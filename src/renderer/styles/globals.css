@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+    margin: 0;
+  }
+
+  body {
+    background: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    letter-spacing: -0.01em;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    overflow: hidden; /* the canvas owns scrolling */
+    user-select: none; /* re-enabled per editable surface */
+  }
+
+  /* The app frame is a draggable desktop title bar; interactive bits opt back out. */
+  .app-drag {
+    -webkit-app-region: drag;
+  }
+  .app-no-drag {
+    -webkit-app-region: no-drag;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--surface-4);
+    border-radius: var(--radius-pill);
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-quaternary);
+    background-clip: padding-box;
+  }
+}
+
+@layer components {
+  /* Uppercase mono micro-label used in headers, palette sections, dimension readouts. */
+  .label-caps {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+  }
+
+  /* The signature 2x3 datum dot-grip drag affordance. */
+  .datum-grip {
+    display: grid;
+    grid-template-columns: repeat(3, 2px);
+    grid-template-rows: repeat(2, 2px);
+    gap: 3px;
+    width: 16px;
+    height: 7px;
+  }
+  .datum-grip > span {
+    width: 2px;
+    height: 2px;
+    border-radius: 9999px;
+    background: var(--text-quaternary);
+    transition: background 160ms var(--ease-settle);
+  }
+}

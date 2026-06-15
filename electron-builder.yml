@@ -1,0 +1,43 @@
+appId: dev.plano.app
+productName: PLANO
+copyright: Copyright © 2026 PLANO
+
+directories:
+  output: release
+  buildResources: resources
+
+files:
+  - out/**/*
+  - package.json
+
+# node-pty ships a native .node binary that must NOT be packed into the asar archive,
+# otherwise it cannot be dlopen'd at runtime.
+asar: true
+asarUnpack:
+  - "**/node_modules/node-pty/**"
+
+win:
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+
+mac:
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+  hardenedRuntime: true
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+
+linux:
+  target:
+    - AppImage
+  category: Development
+
+# Auto-rebuild native deps (node-pty) against the packaged Electron ABI.
+npmRebuild: true
