@@ -60,6 +60,48 @@ export function useXterm(panelId: string, containerRef: RefObject<HTMLDivElement
     }
     fit.fit()
 
+    // Clipboard: write/read go through main (focus-independent, reliable in Electron).
+    const pasteFromClipboard = async (): Promise<void> => {
+      try {
+        const text = await window.plano.clipboard.readText()
+        if (text && ptyId) window.plano.terminal.write(ptyId, text)
+      } catch {
+        /* clipboard unavailable */
+      }
+    }
+    const copySelection = (): void => {
+      const sel = term.getSelection()
+      if (sel) void window.plano.clipboard.writeText(sel)
+    }
+
+    // Ctrl/Cmd+V pastes; Ctrl/Cmd+C copies only when there's a selection (otherwise it
+    // must stay SIGINT). Returning false stops xterm from also handling the key.
+    term.attachCustomKeyEventHandler((e): boolean => {
+      if (e.type !== 'keydown') return true
+      const mod = e.ctrlKey || e.metaKey
+      if (!mod) return true
+      const key = e.key.toLowerCase()
+      if (key === 'v') {
+        // preventDefault stops the browser's native paste so we don't paste twice.
+        e.preventDefault()
+        void pasteFromClipboard()
+        return false
+      }
+      if (key === 'c' && term.hasSelection()) {
+        e.preventDefault()
+        copySelection()
+        return false
+      }
+      return true
+    })
+
+    // Right-click pastes (classic terminal convenience) without opening the canvas menu.
+    const onContextMenu = (e: MouseEvent): void => {
+      e.preventDefault()
+      void pasteFromClipboard()
+    }
+    container.addEventListener('contextmenu', onContextMenu)
+
     // A terminal opened from a folder carries its own cwd; otherwise fall back to the workspace.
     const panelCwd = (usePanelStore.getState().panels[panelId]?.props as TerminalProps | undefined)?.cwd
     const cwd = panelCwd ?? useWorkspaceStore.getState().folderPath ?? undefined
@@ -110,6 +152,7 @@ export function useXterm(panelId: string, containerRef: RefObject<HTMLDivElement
     return () => {
       disposed = true
       resizeObs?.disconnect()
+      container.removeEventListener('contextmenu', onContextMenu)
       unsubs.forEach((u) => u())
       if (ptyId) {
         void window.plano.terminal.kill(ptyId)

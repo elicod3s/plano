@@ -33,6 +33,12 @@
     width: 10px;
     height: 10px;
   }
+  /* Without explicit track/corner colors Chromium paints its default light gray —
+     which showed up as a white strip down the right of terminals/editors. */
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
   ::-webkit-scrollbar-thumb {
     background: var(--surface-4);
     border-radius: var(--radius-pill);

@@ -167,6 +167,8 @@ export interface PlanoApi {
   clipboard: {
     /** Copy plain text to the system clipboard. */
     writeText(text: string): Promise<void>
+    /** Read plain text from the system clipboard. */
+    readText(): Promise<string>
   }
   shell: {
     /** Show a file/folder in the OS file manager (Explorer/Finder), selecting it. */

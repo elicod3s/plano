@@ -54,6 +54,7 @@ const api: PlanoApi = {
   },
   clipboard: {
     writeText: (text: string) => ipcRenderer.invoke(CH.clipboardWriteText, text),
+    readText: () => ipcRenderer.invoke(CH.clipboardReadText),
   },
   shell: {
     revealPath: (path: string) => ipcRenderer.invoke(CH.shellRevealPath, path),

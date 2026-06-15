@@ -80,6 +80,7 @@ export function registerIpc(services: Services): void {
   ipcMain.handle(CH.clipboardWriteText, (_e, text: string) => {
     clipboard.writeText(typeof text === 'string' ? text : String(text))
   })
+  ipcMain.handle(CH.clipboardReadText, () => clipboard.readText())
   ipcMain.handle(CH.shellRevealPath, (_e, path: string) => {
     // Only reveal paths inside an opened workspace/editor root.
     if (typeof path === 'string' && fs.isAllowed(path)) shell.showItemInFolder(path)

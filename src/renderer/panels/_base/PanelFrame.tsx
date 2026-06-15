@@ -105,10 +105,13 @@ export function PanelFrame({ panel, zoom, zIndex }: { panel: Panel; zoom: number
         agentActive && 'animate-agent-breathe',
       )}
       style={{
-        left: panel.rect.x,
-        top: panel.rect.y,
+        // Position via GPU transform (not left/top) so moving a panel composites cleanly
+        // — left/top moves repaint and leave a ghost trail from the agent box-shadow/rail.
+        left: 0,
+        top: 0,
         width: panel.rect.width,
         height: panel.rect.height,
+        transform: `translate3d(${panel.rect.x}px, ${panel.rect.y}px, 0)`,
         zIndex: zIndex ?? panel.z,
         boxShadow: isFront ? 'var(--shadow-panel-focus)' : 'var(--shadow-panel)',
       }}

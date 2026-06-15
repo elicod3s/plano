@@ -51,6 +51,12 @@
   --status-active: #ffffff;
   --status-error: #ef4444;
 
+  /* ── Regions (grouping zones — brighter than panel borders so they read as ground) ── */
+  --region-border: rgba(255, 255, 255, 0.26);
+  --region-border-hover: rgba(255, 255, 255, 0.5);
+  --region-fill: rgba(255, 255, 255, 0.025);
+  --region-fill-hover: rgba(255, 255, 255, 0.045);
+
   /* ── Overlays / texture ── */
   --scrim: rgba(8, 8, 8, 0.64);
 

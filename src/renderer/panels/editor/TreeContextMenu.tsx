@@ -54,7 +54,19 @@ export function TreeContextMenu({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const copy = (text: string) => (): void => void window.plano.clipboard.writeText(text)
+  const copy = (text: string) => (): void => {
+    void (async () => {
+      try {
+        await window.plano.clipboard.writeText(text)
+      } catch {
+        try {
+          await navigator.clipboard.writeText(text)
+        } catch {
+          /* clipboard unavailable */
+        }
+      }
+    })()
+  }
   const isDir = node.type === 'directory'
   const terminalCwd = isDir ? node.path : dirName(node.path)
 

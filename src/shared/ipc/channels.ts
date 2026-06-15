@@ -30,6 +30,7 @@ export const CH = {
 
   // ── OS integration (clipboard + native file manager) ──
   clipboardWriteText: 'clipboard:writeText',
+  clipboardReadText: 'clipboard:readText',
   shellRevealPath: 'shell:revealPath',
 
   // ── time tracking (top-bar usage chip) ──

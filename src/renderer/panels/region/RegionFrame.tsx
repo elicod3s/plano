@@ -28,9 +28,10 @@ function membersOf(panels: Record<string, Panel>, region: Panel): Panel[] {
 
 /**
  * A region is *ground*, not a floating window: a resizable, named zone that lives behind
- * the panels and carries everything inside it when moved. It deliberately wears a different
- * skin from PanelFrame — a dashed rounded plate with a single grab-tab — and leaves its
- * interior click-through so the canvas still pans and panels stay interactive on top.
+ * the panels and carries everything inside it when moved. It wears a deliberately different
+ * skin from PanelFrame — a brighter dashed plate with a header tab — and stays grabbable
+ * from its whole border, while its interior is click-through so the canvas still pans and
+ * panels stay interactive on top.
  */
 export function RegionFrame({ panel, zoom, zIndex }: { panel: Panel; zoom: number; zIndex: number }) {
   const props = panel.props as RegionProps
@@ -119,15 +120,17 @@ export function RegionFrame({ panel, zoom, zIndex }: { panel: Panel; zoom: numbe
   }
 
   return (
-    // Wrapper is click-through; only the tab and resize handles capture pointer events,
-    // so the large interior never blocks canvas panning or the panels stacked above it.
+    // Wrapper is click-through; only the border rim, tab and resize handles capture pointer
+    // events, so the large interior never blocks canvas panning or the panels stacked above.
+    // Positioned via transform (not left/top) to composite cleanly while dragging.
     <div
       className="group/region absolute"
       style={{
-        left: panel.rect.x,
-        top: panel.rect.y,
+        left: 0,
+        top: 0,
         width: panel.rect.width,
         height: panel.rect.height,
+        transform: `translate3d(${panel.rect.x}px, ${panel.rect.y}px, 0)`,
         zIndex,
         pointerEvents: 'none',
       }}
@@ -135,28 +138,44 @@ export function RegionFrame({ panel, zoom, zIndex }: { panel: Panel; zoom: numbe
       onPointerUp={endGesture}
       onPointerCancel={endGesture}
     >
-      {/* the zone plate — purely visual */}
-      <div
-        className="absolute inset-0 rounded-2xl border-[1.5px] border-dashed"
-        style={{ borderColor: 'var(--border-default)', background: 'rgba(255,255,255,0.018)' }}
-      />
-
-      {/* grab-tab: drag to move the region + everything inside, double-click to rename */}
+      {/* the zone plate — purely visual, brightens on hover */}
       <div
         className={cn(
-          'absolute -top-[34px] left-0 flex h-7 max-w-[80%] cursor-move items-center gap-1.5 rounded-md',
-          'border border-subtle bg-surface-2 pl-2 pr-1 shadow-popover',
+          'absolute inset-0 rounded-2xl border-2 border-dashed transition-colors duration-150',
+          'border-[color:var(--region-border)] bg-[color:var(--region-fill)]',
+          'group-hover/region:border-[color:var(--region-border-hover)] group-hover/region:bg-[color:var(--region-fill-hover)]',
         )}
-        style={{ pointerEvents: 'auto' }}
+      />
+
+      {/* visible corner brackets — affordance that the zone is resizable */}
+      <CornerBrackets />
+
+      {/* fat draggable border rim — grab anywhere on the frame to move the whole region */}
+      <div className="absolute inset-x-3 top-0 h-4 cursor-move" style={PE} onPointerDown={beginMove} />
+      <div className="absolute inset-x-3 bottom-0 h-4 cursor-move" style={PE} onPointerDown={beginMove} />
+      <div className="absolute inset-y-3 left-0 w-4 cursor-move" style={PE} onPointerDown={beginMove} />
+      <div className="absolute inset-y-3 right-0 w-4 cursor-move" style={PE} onPointerDown={beginMove} />
+
+      {/* generous resize handles (8-way) layered above the move rim */}
+      <ResizeHandles onBegin={beginResize} />
+
+      {/* header tab: visible label that also drags the region; double-click or ✎ to rename */}
+      <div
+        className={cn(
+          'absolute -top-[38px] left-0 flex h-8 max-w-full cursor-move items-center gap-2 rounded-lg',
+          'border border-[color:var(--region-border)] bg-surface-3 pl-2.5 pr-1.5 shadow-popover',
+          'group-hover/region:border-[color:var(--region-border-hover)]',
+        )}
+        style={PE}
         onPointerDown={beginMove}
         onDoubleClick={() => setEditing(true)}
       >
-        <span className="datum-grip shrink-0 group-hover/region:[&>span]:bg-[var(--text-secondary)]">
+        <span className="datum-grip shrink-0 [&>span]:bg-[var(--text-tertiary)] group-hover/region:[&>span]:bg-[var(--text-secondary)]">
           {Array.from({ length: 6 }).map((_, i) => (
             <span key={i} />
           ))}
         </span>
-        <Icon name="Frame" size={13} className="shrink-0 text-text-secondary" />
+        <Icon name="Frame" size={14} className="shrink-0 text-text-secondary" />
 
         {editing ? (
           <input
@@ -167,39 +186,55 @@ export function RegionFrame({ panel, zoom, zIndex }: { panel: Panel; zoom: numbe
               if (e.key === 'Enter') (e.target as HTMLInputElement).blur()
               if (e.key === 'Escape') setEditing(false)
             }}
-            className="app-no-drag min-w-0 flex-1 bg-transparent font-display text-[12px] font-semibold text-text-primary focus:outline-none"
+            className="app-no-drag min-w-[80px] flex-1 bg-transparent font-display text-[13px] font-semibold text-text-primary focus:outline-none"
           />
         ) : (
-          <span className="min-w-0 flex-1 truncate font-display text-[12px] font-semibold text-text-primary">
+          <span className="min-w-0 flex-1 truncate font-display text-[13px] font-semibold text-text-primary">
             {props.label}
           </span>
         )}
 
-        <span className="label-caps shrink-0 px-1 text-text-quaternary">{memberCount}</span>
+        <span className="label-caps shrink-0 rounded-pill bg-surface-1 px-1.5 py-0.5 text-text-tertiary">
+          {memberCount}
+        </span>
 
-        <div className="app-no-drag shrink-0 opacity-0 transition-opacity group-hover/region:opacity-100">
-          <IconButton icon="Trash2" label="Remove region" size={22} danger onClick={() => remove(panel.id)} />
+        <div className="app-no-drag flex shrink-0 items-center opacity-0 transition-opacity group-hover/region:opacity-100">
+          <IconButton icon="Pencil" label="Rename region" size={24} onClick={() => setEditing(true)} />
+          <IconButton icon="Trash2" label="Remove region" size={24} danger onClick={() => remove(panel.id)} />
         </div>
       </div>
-
-      <ResizeHandles onBegin={beginResize} />
     </div>
   )
 }
 
+const PE = { pointerEvents: 'auto' as const }
+
 function ResizeHandles({ onBegin }: { onBegin: (dir: ResizeDir) => (e: React.PointerEvent) => void }) {
-  const edge = 'absolute z-20'
-  const pe = { pointerEvents: 'auto' as const }
+  // Edges: full-length thin outer strips. Corners: large squares layered on top so the
+  // corner always wins over the adjacent edge/rim. All comfortably grabbable.
   return (
     <>
-      <div className={cn(edge, 'inset-x-4 top-0 h-1.5 cursor-ns-resize')} style={pe} onPointerDown={onBegin('n')} />
-      <div className={cn(edge, 'inset-x-4 bottom-0 h-1.5 cursor-ns-resize')} style={pe} onPointerDown={onBegin('s')} />
-      <div className={cn(edge, 'inset-y-4 left-0 w-1.5 cursor-ew-resize')} style={pe} onPointerDown={onBegin('w')} />
-      <div className={cn(edge, 'inset-y-4 right-0 w-1.5 cursor-ew-resize')} style={pe} onPointerDown={onBegin('e')} />
-      <div className={cn(edge, 'left-0 top-0 h-4 w-4 cursor-nwse-resize')} style={pe} onPointerDown={onBegin('nw')} />
-      <div className={cn(edge, 'right-0 top-0 h-4 w-4 cursor-nesw-resize')} style={pe} onPointerDown={onBegin('ne')} />
-      <div className={cn(edge, 'bottom-0 left-0 h-4 w-4 cursor-nesw-resize')} style={pe} onPointerDown={onBegin('sw')} />
-      <div className={cn(edge, 'bottom-0 right-0 h-4 w-4 cursor-nwse-resize')} style={pe} onPointerDown={onBegin('se')} />
+      <div className="absolute inset-x-5 top-0 z-20 h-2 cursor-ns-resize" style={PE} onPointerDown={onBegin('n')} />
+      <div className="absolute inset-x-5 bottom-0 z-20 h-2 cursor-ns-resize" style={PE} onPointerDown={onBegin('s')} />
+      <div className="absolute inset-y-5 left-0 z-20 w-2 cursor-ew-resize" style={PE} onPointerDown={onBegin('w')} />
+      <div className="absolute inset-y-5 right-0 z-20 w-2 cursor-ew-resize" style={PE} onPointerDown={onBegin('e')} />
+      <div className="absolute left-0 top-0 z-30 h-6 w-6 cursor-nwse-resize" style={PE} onPointerDown={onBegin('nw')} />
+      <div className="absolute right-0 top-0 z-30 h-6 w-6 cursor-nesw-resize" style={PE} onPointerDown={onBegin('ne')} />
+      <div className="absolute bottom-0 left-0 z-30 h-6 w-6 cursor-nesw-resize" style={PE} onPointerDown={onBegin('sw')} />
+      <div className="absolute bottom-0 right-0 z-30 h-6 w-6 cursor-nwse-resize" style={PE} onPointerDown={onBegin('se')} />
+    </>
+  )
+}
+
+function CornerBrackets() {
+  const base =
+    'pointer-events-none absolute h-3.5 w-3.5 border-[color:var(--region-border)] transition-colors group-hover/region:border-[color:var(--region-border-hover)]'
+  return (
+    <>
+      <span className={cn(base, 'left-1.5 top-1.5 rounded-tl border-l-2 border-t-2')} />
+      <span className={cn(base, 'right-1.5 top-1.5 rounded-tr border-r-2 border-t-2')} />
+      <span className={cn(base, 'bottom-1.5 left-1.5 rounded-bl border-b-2 border-l-2')} />
+      <span className={cn(base, 'bottom-1.5 right-1.5 rounded-br border-b-2 border-r-2')} />
     </>
   )
 }
