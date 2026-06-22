@@ -32,4 +32,10 @@ export const xtermTheme: ITheme = {
   brightWhite: '#ffffff',
 }
 
-export const TERMINAL_FONT = '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace'
+// JetBrains Mono first (box/block/geometric/✓✗ + all Latin). Then the two BUNDLED symbol layers from
+// styles/terminal-symbols.css — "PLANO Term Symbols" (Cascadia: Braille spinners + Powerline) and
+// "PLANO Term Dingbats" (DejaVu: Claude Code's ✻✳ star marks) — so CLI glyphs render in a real
+// monospace on ANY machine. Trailing entries are last-resort OS monospace fallbacks (never a
+// proportional system symbol font, which mangles terminal alignment).
+export const TERMINAL_FONT =
+  '"JetBrains Mono", "PLANO Term Symbols", "PLANO Term Dingbats", "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", ui-monospace, SFMono-Regular, Menlo, "DejaVu Sans Mono", monospace'

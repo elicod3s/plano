@@ -8,10 +8,15 @@
  */
 
 import { BrowserWindow, shell, session } from 'electron'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { is } from '@electron-toolkit/utils'
 
 const BROWSER_PARTITION = 'persist:plano-browser'
+
+// Window/taskbar icon. In dev this PNG drives the taskbar; once packaged, Windows uses the
+// .exe's embedded icon (from build/icon.ico) so this is a harmless no-op there.
+const ICON_PATH = join(__dirname, '../../build/icon.png')
 
 export function createMainWindow(): BrowserWindow {
   const win = new BrowserWindow({
@@ -23,6 +28,7 @@ export function createMainWindow(): BrowserWindow {
     frame: false,
     titleBarStyle: 'hidden',
     backgroundColor: '#0E0E0D',
+    ...(existsSync(ICON_PATH) ? { icon: ICON_PATH } : {}),
     trafficLightPosition: { x: 16, y: 16 },
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
@@ -53,6 +59,7 @@ export function createMainWindow(): BrowserWindow {
     win.webContents.on('did-fail-load', (_e, code, desc, url) =>
       console.log('[did-fail-load]', code, desc, url),
     )
+    win.webContents.on('did-finish-load', () => console.log('[renderer] loaded', win.webContents.getURL()))
     // DevTools available on demand (Ctrl+Shift+I / F12) rather than auto-opening.
   }
 
@@ -70,7 +77,23 @@ export function createMainWindow(): BrowserWindow {
   hardenWebviews(win)
 
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
-    void win.loadURL(process.env.ELECTRON_RENDERER_URL)
+    const devUrl = process.env.ELECTRON_RENDERER_URL
+    // electron-vite can launch Electron a beat before the Vite dev server is accepting connections, so
+    // the first loadURL fails (ERR_CONNECTION_RESET/REFUSED/TIMED_OUT) and the window is left on a blank
+    // error page. Retry the dev-server load (main frame only, ignoring ERR_ABORTED from a superseded
+    // load) until Vite answers — capped so a genuinely wrong URL can't loop forever.
+    let devLoadTries = 0
+    const loadDev = (): void => {
+      win.loadURL(devUrl).catch(() => {})
+    }
+    win.webContents.on('did-fail-load', (_e, code, _desc, failedUrl, isMainFrame) => {
+      if (!isMainFrame || code === -3 || win.isDestroyed() || !failedUrl?.startsWith(devUrl)) return
+      if (devLoadTries++ >= 40) return
+      setTimeout(() => {
+        if (!win.isDestroyed()) loadDev()
+      }, 350)
+    })
+    loadDev()
   } else {
     void win.loadFile(join(__dirname, '../renderer/index.html'))
   }
@@ -91,6 +114,23 @@ function hardenWebviews(win: BrowserWindow): void {
     params.partition = BROWSER_PARTITION
   })
 
+  // Links that try to open a new window (target="_blank", window.open) would otherwise either
+  // spawn a detached popup or silently no-op. Keep navigation INSIDE the browser panel: deny the
+  // popup and load the URL in the same guest instead (http/https only; other schemes are dropped).
+  win.webContents.on('did-attach-webview', (_event, guest) => {
+    guest.setWindowOpenHandler(({ url }) => {
+      // Defer the in-place navigation so we don't re-enter while the popup request is being
+      // resolved; deny the popup itself either way.
+      if (/^https?:\/\//i.test(url)) setImmediate(() => guest.loadURL(url).catch(() => {}))
+      return { action: 'deny' }
+    })
+  })
+
   const part = session.fromPartition(BROWSER_PARTITION)
-  part.setPermissionRequestHandler((_wc, _permission, callback) => callback(false))
+  // Browser panels may read/write the clipboard (page "copy" buttons, paste fields) so
+  // copy/paste flows between panels; everything else (camera, mic, geolocation,
+  // notifications…) stays denied by default.
+  const CLIPBOARD = new Set(['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write'])
+  part.setPermissionRequestHandler((_wc, permission, callback) => callback(CLIPBOARD.has(permission)))
+  part.setPermissionCheckHandler((_wc, permission) => CLIPBOARD.has(permission))
 }

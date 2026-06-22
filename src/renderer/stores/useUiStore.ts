@@ -18,7 +18,9 @@ interface UiState {
   setCommandPalette: (open: boolean) => void
   toggleCommandPalette: () => void
   toggleMinimap: () => void
+  setMinimap: (visible: boolean) => void
   toggleSnapping: () => void
+  setSnapping: (on: boolean) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -33,5 +35,7 @@ export const useUiStore = create<UiState>((set) => ({
   setCommandPalette: (open) => set({ commandPaletteOpen: open }),
   toggleCommandPalette: () => set((s) => ({ commandPaletteOpen: !s.commandPaletteOpen })),
   toggleMinimap: () => set((s) => ({ minimapVisible: !s.minimapVisible })),
+  setMinimap: (minimapVisible) => set({ minimapVisible }),
   toggleSnapping: () => set((s) => ({ snapping: !s.snapping })),
+  setSnapping: (snapping) => set({ snapping }),
 }))

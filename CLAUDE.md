@@ -57,14 +57,16 @@ renderer (Chromium, sandboxed)  ──window.plano──▶  preload (bridge)  �
 
 ### Persistence
 
-Per-project at `<projectFolder>/.plano/workspace.json` (atomic temp+rename, `schemaVersion` for migrations). Runtime-only data (ptyId, webview ids) is deliberately not persisted — terminals respawn, browsers re-navigate. App-global recents live in Electron `userData`.
+Per-project at `<projectFolder>/.plano/workspace.json` (atomic temp+rename, `schemaVersion` for migrations). Runtime-only data (ptyId, webview ids) is deliberately not persisted — terminals respawn, browsers re-navigate. App-global recents live in Electron `userData`. App-global **settings** also live there as `userData/settings.json` (`SettingsService`, tolerant `mergeSettings` over `DEFAULT_SETTINGS`), surfaced to the renderer via `useSettingsStore` + the Settings modal (`chrome/settings/`).
 
 ## Hard design rules (do not break)
 
-The "Monolith Draft" design system is **locked** (see `docs/DESIGN_SYSTEM.md`, tokens in `src/renderer/styles/theme.css`, mirrored in `tailwind.config.js`):
+The "Monolith Draft" design system is the **locked default** (see `docs/DESIGN_SYSTEM.md`, tokens in `src/renderer/styles/theme.css`, referenced via `var(--…)` in `tailwind.config.js` so a runtime theme swap re-tints every utility class):
 
 - **100% English UI.** Every label/menu/tooltip/placeholder.
-- **Dark only**, strictly **monochrome** (white + WARM-neutral grays) + exactly **one** functional hue (red `#EF4444`, destructive/armed only). **No green, lime, or blue accent** — the ramp is intentionally warm (Red ≥ Blue) to avoid the cool/zinc "AI-SaaS" look and the competitor's blue. User content (terminal ANSI, code syntax, web pages) keeps its color; only the chrome is monochrome.
+- **Dark, monochrome BASE — color as a sparing, harmonious accent (NOT strictly monochrome-only).** Surfaces and the bulk of the chrome are white + WARM-neutral grays, but color **is** allowed for **small, meaningful accents** as long as it reads as harmonious, never a decorative flood. Established uses: a detected agent's panel tint, per-workspace colors, a themed terminal's panel border + status dot, and the user's chosen accent/theme. Red `#EF4444` stays reserved for destructive/armed. User content (terminal ANSI, code syntax, web pages) always keeps its own color. The warm ramp (Red ≥ Blue) still steers away from the cool/zinc "AI-SaaS" look.
+- **User theming (opt-in, intentional — do NOT revert):** Settings → Appearance offers alternative themes (incl. colored Indigo/Cyber and a Light theme) + an accent picker; they override the `theme.css` variables at runtime via `src/renderer/theme/themes.ts` + `useSettingsStore`. The default ships as monochrome Monolith — a colored theme/accent a user picked is a feature, not a violation. New chrome must still style via tokens so it themes correctly.
+- **Color-accent precedents (intentional — do NOT revert), every one token/CSS-var driven:** a detected agent tints its panel chrome (border + header accent + breathing glow) via `--agent-accent` (`AGENTS[kind].accent`, `src/shared/domain/agent.ts`); a themed terminal tints its OWN panel border + status dot via `getTerminalThemeAccent` (`panels/terminal/terminalThemes.ts`); workspaces carry their own color. Add new color the same way: scoped to one element, harmonious, sourced from a token/var — not hardcoded ad-hoc.
 - **Rounded everywhere** (panels 16px, overlays 20px, regions 24px, pills for toggles/search). No sharp brutalist corners.
 - Fonts: Space Grotesk (UI) + JetBrains Mono (terminals/code/numeric readouts), bundled offline via Fontsource.
 - Style only via the design tokens / Tailwind theme — don't hardcode hex outside `theme.css`/`tailwind.config.js`.
@@ -73,3 +75,4 @@ The "Monolith Draft" design system is **locked** (see `docs/DESIGN_SYSTEM.md`, t
 
 - **Add a panel type:** extend `PanelType` + props + `PANEL_META` + `defaultProps` in `shared/domain/panel.ts`; add the component folder under `panels/`; register it in `panels/_base/PanelRegistry.ts`; add menu/dock/palette entries.
 - **Add an IPC channel:** add the name to `shared/ipc/channels.ts`, types to `shared/ipc/contracts.ts` (+ the `PlanoApi` method), wrap it in `preload/index.ts`, and register the handler in `main/ipc/registerIpc.ts`. Renderer calls `window.plano.<domain>.<method>()`.
+- **Add a setting:** extend the right group in `shared/domain/settings.ts` (+ `DEFAULT_SETTINGS`); add a `SettingRow`/control to the matching section in `renderer/chrome/settings/sections.tsx` (and an entry in `SETTINGS_INDEX` for search); consume it where it applies via `useSettingsStore`. Appearance side-effects (theme/accent/reduced-motion) run through `applyAppearance` in `theme/themes.ts`; grid/grain/terminal read the store reactively.

@@ -49,6 +49,14 @@
     background: var(--text-quaternary);
     background-clip: padding-box;
   }
+
+  /* Always reserve the terminal's scrollbar gutter so the rightmost column can never hide behind a
+     just-appeared scrollbar. xterm's viewport is already overflow-y:scroll (the ~10px gutter is always
+     present), so this is belt-and-suspenders — but it keeps the FitAddon column count matching the
+     visible width and guards against any future overflow:auto viewport. */
+  .xterm .xterm-viewport {
+    scrollbar-gutter: stable;
+  }
 }
 
 @layer components {
@@ -77,5 +85,39 @@
     border-radius: 9999px;
     background: var(--text-quaternary);
     transition: background 160ms var(--ease-settle);
+  }
+
+  /* Agent-launcher button: tints with the agent's brand color (--a) on hover. */
+  .agent-launch-btn:hover {
+    background: color-mix(in srgb, var(--a) 16%, transparent);
+    color: var(--text-primary);
+  }
+
+  /* Settings slider — a thin blueprint track with a draggable datum thumb. */
+  .plano-range {
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-4);
+    cursor: pointer;
+  }
+  .plano-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 15px;
+    height: 15px;
+    border-radius: var(--radius-pill);
+    background: var(--accent-primary);
+    border: 3px solid var(--surface-1);
+    box-shadow: 0 1px 4px -1px rgba(0, 0, 0, 0.6);
+    transition: transform 120ms var(--ease-settle);
+  }
+  .plano-range::-webkit-slider-thumb:hover {
+    transform: scale(1.12);
+  }
+  .plano-range:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: 3px;
   }
 }

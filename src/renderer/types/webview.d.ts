@@ -5,12 +5,23 @@ export interface WebviewElement extends HTMLElement {
   src: string
   loadURL(url: string): Promise<void>
   getURL(): string
+  getTitle(): string
+  isLoading(): boolean
+  // Legacy navigation methods (deprecated in Electron ≥30 in favour of `navigationHistory`,
+  // but still present in 33). We prefer `navigationHistory` when available, falling back here.
   goBack(): void
   goForward(): void
   canGoBack(): boolean
   canGoForward(): boolean
   reload(): void
   stop(): void
+  /** Modern navigation-history controller (present in recent Electron). */
+  navigationHistory?: {
+    canGoBack(): boolean
+    canGoForward(): boolean
+    goBack(): void
+    goForward(): void
+  }
 }
 
 declare global {

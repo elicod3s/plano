@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Panel, EditorProps, FilesProps } from '@shared/domain/panel'
 import type { FsNode } from '@shared/ipc/contracts'
 import { usePanelStore } from '@/stores/usePanelStore'
@@ -6,8 +6,10 @@ import { openTerminalAt } from '@/app/actions'
 import { Icon } from '@/design-system/Icon'
 import { IconButton } from '@/design-system/IconButton'
 import { cn } from '@/lib/cn'
+import { fmtKeys } from '@/lib/hotkeys'
 import { useCodeMirror } from './useCodeMirror'
 import { FileTree } from './FileTree'
+import { FileTypeIcon } from './fileIcons'
 
 const TREE_DEPTH = 5
 const SIDEBAR_W = 200
@@ -37,7 +39,6 @@ export function EditorPanel({ panel }: { panel: Panel }) {
   // Accept either the editor props or a (pre-migration) File Explorer panel's rootPath.
   const props = panel.props as EditorProps & Partial<FilesProps>
   const updateProps = usePanelStore((s) => s.updateProps)
-  const setTitle = usePanelStore((s) => s.setTitle)
   const resize = usePanelStore((s) => s.resizePanel)
 
   const folderPath = props.folderPath ?? props.rootPath
@@ -54,6 +55,24 @@ export function EditorPanel({ panel }: { panel: Panel }) {
   const [saving, setSaving] = useState(false)
   const dirtyRef = useRef(false)
   const valueRef = useRef('')
+  // Live-reload plumbing: bumping `reloadNonce` remounts the editor with fresh on-disk content;
+  // `externalChange` flags that the open file changed under us while we had unsaved edits.
+  const [reloadNonce, setReloadNonce] = useState(0)
+  const [externalChange, setExternalChange] = useState(false)
+  // Read inside the stable fs-watch subscription without re-subscribing on every file open.
+  const activePathRef = useRef(activePath)
+  activePathRef.current = activePath
+
+  // Migrate stale auto-titles: earlier builds set the panel title to the open folder/file
+  // name, duplicating the explorer sub-header (and the editor's own file tab). The title bar
+  // is the panel's identity ("Files") now, so reset a leftover auto-derived title back. We
+  // only match the exact folder/file basename, so a user's manual rename is left untouched.
+  useEffect(() => {
+    const auto = [folderPath, activePath].filter(Boolean).map((p) => baseName(p as string))
+    if (auto.includes(panel.title)) usePanelStore.getState().setTitle(panel.id, 'Files')
+    // Run once on mount — this only fixes titles persisted under the old behavior.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Load / refresh the folder tree whenever the editor's root changes.
   useEffect(() => {
@@ -76,6 +95,7 @@ export function EditorPanel({ panel }: { panel: Panel }) {
   useEffect(() => {
     dirtyRef.current = false
     setDirty(false)
+    setExternalChange(false)
     if (!activePath) {
       setFileDoc(null)
       setImage(null)
@@ -109,39 +129,124 @@ export function EditorPanel({ panel }: { panel: Panel }) {
     }
   }, [activePath])
 
+  // Swap the editor buffer to fresh on-disk content (live-reload + the manual Reload action).
+  // Stable identity so the fs-watch subscription below doesn't re-run on every keystroke.
+  const applyDoc = useCallback((path: string, content: string): void => {
+    setFileDoc({ path, content })
+    valueRef.current = content
+    dirtyRef.current = false
+    setDirty(false)
+    setExternalChange(false)
+    setReloadNonce((n) => n + 1) // remounts CodeMirror with the new doc
+  }, [])
+
+  // Live folder watching: when the agent/terminal writes to disk, refresh the tree and the open
+  // file in real time. The main watcher is ref-counted + debounced; here we coalesce per panel.
+  useEffect(() => {
+    if (!folderPath) return
+    const dir = folderPath
+    void window.plano.fs.watch({ dir })
+
+    let treeTimer: number | undefined
+    const refreshTree = (): void => {
+      window.clearTimeout(treeTimer)
+      // Re-read WITHOUT clearing first: TreeNodes are keyed by path, so expanded folders keep
+      // their open state across the refresh (new files appear, deleted ones vanish, in place).
+      treeTimer = window.setTimeout(() => {
+        window.plano.fs
+          .readTree({ dir, depth: TREE_DEPTH })
+          .then((r) => setRoot(r.root))
+          .catch(() => undefined)
+      }, 120)
+    }
+
+    const unsub = window.plano.fs.onChanged((e) => {
+      if (e.dir !== dir) return
+      refreshTree()
+
+      const active = activePathRef.current
+      if (!active || !e.paths.includes(active)) return
+      if (isImagePath(active)) {
+        window.plano.fs
+          .readBinaryFile({ path: active })
+          .then((r) => setImage({ path: active, url: `data:${r.mime};base64,${r.base64}` }))
+          .catch(() => undefined)
+        return
+      }
+      window.plano.fs
+        .readFile({ path: active })
+        .then((r) => {
+          if (r.content === valueRef.current) return // no real change (e.g. our own save)
+          if (dirtyRef.current) setExternalChange(true) // don't clobber unsaved edits — flag it
+          else applyDoc(active, r.content)
+        })
+        .catch(() => undefined)
+    })
+
+    return () => {
+      window.clearTimeout(treeTimer)
+      unsub()
+      void window.plano.fs.unwatch({ dir })
+    }
+  }, [folderPath, applyDoc])
+
+  // Manually pull the latest on-disk content into the editor (offered when it changed under us).
+  const reloadFromDisk = (): void => {
+    if (!activePath) return
+    if (dirtyRef.current && !window.confirm('Discard your unsaved changes and reload from disk?')) return
+    void window.plano.fs
+      .readFile({ path: activePath })
+      .then((r) => applyDoc(activePath, r.content))
+      .catch(() => undefined)
+  }
+
   const openFolder = async (): Promise<void> => {
     const { folderPath: picked } = await window.plano.fs.pickFolder()
     if (!picked) return
     updateProps<'editor'>(panel.id, { folderPath: picked })
-    if (!isFile) setTitle(panel.id, baseName(picked))
   }
 
   const guardDirty = (): boolean =>
     !dirtyRef.current || window.confirm('Discard unsaved changes to this file?')
 
-  const openFile = (node: FsNode): void => {
-    if (node.path === activePath || !guardDirty()) return
-    const firstOpen = !isFile
-    updateProps<'editor'>(panel.id, { filePath: node.path })
-    setTitle(panel.id, node.name)
-    // Grow the panel so the editor has room (the explorer collapses to a sidebar).
-    if (firstOpen) {
-      const { x, y, width, height } = panel.rect
-      if (width < EXPANDED.width || height < EXPANDED.height) {
-        resize(panel.id, {
-          x,
-          y,
-          width: Math.max(width, EXPANDED.width),
-          height: Math.max(height, EXPANDED.height),
-        })
+  // Stable identity (deps are all stable across renders) so the memoized FileTree keeps its
+  // bail-out while the panel is dragged. It must NOT close over `panel.rect`/`activePath`
+  // (which change mid-drag / on open) — it reads the live panel from the store at call time.
+  const openFile = useCallback(
+    (node: FsNode): void => {
+      const current = usePanelStore.getState().panels[panel.id]
+      if (!current) return
+      const currentActive = (current.props as EditorProps).filePath
+      // Toggle: clicking the already-open file closes its preview (collapse back to the explorer),
+      // same as the file tab's X — so a second click on the same row dismisses it.
+      if (node.path === currentActive) {
+        if (dirtyRef.current && !window.confirm('Discard unsaved changes to this file?')) return
+        updateProps<'editor'>(panel.id, { filePath: undefined })
+        resize(panel.id, { x: current.rect.x, y: current.rect.y, ...COMPACT })
+        return
       }
-    }
-  }
+      if (dirtyRef.current && !window.confirm('Discard unsaved changes to this file?')) return
+      const firstOpen = !currentActive
+      updateProps<'editor'>(panel.id, { filePath: node.path })
+      // Grow the panel so the editor has room (the explorer collapses to a sidebar).
+      if (firstOpen) {
+        const { x, y, width, height } = current.rect
+        if (width < EXPANDED.width || height < EXPANDED.height) {
+          resize(panel.id, {
+            x,
+            y,
+            width: Math.max(width, EXPANDED.width),
+            height: Math.max(height, EXPANDED.height),
+          })
+        }
+      }
+    },
+    [panel.id, updateProps, resize],
+  )
 
   const closeFile = (): void => {
     if (!guardDirty()) return
     updateProps<'editor'>(panel.id, { filePath: undefined })
-    setTitle(panel.id, folderPath ? baseName(folderPath) : 'Files')
     // Collapse back to the compact explorer.
     resize(panel.id, { x: panel.rect.x, y: panel.rect.y, ...COMPACT })
   }
@@ -163,6 +268,7 @@ export function EditorPanel({ panel }: { panel: Panel }) {
       await window.plano.fs.writeFile({ path: activePath, content: value ?? valueRef.current })
       dirtyRef.current = false
       setDirty(false)
+      setExternalChange(false)
     } finally {
       setSaving(false)
     }
@@ -174,7 +280,9 @@ export function EditorPanel({ panel }: { panel: Panel }) {
     isFile && (activeIsImage ? image?.path !== activePath : fileDoc?.path !== activePath)
 
   return (
-    <div className="flex h-full w-full bg-surface-1">
+    // data-wheel-own: the tree, CodeMirror and image preview own the wheel here, so scrolling
+    // their content scrolls it instead of panning/zooming the canvas underneath.
+    <div className="flex h-full w-full bg-surface-1" data-wheel-own>
       {/* explorer / sidebar */}
       {showSidebar && (
         <div
@@ -232,15 +340,29 @@ export function EditorPanel({ panel }: { panel: Panel }) {
               onClick={toggleSidebar}
             />
             <div className="flex min-w-0 flex-1 items-center gap-1.5 px-1">
-              <Icon name={activeIsImage ? 'Image' : 'File'} size={13} className="shrink-0 text-text-tertiary" />
+              <FileTypeIcon name={baseName(activePath as string)} size={13} className="shrink-0 text-text-tertiary" />
               <span className="truncate text-[12px] text-text-secondary">{baseName(activePath as string)}</span>
               {dirty && <span className="h-1.5 w-1.5 shrink-0 rounded-pill bg-text-tertiary" />}
               <IconButton icon="X" label="Close file" size={20} onClick={closeFile} />
             </div>
+            {externalChange && !activeIsImage && (
+              <button
+                type="button"
+                onClick={reloadFromDisk}
+                title="This file changed on disk"
+                className={cn(
+                  'app-no-drag inline-flex shrink-0 items-center gap-1 rounded-pill px-2 py-0.5 text-[11px]',
+                  'bg-accent-soft text-text-secondary transition-colors hover:bg-accent-soft-strong hover:text-text-primary',
+                )}
+              >
+                <Icon name="RotateCw" size={12} />
+                Reload
+              </button>
+            )}
             {!activeIsImage && (
               <IconButton
                 icon="Save"
-                label={saving ? 'Saving…' : 'Save (Ctrl+S)'}
+                label={saving ? 'Saving…' : `Save (${fmtKeys('Ctrl+S')})`}
                 size={24}
                 active={dirty}
                 disabled={saving || !dirty}
@@ -269,7 +391,7 @@ export function EditorPanel({ panel }: { panel: Panel }) {
               )
             ) : (
               <EditorMount
-                key={activePath}
+                key={`${activePath}:${reloadNonce}`}
                 doc={fileDoc?.content ?? ''}
                 filePath={activePath}
                 onChange={handleChange}

@@ -1,27 +1,30 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { PANEL_META, type PanelType } from '@shared/domain/panel'
+import { PANEL_META } from '@shared/domain/panel'
 import { useUiStore } from '@/stores/useUiStore'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useViewportStore } from '@/stores/useViewportStore'
 import { useSpacesStore } from '@/stores/useSpacesStore'
 import { Icon } from '@/design-system/Icon'
-import { addPanelAtCenter, zoomToFitAll } from '@/app/actions'
-import { openFolder, saveCurrent, switchSpace, createNewSpace } from '@/app/workspaceActions'
+import { switchSpace } from '@/app/workspaceActions'
+import { COMMANDS, primaryShortcut, type CommandGroup } from '@/app/commands'
 import { cn } from '@/lib/cn'
+import { fmtKeys } from '@/lib/hotkeys'
+
+type Section = 'Open panels' | 'Workspaces' | 'Commands' | 'New panel'
 
 interface Cmd {
   id: string
   label: string
-  section: 'Open panels' | 'Workspaces' | 'Commands' | 'New panel'
+  section: Section
   icon: string
   shortcut?: string
   hint?: string
   run: () => void
 }
 
-const CREATE_ORDER: PanelType[] = [
-  'terminal', 'editor', 'browser', 'agent', 'git', 'markdown', 'sticky', 'voice', 'region', 'label',
-]
+/** Map a registry command's group to the palette section it shows under. */
+const sectionForGroup = (g: CommandGroup): Section =>
+  g === 'Create' ? 'New panel' : g === 'Workspace' ? 'Workspaces' : 'Commands'
 
 export function CommandPalette() {
   const open = useUiStore((s) => s.commandPaletteOpen)
@@ -60,14 +63,7 @@ export function CommandPalette() {
         run: () => focusPanel(p.id),
       }))
 
-    const commands: Cmd[] = [
-      { id: 'cmd:open', label: 'Open Folder…', section: 'Commands', icon: 'FolderOpen', shortcut: 'Ctrl+O', run: () => void openFolder() },
-      { id: 'cmd:save', label: 'Save Workspace', section: 'Commands', icon: 'Save', shortcut: 'Ctrl+S', run: () => void saveCurrent() },
-      { id: 'cmd:fit', label: 'Zoom to Fit', section: 'Commands', icon: 'Maximize2', shortcut: 'Ctrl+Shift+F', run: () => zoomToFitAll() },
-      { id: 'cmd:reset', label: 'Reset Zoom', section: 'Commands', icon: 'Search', shortcut: 'Ctrl+0', run: () => useViewportStore.getState().zoomTo(1, { width: window.innerWidth, height: window.innerHeight }) },
-    ]
-
-    const workspaces: Cmd[] = spaces.map((s, i) => ({
+    const spaceSwitch: Cmd[] = spaces.map((s, i) => ({
       id: `ws:${s.id}`,
       label: s.id === activeId ? `${s.name} (current)` : `Switch to ${s.name}`,
       section: 'Workspaces',
@@ -76,23 +72,27 @@ export function CommandPalette() {
       shortcut: i < 9 ? `Ctrl+${i + 1}` : undefined,
       run: () => switchSpace(s.id),
     }))
-    workspaces.push({
-      id: 'ws:new',
-      label: 'New Workspace',
-      section: 'Workspaces',
-      icon: 'Plus',
-      run: () => createNewSpace(),
-    })
 
-    const create: Cmd[] = CREATE_ORDER.map((type) => ({
-      id: `new:${type}`,
-      label: PANEL_META[type].label,
-      section: 'New panel',
-      icon: PANEL_META[type].icon,
-      run: () => addPanelAtCenter(type),
-    }))
+    // Everything else — panel creation + app/view/workspace actions — comes from the registry, so
+    // each row shows the exact key that fires it. Hide "open palette" (can't open it from inside).
+    const fromRegistry = (group: CommandGroup): Cmd[] =>
+      COMMANDS.filter((c) => c.group === group && c.id !== 'app:palette').map((c) => ({
+        id: c.id,
+        label: c.label,
+        section: sectionForGroup(c.group),
+        icon: c.icon,
+        shortcut: primaryShortcut(c),
+        run: c.run,
+      }))
 
-    return [...openPanels, ...workspaces, ...commands, ...create]
+    return [
+      ...openPanels,
+      ...spaceSwitch,
+      ...fromRegistry('Workspace'),
+      ...fromRegistry('View'),
+      ...fromRegistry('App'),
+      ...fromRegistry('Create'),
+    ]
   }, [panels, spaces, activeId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const filtered = useMemo(() => {
@@ -170,14 +170,14 @@ export function CommandPalette() {
                   onClick={() => choose(i)}
                   className={cn(
                     'flex h-10 w-full items-center gap-3 rounded-sm px-2.5 text-left',
-                    i === index ? 'bg-accent-soft' : 'hover:bg-accent-soft/60',
+                    i === index ? 'bg-accent-soft' : 'hover:bg-accent-soft',
                   )}
                 >
                   {i === index && <span className="absolute left-0 h-6 w-[2px] rounded-pill bg-accent" />}
                   <Icon name={item.icon} size={16} className="text-text-secondary" />
                   <span className="flex-1 text-[14px] text-text-primary">{item.label}</span>
                   {item.hint && <span className="font-mono text-[11px] text-text-tertiary">{item.hint}</span>}
-                  {item.shortcut && <span className="font-mono text-[11px] text-text-tertiary">{item.shortcut}</span>}
+                  {item.shortcut && <span className="font-mono text-[11px] text-text-tertiary">{fmtKeys(item.shortcut)}</span>}
                 </button>
               </div>
             )

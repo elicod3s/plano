@@ -1,9 +1,12 @@
 import { useEffect, useRef } from 'react'
 import type { PanelType } from '@shared/domain/panel'
 import { useUiStore } from '@/stores/useUiStore'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 import { Icon } from '@/design-system/Icon'
 import { addPanelAtWorld } from '@/app/actions'
+import { shortcutForPanel } from '@/app/commands'
 import { cn } from '@/lib/cn'
+import { fmtKeys } from '@/lib/hotkeys'
 
 type Item =
   | { kind: 'panel'; panelType: PanelType; label: string; icon: string }
@@ -39,6 +42,8 @@ export function ContextMenu() {
     { kind: 'panel', panelType: 'editor', label: 'New Files', icon: 'FolderTree' },
     { kind: 'panel', panelType: 'browser', label: 'New Browser', icon: 'Globe' },
     { kind: 'panel', panelType: 'agent', label: 'New PLANO Agent', icon: 'Sparkles' },
+    { kind: 'panel', panelType: 'todo', label: 'New To-do List', icon: 'ListChecks' },
+    { kind: 'panel', panelType: 'pomodoro', label: 'New Pomodoro', icon: 'Timer' },
     { kind: 'panel', panelType: 'sticky', label: 'New Sticky Note', icon: 'StickyNote' },
     { kind: 'command', label: 'Pinned', icon: 'Pin', chevron: true, disabled: true, onSelect: () => {} },
     { kind: 'separator' },
@@ -55,12 +60,22 @@ export function ContextMenu() {
     { kind: 'panel', panelType: 'region', label: 'New Region', icon: 'Frame' },
     { kind: 'panel', panelType: 'label', label: 'New Text', icon: 'Type' },
     { kind: 'separator' },
+    {
+      kind: 'command',
+      label: 'Settings…',
+      icon: 'Settings',
+      shortcut: 'Ctrl+,',
+      onSelect: () => {
+        useSettingsStore.getState().setOpen(true)
+        close()
+      },
+    },
     { kind: 'command', label: 'Paste', icon: 'Clipboard', disabled: true, onSelect: () => {} },
   ]
 
   // Clamp the menu inside the viewport.
   const left = Math.min(screen.x, window.innerWidth - MENU_WIDTH - 12)
-  const top = Math.min(screen.y, window.innerHeight - 380)
+  const top = Math.min(screen.y, window.innerHeight - 440)
 
   return (
     <>
@@ -87,9 +102,14 @@ export function ContextMenu() {
             >
               <Icon name={item.icon} size={15} className="text-text-secondary" />
               <span className="flex-1">{item.label}</span>
-              {item.kind === 'command' && item.shortcut && (
-                <span className="font-mono text-[11px] text-text-tertiary">{item.shortcut}</span>
-              )}
+              {(() => {
+                // Show the same key that fires this action — from the registry for panel items,
+                // from the item itself for plain commands.
+                const sc = item.kind === 'command' ? item.shortcut : shortcutForPanel(item.panelType)
+                return sc ? (
+                  <span className="font-mono text-[11px] text-text-tertiary">{fmtKeys(sc)}</span>
+                ) : null
+              })()}
               {item.kind === 'command' && item.chevron && (
                 <Icon name="ChevronRight" size={13} className="text-text-tertiary" />
               )}

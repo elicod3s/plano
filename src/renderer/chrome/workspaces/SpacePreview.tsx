@@ -19,7 +19,9 @@ const PAD = 3
  * never by hue. Cheap enough to render for inactive spaces with no capture needed.
  */
 export function SpacePreview({ panels, width, height, className, radius = 1.5 }: SpacePreviewProps) {
-  const box = boundingBox(panels.map((p) => p.rect))
+  // Docked panels have a stale rect (their group holds the real one) — show the group, not them.
+  const visible = panels.filter((p) => !p.dockedIn)
+  const box = boundingBox(visible.map((p) => p.rect))
   const innerW = width - PAD * 2
   const innerH = height - PAD * 2
   const scale = box ? Math.min(innerW / Math.max(1, box.width), innerH / Math.max(1, box.height)) : 1
@@ -28,8 +30,8 @@ export function SpacePreview({ panels, width, height, className, radius = 1.5 }:
 
   return (
     <svg width={width} height={height} className={className} style={{ display: 'block' }}>
-      {box && panels.length > 0 ? (
-        panels.map((p) => (
+      {box && visible.length > 0 ? (
+        visible.map((p) => (
           <rect
             key={p.id}
             x={ox + (p.rect.x - box.x) * scale}
@@ -59,6 +61,8 @@ function tint(type: PanelType): string {
     case 'files':
     case 'git':
     case 'voice':
+    case 'todo':
+    case 'pomodoro':
       return 'rgba(255,255,255,0.40)'
     default:
       return 'rgba(255,255,255,0.20)'

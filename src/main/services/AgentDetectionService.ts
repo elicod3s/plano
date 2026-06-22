@@ -11,8 +11,9 @@
  * doesn't flap the chrome. The renderer is notified ONLY when the verdict changes.
  */
 
-import type { AgentKind, AgentVerdict } from '@shared/domain/agent'
+import type { AgentKind, AgentPhase, AgentVerdict } from '@shared/domain/agent'
 import { NO_AGENT } from '@shared/domain/agent'
+import type { TerminalProcessInfo } from '@shared/ipc/contracts'
 import { ProcessTreeService, type Proc } from './ProcessTreeService'
 
 interface Signature {
@@ -62,12 +63,31 @@ const SIGS: Signature[] = [
     cmd: /(^|[\\/\s])gemini(\.exe)?\b|node_modules[\\/]@google[\\/]gemini-cli/i,
     banner: /Gemini CLI|@google\/gemini-cli/i,
   },
+  {
+    id: 'cursor',
+    displayName: 'Cursor',
+    names: /^(cursor-agent(\.exe)?|node(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])cursor-agent(\.exe)?\b|[\\/]cursor-agent[\\/]/i,
+    banner: /Cursor Agent|\bcursor-agent\b/i,
+  },
+  {
+    // Kiro CLI is a bun TUI: `kiro-cli.exe` launches `bun` running `tui.js` from
+    // …\AppData\Local\Kiro-Cli\. The cmd marker is the load-bearing Windows signal.
+    id: 'kiro-cli',
+    displayName: 'Kiro CLI',
+    names: /^(kiro-cli(\.exe)?|bun(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])kiro-cli(\.exe)?\b|[\\/]Kiro-Cli[\\/]|[\\/]tui\.js\b/i,
+    banner: /Kiro CLI|kiro\.dev|\bKiro\b/i,
+  },
 ]
 
 const SHELLS = /^(pwsh|powershell|cmd|conhost|bash|zsh|sh|fish|wsl|winpty-agent|node-pty)(\.exe)?$/i
 const HOSTS = /^(node|python(3|w)?|bun|deno)(\.exe)?$/i
 const TAIL_MAX = 4096
 const EXIT_GRACE_MS = 2500
+// Output seen within this window ⇒ the agent is "working"; quiet longer ⇒ "idle"/done.
+// Kept below the active heartbeat (1500ms) so one heartbeat after output stops flips to idle.
+const WORKING_WINDOW_MS = 900
 
 const baseName = (p: string): string => (p || '').split(/[\\/]/).pop() || p
 
@@ -76,6 +96,7 @@ class TerminalDetector {
   private state: AgentVerdict = { ...NO_AGENT }
   private streak = 0
   private lastSeen = 0
+  private lastOutputAt = 0
   private timer: NodeJS.Timeout | null = null
   private running = false
   private disposed = false
@@ -88,12 +109,19 @@ class TerminalDetector {
 
   onData(chunk: string): void {
     this.tail = (this.tail + chunk).slice(-TAIL_MAX)
+    // Output just arrived — used to tell "working" (streaming) from "idle" (awaiting input).
+    this.lastOutputAt = Date.now()
     // A newline usually means a command was just submitted — check sooner.
     this.schedule(/\r?\n/.test(chunk) ? 60 : 250)
   }
 
   ping(): void {
     this.schedule(120)
+  }
+
+  /** The latest verdict (used to re-sync a panel that reattaches after a space switch). */
+  verdict(): AgentVerdict {
+    return this.state
   }
 
   dispose(): void {
@@ -138,6 +166,37 @@ class TerminalDetector {
     return best
   }
 
+  /**
+   * The agent process(es) actually running under this shell — matched with the SAME
+   * signature rules as detection, so the list shows exactly what turned the panel into
+   * agent mode (the CLI), never the surrounding shell/OS noise that a raw descendant
+   * walk would surface (cmd.exe wrappers, PID-reuse orphans, etc.).
+   */
+  async matchedProcesses(): Promise<TerminalProcessInfo[]> {
+    const map = await this.tree.ensureFresh()
+    const descendants = ProcessTreeService.descendants(this.rootPid, map)
+    const out: TerminalProcessInfo[] = []
+    for (const proc of descendants) {
+      const name = baseName(proc.name)
+      if (SHELLS.test(name)) continue
+      const hostOnly = HOSTS.test(name)
+      const hit = SIGS.some((sig) => {
+        const cmdOk = !!proc.cmd && sig.cmd.test(proc.cmd)
+        const nameOk = sig.names.test(name)
+        return cmdOk || (nameOk && !hostOnly)
+      })
+      if (hit) out.push({ pid: proc.pid, name: proc.name, cmd: proc.cmd })
+    }
+    return out
+  }
+
+  /** The matched agent CLI process running under this shell (kind + pid), via the SAME
+   *  signature rules as detection — so the session resolver reuses one table, never a copy. */
+  async matchedAgent(): Promise<{ kind: AgentKind; pid: number } | null> {
+    const hit = await this.processHit()
+    return hit ? { kind: hit.sig.id, pid: hit.pid } : null
+  }
+
   private async evaluate(): Promise<void> {
     if (this.disposed || this.running) return
     this.running = true
@@ -173,7 +232,7 @@ class TerminalDetector {
         const enter = (proc && score >= 0.8) || (score >= 0.7 && this.streak >= 2)
         if (enter && kind) {
           this.lastSeen = now
-          this.setState({ active: true, kind, displayName, confidence: score, source })
+          this.setState({ active: true, kind, displayName, confidence: score, source, phase: this.phase(now) })
         }
       } else {
         const sameAgentAlive = proc && this.state.kind === proc.sig.id
@@ -181,10 +240,13 @@ class TerminalDetector {
 
         if (proc && kind && kind !== this.state.kind && score >= 0.8) {
           // Switch agent (e.g. claude → aider) without dropping to "none".
-          this.setState({ active: true, kind, displayName, confidence: score, source })
+          this.setState({ active: true, kind, displayName, confidence: score, source, phase: this.phase(now) })
         } else if (now - this.lastSeen > EXIT_GRACE_MS) {
           this.streak = 0
           this.setState({ ...NO_AGENT })
+        } else {
+          // Same agent still running — just refresh the working/idle phase (emits only on flip).
+          this.setState({ ...this.state, phase: this.phase(now) })
         }
       }
 
@@ -196,18 +258,33 @@ class TerminalDetector {
     }
   }
 
+  /** working while output flowed recently; idle once the stream goes quiet (turn finished). */
+  private phase(now: number): AgentPhase {
+    return now - this.lastOutputAt < WORKING_WINDOW_MS ? 'working' : 'idle'
+  }
+
   private setState(next: AgentVerdict): void {
-    const changed = next.active !== this.state.active || next.kind !== this.state.kind
+    const changed =
+      next.active !== this.state.active ||
+      next.kind !== this.state.kind ||
+      next.phase !== this.state.phase
     this.state = next
     if (changed) this.emit(next)
   }
 }
 
 export class AgentDetectionService {
-  private readonly tree = new ProcessTreeService()
   private readonly detectors = new Map<string, TerminalDetector>()
 
+  // Share one snapshot provider with the rest of main (e.g. PtyManager.listProcesses)
+  // so the cached process enumeration is reused instead of duplicated.
+  constructor(private readonly tree: ProcessTreeService = new ProcessTreeService()) {}
+
   register(ptyId: string, pid: number, emit: (verdict: AgentVerdict) => void): void {
+    // Pre-warm the (Windows) enumeration worker the moment a terminal exists, so its ~1.5s
+    // PowerShell cold-start is paid in the background — not in the window where the user
+    // launches an agent CLI and starts typing, where it used to stall both.
+    this.tree.warm()
     this.detectors.set(ptyId, new TerminalDetector(pid, this.tree, emit))
   }
 
@@ -221,6 +298,22 @@ export class AgentDetectionService {
     this.detectors.get(ptyId)?.ping()
   }
 
+  /** Current verdict for a terminal (NO_AGENT if unknown) — re-emitted on reattach. */
+  currentVerdict(ptyId: string): AgentVerdict {
+    return this.detectors.get(ptyId)?.verdict() ?? { ...NO_AGENT }
+  }
+
+  /** The agent CLI process(es) running under this terminal (for the close dialog). */
+  listAgentProcesses(ptyId: string): Promise<TerminalProcessInfo[]> {
+    return this.detectors.get(ptyId)?.matchedProcesses() ?? Promise.resolve([])
+  }
+
+  /** The single matched agent CLI (kind + pid) under this terminal — used by the session
+   *  resolver to find the agent process whose conversation should be restored. */
+  matchedAgentPid(ptyId: string): Promise<{ kind: AgentKind; pid: number } | null> {
+    return this.detectors.get(ptyId)?.matchedAgent() ?? Promise.resolve(null)
+  }
+
   unregister(ptyId: string): void {
     this.detectors.get(ptyId)?.dispose()
     this.detectors.delete(ptyId)
@@ -229,6 +322,8 @@ export class AgentDetectionService {
   disposeAll(): void {
     for (const d of this.detectors.values()) d.dispose()
     this.detectors.clear()
+    // Kill the shared enumeration worker so no PowerShell process is left orphaned on quit.
+    this.tree.dispose()
   }
 }
 

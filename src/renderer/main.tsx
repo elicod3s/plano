@@ -5,6 +5,10 @@ import { createRoot } from 'react-dom/client'
 import '@fontsource-variable/space-grotesk'
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/600.css'
+// Fills the box-drawing / Braille / block / symbol ranges Fontsource's subsets drop, so terminal
+// CLIs (Claude Code's box + spinner, progress bars, ✓/✶ marks) render in JetBrains Mono, not an
+// ugly proportional system fallback. Must come AFTER the Fontsource imports. See the file header.
+import './styles/terminal-symbols.css'
 
 import './styles/theme.css'
 import './styles/globals.css'

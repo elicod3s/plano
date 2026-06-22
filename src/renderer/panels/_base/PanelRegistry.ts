@@ -5,8 +5,9 @@ import { EditorPanel } from '../editor/EditorPanel'
 import { BrowserPanel } from '../browser/BrowserPanel'
 import { AgentPanel } from '../agent/AgentPanel'
 import { MarkdownPanel } from '../markdown/MarkdownPanel'
+import { PomodoroPanel } from '../pomodoro/PomodoroPanel'
+import { TodoPanel } from '../todo/TodoPanel'
 import { StickyNotePanel } from '../sticky/StickyNotePanel'
-import { TextLabelPanel } from '../label/TextLabelPanel'
 import { StubPanel } from './StubPanel'
 
 type PanelComponent = ComponentType<{ panel: Panel }>
@@ -22,12 +23,18 @@ const REGISTRY: Record<PanelType, PanelComponent> = {
   files: EditorPanel,
   git: StubPanel,
   markdown: MarkdownPanel,
+  pomodoro: PomodoroPanel,
+  todo: TodoPanel,
   sticky: StickyNotePanel,
   voice: StubPanel,
-  // Regions render via RegionFrame in PanelLayer (not through PanelFrame), so this slot
-  // is never consulted; keep it mapped to satisfy the exhaustive PanelType record.
+  // Regions and text labels are ground annotations rendered by their own frames in PanelLayer
+  // (RegionFrame / TextLabelFrame), not through PanelFrame — so these slots are never consulted;
+  // keep them mapped to satisfy the exhaustive PanelType record.
   region: StubPanel,
-  label: TextLabelPanel,
+  label: StubPanel,
+  // Dock groups are rendered by DockGroupFrame in PanelLayer (like regions/labels), not via this
+  // registry — their members' bodies are looked up here individually. This slot is never consulted.
+  group: StubPanel,
 }
 
 export function getPanelComponent(type: PanelType): PanelComponent {

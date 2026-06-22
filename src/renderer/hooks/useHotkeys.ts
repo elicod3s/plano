@@ -1,63 +1,62 @@
 import { useEffect } from 'react'
-import { useUiStore } from '@/stores/useUiStore'
-import { useViewportStore } from '@/stores/useViewportStore'
 import { useSpacesStore } from '@/stores/useSpacesStore'
-import { addPanelAtCenter, zoomToFitAll } from '@/app/actions'
-import { openFolder, saveCurrent, switchSpace, createNewSpace } from '@/app/workspaceActions'
+import { switchSpace } from '@/app/workspaceActions'
+import { KEYMAP } from '@/app/commands'
+import { eventKey, matchesCombo } from '@/lib/keymap'
 
 function isTyping(target: EventTarget | null): boolean {
   const el = target as HTMLElement | null
   if (!el) return false
+  // xterm focuses a hidden <textarea>, so this also (correctly) shields a focused terminal from
+  // non-global panel-creation shortcuts — Alt+B etc. reach the shell's readline instead.
   return el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
 }
 
-/** Global keyboard shortcuts. Panel-creation shortcuts are suppressed while typing. */
+/**
+ * Global keyboard shortcuts. Static commands come from the command registry (app/commands) so the
+ * keys, the command palette, the dock and the context menu can never drift apart. The two
+ * parametric shortcuts — cycling spaces (Ctrl+Tab / Ctrl+Shift+Tab) and jumping to space N
+ * (Ctrl+1‑9) — are handled here directly. Registry bindings marked `global` fire even while typing;
+ * the rest (panel creation) are suppressed while a text field / terminal is focused.
+ */
 export function useHotkeys(): void {
-  const togglePalette = useUiStore((s) => s.toggleCommandPalette)
-  const setPalette = useUiStore((s) => s.setCommandPalette)
-
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       const mod = e.ctrlKey || e.metaKey
-      if (!mod) return
-      const k = e.key.toLowerCase()
-      const typing = isTyping(e.target)
-      const vp = { width: window.innerWidth, height: window.innerHeight }
+      const key = eventKey(e)
 
-      // Palette works everywhere.
-      if (k === 'k') return run(e, togglePalette)
-      if (e.shiftKey && k === 'e') return run(e, () => setPalette(true))
-
-      // Workspace switching — global, so it works even with a panel focused.
-      if (k === 'tab') {
+      // Parametric (always global): cycle / jump between spaces.
+      if (mod && !e.altKey && key === 'tab') {
         const { spaces, activeId } = useSpacesStore.getState()
-        if (spaces.length < 2) return run(e, () => undefined)
-        const cur = Math.max(0, spaces.findIndex((s) => s.id === activeId))
-        const next = e.shiftKey ? (cur - 1 + spaces.length) % spaces.length : (cur + 1) % spaces.length
-        return run(e, () => switchSpace(spaces[next].id))
+        if (spaces.length >= 2) {
+          const cur = Math.max(0, spaces.findIndex((s) => s.id === activeId))
+          const next = e.shiftKey ? (cur - 1 + spaces.length) % spaces.length : (cur + 1) % spaces.length
+          e.preventDefault()
+          switchSpace(spaces[next].id)
+        }
+        return
       }
-      if (!e.shiftKey && !e.altKey && k >= '1' && k <= '9') {
-        const target = useSpacesStore.getState().spaces[Number(k) - 1]
-        return run(e, () => target && switchSpace(target.id))
+      if (mod && !e.shiftKey && !e.altKey && key >= '1' && key <= '9') {
+        const target = useSpacesStore.getState().spaces[Number(key) - 1]
+        if (target) {
+          e.preventDefault()
+          switchSpace(target.id)
+        }
+        return
       }
 
-      if (typing) return
-
-      if (e.shiftKey && k === 't') return run(e, () => addPanelAtCenter('terminal'))
-      if (e.shiftKey && k === 'b') return run(e, () => addPanelAtCenter('browser'))
-      if (e.altKey && k === 'e') return run(e, () => addPanelAtCenter('editor'))
-      if (k === 'n') return run(e, () => createNewSpace())
-      if (e.shiftKey && k === 'f') return run(e, () => zoomToFitAll())
-      if (k === '0') return run(e, () => useViewportStore.getState().zoomTo(1, vp))
-      if (k === 's') return run(e, () => void saveCurrent())
-      if (k === 'o') return run(e, () => void openFolder())
+      // Registry commands.
+      const typing = isTyping(e.target)
+      for (const entry of KEYMAP) {
+        if (!entry.global && typing) continue
+        if (matchesCombo(e, entry.combo)) {
+          e.preventDefault()
+          entry.run()
+          return
+        }
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePalette, setPalette])
-}
-
-function run(e: KeyboardEvent, fn: () => void): void {
-  e.preventDefault()
-  fn()
+  }, [])
 }

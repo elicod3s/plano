@@ -6,6 +6,7 @@ import { switchSpace, createNewSpace, renameSpace, deleteSpace } from '@/app/wor
 import { SpacePreview } from './SpacePreview'
 import { Icon } from '@/design-system/Icon'
 import { cn } from '@/lib/cn'
+import { MOD } from '@/lib/hotkeys'
 import type { Space } from '@shared/domain/workspace'
 import type { Panel } from '@shared/domain/panel'
 
@@ -16,6 +17,22 @@ const GRID_BG: React.CSSProperties = {
   backgroundColor: 'var(--surface-inset)',
   backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.10) 0.5px, transparent 0.6px)',
   backgroundSize: '7px 7px',
+}
+
+/**
+ * Per-workspace accent — a curated, muted palette so the switcher carries a little colour
+ * while staying classy on the dark warm-neutral ground. Stable per workspace (hashed from
+ * its id), and kept clear of pure red so it never reads as a destructive/armed state.
+ */
+const SPACE_HUES = ['#E3A65C', '#E58C7A', '#B7A2EC', '#6FC4B5', '#7FB2E6', '#B4CC82', '#E48FC6', '#D9C56A']
+function spaceColor(id: string): string {
+  let h = 0
+  for (let i = 0; i < id.length; i += 1) h = (h * 31 + id.charCodeAt(i)) >>> 0
+  return SPACE_HUES[h % SPACE_HUES.length]
+}
+/** `color` mixed with transparency — for tints + outlines. */
+function tint(color: string, pct: number): string {
+  return `color-mix(in srgb, ${color} ${pct}%, transparent)`
 }
 
 /**
@@ -106,7 +123,10 @@ export function SpacesMenu() {
         )}
       >
         <Icon name="LayoutGrid" size={14} className="text-text-secondary" />
-        <span className="max-w-[150px] truncate text-[12px] font-medium text-text-primary">
+        <span
+          className="max-w-[150px] truncate text-[12px] font-medium"
+          style={{ color: active ? spaceColor(active.id) : 'var(--text-primary)' }}
+        >
           {active?.name ?? 'Workspaces'}
         </span>
         <span
@@ -167,11 +187,13 @@ export function SpacesMenu() {
                   <SpaceRow
                     key={space.id}
                     space={space}
-                    index={i}
+                    // Badge shows the canonical slot (matches Ctrl+1–9 + the name), not the filtered row.
+                    index={spaces.indexOf(space)}
                     isActive={space.id === activeId}
                     selected={i === sel}
                     livePanels={livePanels}
-                    canDelete={spaces.length > 1}
+                    // Always deletable: removing the final workspace closes the whole project.
+                    canDelete={true}
                     editing={editingId === space.id}
                     onHover={() => setSel(i)}
                     onSwitch={() => {
@@ -197,13 +219,13 @@ export function SpacesMenu() {
                   <Icon name="Plus" size={13} />
                 </span>
                 New workspace
-                <span className="ml-auto font-mono text-[10px] text-text-quaternary">Ctrl N</span>
+                <span className="ml-auto font-mono text-[10px] text-text-quaternary">{MOD} N</span>
               </button>
 
               <div className="flex items-center gap-3.5 border-t border-subtle bg-surface-2 px-4 py-2 font-mono text-[10px] text-text-quaternary">
                 <span>↑↓ Move</span>
                 <span>↵ Switch</span>
-                <span>Ctrl 1–9 Jump</span>
+                <span>{MOD} 1–9 Jump</span>
               </div>
             </div>
           </div>,
@@ -242,7 +264,11 @@ function SpaceRow({
 
   const panels: Panel[] = isActive ? Object.values(livePanels) : space.panels
   const agents = panels.filter((p) => p.type === 'terminal' || p.type === 'agent').length
-  const meta = `${panels.length} panel${panels.length === 1 ? '' : 's'}${agents > 0 ? ` · ${agents} agent${agents === 1 ? '' : 's'}` : ''}`
+  // Each workspace owns its OWN folder (or none) — surface it so they read as independent projects.
+  const folder = space.folderPath ? space.folderPath.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || space.folderPath : 'No folder'
+  const counts = `${panels.length} panel${panels.length === 1 ? '' : 's'}${agents > 0 ? ` · ${agents} agent${agents === 1 ? '' : 's'}` : ''}`
+  const meta = `${folder} · ${counts}`
+  const color = spaceColor(space.id)
 
   const commit = (): void => {
     if (draft.trim()) renameSpace(space.id, draft)
@@ -257,18 +283,15 @@ function SpaceRow({
       onClick={() => {
         if (!editing) onSwitch()
       }}
-      className="group relative flex cursor-pointer items-center gap-2.5 rounded-xl px-2 py-1.5 transition-colors"
+      className="group relative flex cursor-pointer items-center gap-2.5 rounded-xl border px-2 py-1.5 transition-colors"
       style={{
-        background: selected ? 'var(--accent-soft-strong)' : isActive ? 'var(--accent-soft)' : 'transparent',
+        borderColor: selected ? color : isActive ? tint(color, 50) : 'transparent',
+        background: selected ? tint(color, 12) : isActive ? tint(color, 6) : 'transparent',
       }}
     >
-      {isActive && (
-        <span className="absolute left-0 top-1/2 h-7 w-[2px] -translate-y-1/2 rounded-pill bg-accent" />
-      )}
-
       <span
-        className="ml-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-md font-mono text-[10px] text-text-tertiary"
-        style={{ background: 'var(--surface-3)' }}
+        className="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md font-mono text-[10px]"
+        style={{ color, background: tint(color, 14) }}
       >
         {index + 1}
       </span>
@@ -298,8 +321,10 @@ function SpaceRow({
         ) : (
           <>
             <span className="flex items-center gap-1.5">
-              <span className="truncate text-[12.5px] font-medium text-text-primary">{space.name}</span>
-              {isActive && <Icon name="Check" size={12} className="shrink-0 text-text-secondary" />}
+              <span className="truncate text-[12.5px] font-medium" style={{ color }}>
+                {space.name}
+              </span>
+              {isActive && <Icon name="Check" size={12} className="shrink-0" style={{ color }} />}
             </span>
             <span className="mt-0.5 block font-mono text-[9.5px] uppercase tracking-wider text-text-quaternary">
               {meta}
@@ -328,7 +353,7 @@ function SpaceRow({
               aria-label="Delete workspace"
               onClick={(e) => {
                 e.stopPropagation()
-                deleteSpace(space.id)
+                void deleteSpace(space.id)
               }}
               className="flex h-6 w-6 items-center justify-center rounded-md text-text-tertiary transition-colors hover:bg-destructive hover:text-white"
             >

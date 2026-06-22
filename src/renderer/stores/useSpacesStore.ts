@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import { createSpace, type Space, type Viewport } from '@shared/domain/workspace'
+import { createSpace, renumberDefaultSpaces, type Space, type Viewport } from '@shared/domain/workspace'
 import type { Panel } from '@shared/domain/panel'
 import { newId } from '@/lib/id'
 
@@ -20,6 +20,8 @@ interface SpacesState {
   add: (space: Space) => void
   remove: (id: string) => void
   rename: (id: string, name: string) => void
+  /** Point a workspace at its own project folder (or null to clear it). */
+  setFolder: (id: string, folderPath: string | null) => void
   setActiveId: (id: string) => void
 }
 
@@ -29,9 +31,11 @@ export const useSpacesStore = create<SpacesState>((set) => ({
   spaces: [initial],
   activeId: initial.id,
 
+  // Every list mutation re-tightens auto-named spaces to their position (see renumberDefaultSpaces),
+  // so a name like "Workspace 2" can never outlive its slot. Custom names are preserved.
   hydrate: (spaces, activeId) =>
     set(() => {
-      const list = spaces.length > 0 ? spaces : [createSpace(newId(), 'Workspace 1')]
+      const list = renumberDefaultSpaces(spaces.length > 0 ? spaces : [createSpace(newId(), 'Workspace 1')])
       const active = list.some((s) => s.id === activeId) ? activeId : list[0].id
       return { spaces: list, activeId: active }
     }),
@@ -39,12 +43,15 @@ export const useSpacesStore = create<SpacesState>((set) => ({
   writeBack: (id, panels, viewport) =>
     set((s) => ({ spaces: s.spaces.map((sp) => (sp.id === id ? { ...sp, panels, viewport } : sp)) })),
 
-  add: (space) => set((s) => ({ spaces: [...s.spaces, space] })),
+  add: (space) => set((s) => ({ spaces: renumberDefaultSpaces([...s.spaces, space]) })),
 
-  remove: (id) => set((s) => ({ spaces: s.spaces.filter((sp) => sp.id !== id) })),
+  remove: (id) => set((s) => ({ spaces: renumberDefaultSpaces(s.spaces.filter((sp) => sp.id !== id)) })),
 
   rename: (id, name) =>
     set((s) => ({ spaces: s.spaces.map((sp) => (sp.id === id ? { ...sp, name } : sp)) })),
+
+  setFolder: (id, folderPath) =>
+    set((s) => ({ spaces: s.spaces.map((sp) => (sp.id === id ? { ...sp, folderPath } : sp)) })),
 
   setActiveId: (id) => set({ activeId: id }),
 }))

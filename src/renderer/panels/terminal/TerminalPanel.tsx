@@ -1,25 +1,115 @@
-import { useRef } from 'react'
-import type { Panel } from '@shared/domain/panel'
+import { useEffect, useRef } from 'react'
+import type { Panel, TerminalProps, TerminalTab } from '@shared/domain/panel'
+import { AGENTS } from '@shared/domain/agent'
+import { usePanelStore } from '@/stores/usePanelStore'
 import { useTerminalStore } from '@/stores/useTerminalStore'
-import { useAgentStore, selectVerdict } from '@/stores/useAgentStore'
-import { useXterm } from './useXterm'
-import { AgentBar } from './AgentBar'
+import { useAgentStore } from '@/stores/useAgentStore'
+import { useSettingsStore } from '@/stores/useSettingsStore'
+import { promptTerminalClose } from '@/stores/useTerminalClosePrompt'
+import { killTerminalTab } from '@/app/terminalSessions'
+import { newId } from '@/lib/id'
+import { getTerminalTheme } from './terminalThemes'
+import { TerminalTabBar } from './TerminalTabBar'
+import { TerminalView } from './TerminalView'
 
+/**
+ * A terminal panel hosts one or more terminals (tabs), each with its own PTY/xterm. A slim tab
+ * strip at the top switches between them and the "+" spawns another in the same panel — usable even
+ * while an agent runs in the active tab. Only the active tab mounts a <TerminalView>; switching tabs
+ * just DETACHES the old terminal's DOM (its xterm instance + PTY stay alive in `terminalEngine`) and
+ * re-attaches the selected tab's existing instance — a pure DOM re-parent, no buffered replay. A
+ * visited tab keeps its live xterm/WebGL context in the registry until the tab is closed.
+ */
 export function TerminalPanel({ panel }: { panel: Panel }) {
-  const containerRef = useRef<HTMLDivElement>(null)
-  useXterm(panel.id, containerRef)
+  const props = panel.props as TerminalProps
+  const updateProps = usePanelStore((s) => s.updateProps)
+  const addTerminalTab = usePanelStore((s) => s.addTerminalTab)
+  const closeTerminalTab = usePanelStore((s) => s.closeTerminalTab)
+  const setActiveTerminalTab = usePanelStore((s) => s.setActiveTerminalTab)
 
-  const ptyId = useTerminalStore((s) => s.byPanel[panel.id]?.ptyId ?? null)
-  const verdict = useAgentStore(selectVerdict(ptyId))
+  // Migration / fresh-panel bootstrap: synthesize the first tab from the legacy single-terminal
+  // fields with a STABLE id (kept in a ref) so the provisional tab we render this frame and the one
+  // the effect persists are the same terminal — no remount, no double-spawn. The effect then clears
+  // the legacy fields so they can't act as a second source of cwd/agentSession.
+  const firstIdRef = useRef('')
+  const hasTabs = !!props.tabs && props.tabs.length > 0
+  if (!hasTabs && !firstIdRef.current) firstIdRef.current = newId()
+
+  const synthTab = (): TerminalTab => ({
+    id: firstIdRef.current,
+    cwd: props.cwd,
+    shell: props.shell,
+    fontSize: props.fontSize,
+    agentSession: props.agentSession,
+  })
+
+  useEffect(() => {
+    if (props.tabs && props.tabs.length > 0) return
+    if (!firstIdRef.current) return
+    updateProps<'terminal'>(panel.id, {
+      tabs: [synthTab()],
+      activeTabId: firstIdRef.current,
+      cwd: undefined,
+      shell: undefined,
+      fontSize: undefined,
+      agentSession: undefined,
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel.id, hasTabs])
+
+  const tabs = hasTabs ? props.tabs! : [synthTab()]
+  // Resolve the active terminal, tolerating a stale/absent activeTabId.
+  const activeTermId =
+    (props.activeTabId && tabs.some((t) => t.id === props.activeTabId) ? props.activeTabId : undefined) ??
+    tabs[0].id
+
+  // Match the panel body (incl. its padding gutter) to the xterm theme's background so a colored
+  // terminal theme has no color seam / "bars" around the content.
+  const themeDefault = useSettingsStore((s) => s.settings.terminal.theme)
+  const bg = getTerminalTheme(props.theme ?? themeDefault).background ?? 'var(--surface-inset)'
+
+  const handleAdd = (): void => {
+    addTerminalTab(panel.id)
+  }
+
+  // Closing a tab kills its PTY for real (unlike a space switch). Guard a tab that has a detected
+  // agent running with the same confirm used for closing the whole panel (skippable in Settings).
+  const handleClose = (tabId: string): void => {
+    const rt = useTerminalStore.getState().byPanel[tabId]
+    const ptyId = rt?.ptyId ?? null
+    const verdict = ptyId ? useAgentStore.getState().byPty[ptyId] : undefined
+    const doClose = (): void => {
+      killTerminalTab(tabId)
+      closeTerminalTab(panel.id, tabId)
+    }
+    const confirmOn = useSettingsStore.getState().settings.general.confirmClosePanelWithProcess
+    if (confirmOn && verdict?.active) {
+      void promptTerminalClose({
+        agentName: verdict.kind ? AGENTS[verdict.kind].displayName : 'An agent',
+        agentIcon: verdict.kind ? AGENTS[verdict.kind].icon : 'Bot',
+        ptyId,
+        cwd: rt?.cwd,
+      }).then((ok) => {
+        if (ok) doClose()
+      })
+      return
+    }
+    doClose()
+  }
 
   return (
-    <div className="flex h-full flex-col">
-      {verdict.active && <AgentBar verdict={verdict} />}
-      <div
-        ref={containerRef}
-        className="min-h-0 flex-1 overflow-hidden"
-        style={{ background: 'var(--surface-inset)', padding: '8px 6px 4px 10px' }}
+    <div className="relative flex h-full flex-col">
+      <TerminalTabBar
+        tabs={tabs}
+        activeTabId={activeTermId}
+        onSelect={(id) => setActiveTerminalTab(panel.id, id)}
+        onClose={handleClose}
+        onAdd={handleAdd}
       />
+      {/* Only the active tab is mounted. key={activeTermId} unmounts the old TerminalView — which
+          DETACHES its terminal's DOM (the engine keeps the xterm instance + PTY alive) — and mounts
+          the selected tab's view, re-attaching its existing instance (pure DOM re-parent, no replay). */}
+      <TerminalView key={activeTermId} termId={activeTermId} panelId={panel.id} bg={bg} />
     </div>
   )
 }

@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { memo, useCallback, useState } from 'react'
 import type { FsNode } from '@shared/ipc/contracts'
 import { Icon } from '@/design-system/Icon'
 import { cn } from '@/lib/cn'
+import { FileTypeIcon } from './fileIcons'
 import { TreeContextMenu } from './TreeContextMenu'
 
 interface MenuState {
@@ -11,8 +12,14 @@ interface MenuState {
 }
 
 /** Collapsible file tree for the Files panel sidebar. Files open in the editor pane; the
- *  active file is highlighted. Right-click a node for path/copy/reveal actions. */
-export function FileTree({
+ *  active file is highlighted. Right-click a node for path/copy/reveal actions.
+ *
+ *  Memoized: while a Files panel is dragged across the canvas its `panel` reference changes
+ *  every pointer tick, re-rendering EditorPanel — but the tree's inputs (root, activePath,
+ *  the stable onOpenFile/onOpenInTerminal callbacks) don't change, so this whole subtree
+ *  (potentially hundreds of TreeNodes) is skipped. That's what keeps a deep, expanded tree
+ *  smooth to move. For the bail-out to hold, EditorPanel must pass STABLE callbacks. */
+function FileTreeInner({
   root,
   rootPath,
   activePath,
@@ -27,11 +34,13 @@ export function FileTree({
 }) {
   const [menu, setMenu] = useState<MenuState | null>(null)
 
-  const openMenu = (node: FsNode, e: React.MouseEvent): void => {
+  // Stable so the memoized TreeNodes don't re-render when the tree re-renders for an
+  // unrelated reason (e.g. the active file changing).
+  const openMenu = useCallback((node: FsNode, e: React.MouseEvent): void => {
     e.preventDefault()
     e.stopPropagation()
     setMenu({ node, x: e.clientX, y: e.clientY })
-  }
+  }, [])
 
   if (!root) {
     return <div className="px-3 py-2 text-[12px] text-text-tertiary">Loading…</div>
@@ -66,7 +75,13 @@ export function FileTree({
   )
 }
 
-function TreeNode({
+export const FileTree = memo(FileTreeInner)
+
+// Memoized so when the tree DOES re-render (folder expand, active-file change) only the
+// branches whose props actually changed reconcile — not every node. The recursive call below
+// uses the memoized `TreeNode` const (not the inner function name) so the bail-out propagates
+// down the tree.
+const TreeNode = memo(function TreeNodeRow({
   node,
   depth,
   activePath,
@@ -102,11 +117,11 @@ function TreeNode({
         ) : (
           <span className="w-[13px] shrink-0" />
         )}
-        <Icon
-          name={isDir ? (open ? 'FolderOpen' : 'Folder') : 'File'}
-          size={14}
-          className="shrink-0 text-text-tertiary"
-        />
+        {isDir ? (
+          <Icon name={open ? 'FolderOpen' : 'Folder'} size={14} className="shrink-0 text-text-tertiary" />
+        ) : (
+          <FileTypeIcon name={node.name} size={14} className="shrink-0 text-text-tertiary" />
+        )}
         <span className="truncate">{node.name}</span>
       </button>
       {isDir &&
@@ -123,4 +138,4 @@ function TreeNode({
         ))}
     </div>
   )
-}
+})

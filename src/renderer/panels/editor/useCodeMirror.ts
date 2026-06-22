@@ -20,6 +20,7 @@ import {
 } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { languageFor } from './languages'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 
 /** Editor chrome in Monolith tones (content/syntax keeps color for legibility). */
 const planoTheme = EditorView.theme(
@@ -77,9 +78,11 @@ export function useCodeMirror(ref: RefObject<HTMLDivElement>, opts: UseCodeMirro
     const parent = ref.current
     if (!parent) return
 
+    // Read editor preferences at mount; new/reopened editors pick up changes.
+    const ed = useSettingsStore.getState().settings.editor
+
     const extensions: Extension[] = [
-      lineNumbers(),
-      highlightActiveLineGutter(),
+      ...(ed.lineNumbers ? [lineNumbers(), highlightActiveLineGutter()] : []),
       foldGutter(),
       history(),
       drawSelection(),
@@ -88,6 +91,7 @@ export function useCodeMirror(ref: RefObject<HTMLDivElement>, opts: UseCodeMirro
       closeBrackets(),
       highlightActiveLine(),
       syntaxHighlighting(planoHighlight),
+      EditorState.tabSize.of(ed.tabSize),
       keymap.of([
         {
           key: 'Mod-s',
@@ -103,7 +107,8 @@ export function useCodeMirror(ref: RefObject<HTMLDivElement>, opts: UseCodeMirro
         indentWithTab,
       ]),
       planoTheme,
-      EditorView.lineWrapping,
+      EditorView.theme({ '&': { fontSize: `${ed.fontSize}px` } }),
+      ...(ed.wordWrap ? [EditorView.lineWrapping] : []),
       EditorView.updateListener.of((u) => {
         if (u.docChanged) onChangeRef.current(u.state.doc.toString())
       }),

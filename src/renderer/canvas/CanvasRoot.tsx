@@ -1,10 +1,13 @@
 import { useEffect, useRef } from 'react'
 import { useViewportStore } from '@/stores/useViewportStore'
 import { useUiStore } from '@/stores/useUiStore'
+import { useSettingsStore } from '@/stores/useSettingsStore'
+import { cn } from '@/lib/cn'
 import { screenToWorld } from '@shared/domain/geometry'
 import { usePanZoom } from './hooks/usePanZoom'
 import { GridBackground } from './GridBackground'
 import { PanelLayer } from './PanelLayer'
+import { SnapOverlay } from './SnapOverlay'
 
 /**
  * The infinite-canvas surface. Owns pan (space-drag / middle-drag), wheel zoom, the
@@ -16,9 +19,11 @@ export function CanvasRoot() {
   usePanZoom(ref)
 
   const setPanning = useViewportStore((s) => s.setPanning)
+  const setInteracting = useViewportStore((s) => s.setInteracting)
   const panBy = useViewportStore((s) => s.panBy)
   const openContextMenu = useUiStore((s) => s.openContextMenu)
   const closeContextMenu = useUiStore((s) => s.closeContextMenu)
+  const grain = useSettingsStore((s) => s.settings.appearance.grain)
 
   const spaceHeld = useRef(false)
   const pan = useRef<{ lastX: number; lastY: number } | null>(null)
@@ -49,6 +54,7 @@ export function CanvasRoot() {
     e.preventDefault()
     pan.current = { lastX: e.clientX, lastY: e.clientY }
     setPanning(true)
+    setInteracting(true) // promote the world layer to a GPU texture for the duration of the pan
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
 
@@ -62,6 +68,7 @@ export function CanvasRoot() {
     if (!pan.current) return
     pan.current = null
     setPanning(false)
+    setInteracting(false) // drop the GPU-layer hint so settled text re-rasters sharp
   }
 
   const onContextMenu = (e: React.MouseEvent<HTMLDivElement>): void => {
@@ -78,16 +85,18 @@ export function CanvasRoot() {
     <div
       ref={ref}
       data-canvas-background="true"
-      className="plano-grain absolute inset-0 overflow-hidden"
+      className={cn('absolute inset-0 overflow-hidden', grain && 'plano-grain')}
       style={{ background: 'var(--bg-canvas)', cursor: pan.current ? 'grabbing' : 'default' }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endPan}
       onPointerCancel={endPan}
+      onLostPointerCapture={endPan}
       onContextMenu={onContextMenu}
     >
       <GridBackground />
       <PanelLayer />
+      <SnapOverlay />
     </div>
   )
 }

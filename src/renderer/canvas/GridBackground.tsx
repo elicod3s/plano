@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useViewportStore } from '@/stores/useViewportStore'
+import { useSettingsStore } from '@/stores/useSettingsStore'
 
 const MINOR = 24
 const MAJOR = 96
@@ -20,6 +21,8 @@ export function GridBackground() {
   const x = useViewportStore((s) => s.x)
   const y = useViewportStore((s) => s.y)
   const zoom = useViewportStore((s) => s.zoom)
+  const gridStyle = useSettingsStore((s) => s.settings.appearance.gridStyle)
+  const gridOpacity = useSettingsStore((s) => s.settings.appearance.gridOpacity)
 
   const minor = MINOR * zoom
   const major = MAJOR * zoom
@@ -75,9 +78,35 @@ export function GridBackground() {
       window.removeEventListener('resize', measure)
       document.removeEventListener('mouseleave', onLeave)
     }
-  }, [])
+    // Re-bind across grid-style changes so the cursor spotlight re-attaches to the live
+    // node after 'none' unmounts/remounts it (and detaches entirely while 'none').
+  }, [gridStyle])
 
   const spotMask = `radial-gradient(circle ${SPOT_RADIUS}px at var(--spot-x, -1000px) var(--spot-y, -1000px), #000 0%, transparent 76%)`
+
+  // 'none' kills the grid entirely (the cursor spotlight goes with it).
+  if (gridStyle === 'none') return null
+
+  // Dots → a pure dot grid at both scales; Lines → minor + major hairlines both ways.
+  // The user-chosen strength multiplies the zoom-based fade so it never becomes noise.
+  const layers =
+    gridStyle === 'lines'
+      ? {
+          backgroundImage: [
+            'linear-gradient(var(--border-grid-minor) 1px, transparent 1px)',
+            'linear-gradient(90deg, var(--border-grid-minor) 1px, transparent 1px)',
+            'linear-gradient(var(--border-grid-major) 1px, transparent 1px)',
+            'linear-gradient(90deg, var(--border-grid-major) 1px, transparent 1px)',
+          ].join(','),
+          backgroundSize: `${minor}px ${minor}px, ${minor}px ${minor}px, ${major}px ${major}px, ${major}px ${major}px`,
+        }
+      : {
+          backgroundImage: [
+            'radial-gradient(var(--border-grid-minor) 1px, transparent 1px)',
+            'radial-gradient(var(--border-grid-major) 1.3px, transparent 1.3px)',
+          ].join(','),
+          backgroundSize: `${minor}px ${minor}px, ${major}px ${major}px`,
+        }
 
   return (
     <>
@@ -85,15 +114,11 @@ export function GridBackground() {
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{
-          backgroundImage: [
-            'radial-gradient(var(--border-grid-minor) 1px, transparent 1px)',
-            'linear-gradient(var(--border-grid-major) 1px, transparent 1px)',
-            'linear-gradient(90deg, var(--border-grid-major) 1px, transparent 1px)',
-          ].join(','),
-          backgroundSize: `${minor}px ${minor}px, ${major}px ${major}px, ${major}px ${major}px`,
+          backgroundImage: layers.backgroundImage,
+          backgroundSize: layers.backgroundSize,
           backgroundPosition: `${x}px ${y}px`,
-          // Fade the minor grid out when zoomed far out so it never turns into noise.
-          opacity: zoom < 0.4 ? 0.5 : 1,
+          // Fade the grid out when zoomed far out, then scale by the user's strength setting.
+          opacity: (zoom < 0.4 ? 0.5 : 1) * gridOpacity,
         }}
       />
       <div
@@ -101,7 +126,7 @@ export function GridBackground() {
         aria-hidden
         className="pointer-events-none absolute inset-0"
         style={{
-          backgroundImage: `radial-gradient(rgba(255,255,255,${spotAlpha}) 1px, transparent 1px)`,
+          backgroundImage: `radial-gradient(rgba(255,255,255,${spotAlpha * gridOpacity}) 1px, transparent 1px)`,
           backgroundSize: `${minor}px ${minor}px`,
           backgroundPosition: `${x}px ${y}px`,
           opacity: 'var(--spot-o, 0)',

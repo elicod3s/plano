@@ -1,0 +1,58 @@
+/*
+ * Terminal/CLI symbol coverage — a layered, BUNDLED fallback so AI CLIs render their UI correctly on
+ * any machine, in a monospace font, instead of an ugly proportional system fallback (Segoe UI Symbol).
+ *
+ * The problem: @fontsource/jetbrains-mono is split into LANGUAGE subsets (latin, cyrillic, …) that drop
+ * every block CLIs draw with — box drawing, block elements, geometric shapes, Braille, dingbats. And no
+ * single common monospace font covers all of them: JetBrains Mono has box/block/geometric + ✓✗; Cascadia
+ * has Braille + Powerline; only DejaVu has the teardrop-asterisk "star" marks (✻✳✱✸) Claude Code animates.
+ *
+ * The fix layers three bundled fonts under custom family names, consulted in this order via the font
+ * stack in xtermTheme.ts / theme.css — each fills exactly what the previous one lacks:
+ *   1. JetBrains Mono (full, unsubsetted) — box drawing (Claude's ╭──╮ input box), block elements
+ *      (progress bars █▉▊), geometric shapes (●○◆), arrows, ✓✗. Same typeface + advance width as the
+ *      terminal text, so lines tile seamlessly and columns never drift.
+ *   2. "PLANO Term Symbols" (Cascadia Code PL) — Braille spinners (⠋⠙⠹) and Powerline glyphs, plus broad
+ *      general symbol coverage, for whatever the layer above lacks.
+ *   3. "PLANO Term Dingbats" (DejaVu Sans Mono, subset to U+2600–27BF) — the star/asterisk dingbats
+ *      (✻✳✱✸ ★☆ ⚠) that Claude Code's mark + "thinking" animation use, which neither font above has.
+ * Anything still uncovered falls through to the OS monospace chain (Consolas/…) — so this only ADDS
+ * coverage, never blanks a glyph. All three fonts are OFL/permissively licensed and safe to bundle.
+ */
+
+/* 1 — full JetBrains Mono for the symbol blocks Fontsource's subsets omit. Same family name as the body
+ * text, so terminal/editor use it automatically; scoped to the ranges JetBrains Mono actually covers. */
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../assets/fonts/JetBrainsMono-Regular.woff2) format('woff2');
+  unicode-range: U+2190-21FF, U+2300-23FF, U+2500-27BF;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(../assets/fonts/JetBrainsMono-SemiBold.woff2) format('woff2');
+  unicode-range: U+2190-21FF, U+2300-23FF, U+2500-27BF;
+}
+
+/* 2 — Cascadia Code PL (variable): Braille + Powerline + broad symbols. */
+@font-face {
+  font-family: 'PLANO Term Symbols';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(../assets/fonts/CascadiaCodePL.woff2) format('woff2');
+}
+
+/* 3 — DejaVu Sans Mono (subset U+2600–27BF): the star/asterisk dingbats Claude Code uses. */
+@font-face {
+  font-family: 'PLANO Term Dingbats';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url(../assets/fonts/DejaVuSansMono-Symbols.woff2) format('woff2');
+}
