@@ -28,6 +28,7 @@
       "buildResources": "build",
       "output": "release"
     },
+    "afterPack": "build/afterPack.js",
     "files": [
       "out/**/*",
       "package.json"

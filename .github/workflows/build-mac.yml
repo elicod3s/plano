@@ -36,8 +36,8 @@ jobs:
         include:
           - runner: macos-14   # Apple Silicon (M-series) → arm64
             arch: arm64
-          - runner: macos-13   # Intel → x64
-            arch: x64
+          # Intel (x64) intentionally omitted — Apple Silicon covers the vast majority of
+          # Macs. To re-add: `- runner: macos-13` / `arch: x64`.
     steps:
       - name: Checkout
         uses: actions/checkout@v4
