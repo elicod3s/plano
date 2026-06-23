@@ -57,7 +57,7 @@ export function useDevUrlAutoOpen(): void {
     // but not yet the preload) so a version skew degrades to "feature off" instead of crashing
     // the whole renderer. Once the preload rebuilds, the method is present and this wires up.
     if (typeof window.plano.terminal.onUrlDetected !== 'function') return
-    return window.plano.terminal.onUrlDetected(({ ptyId, url }) => {
+    return window.plano.terminal.onUrlDetected(({ ptyId, panelId: eventPanelId, url }) => {
       const action = useSettingsStore.getState().settings.browser.terminalUrlAction
       if (action === 'ignore') return
 
@@ -68,7 +68,11 @@ export function useDevUrlAutoOpen(): void {
       // navigated away from the original URL.)
       // openedDevUrls is panel-level; map pty→terminal→owning panel (byPanel keys are termIds).
       const byPanel = useTerminalStore.getState().byPanel
-      const panelId = Object.values(byPanel).find((rt) => rt.ptyId === ptyId)?.panelId
+      // The main process owns this association. Use it first so a fast PTY can never beat the
+      // renderer's runtime-store update; retain the lookup for events from an older preload/main.
+      const panelId =
+        (eventPanelId && usePanelStore.getState().panels[eventPanelId] ? eventPanelId : undefined) ??
+        Object.values(byPanel).find((rt) => rt.ptyId === ptyId)?.panelId
       const opened = panelId
         ? ((usePanelStore.getState().panels[panelId]?.props as TerminalProps).openedDevUrls ?? [])
         : []

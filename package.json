@@ -60,6 +60,22 @@
       "include": "build/installer.nsh",
       "artifactName": "${productName} Setup.${ext}",
       "deleteAppDataOnUninstall": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg"
+        }
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "darkModeSupport": true,
+      "identity": null,
+      "gatekeeperAssess": false
+    },
+    "dmg": {
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
     }
   },
   "dependencies": {

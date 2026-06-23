@@ -73,9 +73,13 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   const panelProps = (): TerminalProps | undefined =>
     usePanelStore.getState().panels[panelId]?.props as TerminalProps | undefined
   const tab = () => panelProps()?.tabs?.find((t) => t.id === termId)
-  // Per-terminal font override: the tab's value, falling back to the panel-level LEGACY field while a
-  // just-rehydrated single-terminal panel hasn't been migrated into the tabs model yet.
-  const fontOverride = (): number | undefined => tab()?.fontSize ?? panelProps()?.fontSize
+  // Per-terminal font override: this tab's own value. Falls back to the panel-level LEGACY field ONLY
+  // in the pre-migration window (no tab record yet); once a tab record exists — every tab created with
+  // "+", and every tab after migration — it owns its zoom and never inherits the panel-level legacy.
+  const fontOverride = (): number | undefined => {
+    const t = tab()
+    return t ? t.fontSize : panelProps()?.fontSize
+  }
 
   const ts0 = useSettingsStore.getState().settings.terminal
   const override0 = panelProps()?.theme
@@ -532,9 +536,15 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   // ── PTY lifecycle: fresh spawn vs HMR reattach ──────────────────────────────────────────────────
   const spawnPty = (): void => {
     const t0 = tab()
-    const pp0 = panelProps()
-    const savedAgent = t0?.agentSession ?? pp0?.agentSession
-    const termCwd = savedAgent?.cwd ?? t0?.cwd ?? pp0?.cwd
+    // Panel-level cwd/shell/agentSession are LEGACY single-terminal fields that exist only until the
+    // first mount migrates them into tab[0] (see TerminalPanel). Read them ONLY in that pre-migration
+    // window — i.e. when this terminal has no tab record yet. Once a tab record exists (every tab made
+    // with "+", and every tab after migration), its OWN fields are the sole source, so a brand-new tab
+    // never inherits the panel's old agent conversation / cwd / shell. This is what stops the "+"
+    // button from re-opening an agent that was resumed long ago.
+    const legacy = t0 ? undefined : panelProps()
+    const savedAgent = t0?.agentSession ?? legacy?.agentSession
+    const termCwd = savedAgent?.cwd ?? t0?.cwd ?? legacy?.cwd
     const cwd = termCwd ?? useWorkspaceStore.getState().folderPath ?? undefined
 
     void window.plano.terminal
@@ -544,7 +554,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
         rows: term.rows,
         cwd,
         autoDetectRoot: !termCwd,
-        shell: t0?.shell ?? pp0?.shell ?? resolveShell(ts0),
+        shell: t0?.shell ?? legacy?.shell ?? resolveShell(ts0),
         predictiveHistory: ts0.predictiveHistory,
       })
       .then((res) => {

@@ -1,0 +1,97 @@
+name: Build macOS
+
+# Builds the macOS installers (.dmg) for PLANO on real Apple hardware runners — one job per
+# architecture so node-pty is compiled natively for each (no cross-compile). The Windows build
+# is untouched: this workflow only ever runs `dist:mac`, which reads the `mac`/`dmg` keys in
+# package.json and ignores the `win`/`nsis` config entirely.
+#
+# Triggered automatically on pushes to main that change app code, and on demand from the
+# Actions tab / `gh workflow run`. The result is published to a rolling prerelease tagged
+# `mac-latest`, so there is always a stable download URL for the newest installers.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'build/**'
+      - 'scripts/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'electron.vite.config.ts'
+      - 'tsconfig*.json'
+      - '.github/workflows/build-mac.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14   # Apple Silicon (M-series) → arm64
+            arch: arm64
+          - runner: macos-13   # Intel → x64
+            arch: x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Rebuild node-pty against Electron's ABI
+        run: npm run rebuild
+
+      - name: Build renderer/main and package the .dmg
+        run: npm run dist:mac
+        env:
+          # No Apple Developer certs in CI → skip code signing so the build doesn't fail.
+          # Produces an UNSIGNED installer (works via right-click → Open on first launch).
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PLANO-mac-${{ matrix.arch }}
+          path: release/*.dmg
+          if-no-files-found: error
+
+  release:
+    name: Publish installers
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download built installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publish rolling "mac-latest" prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          find artifacts -name '*.dmg' -exec cp {} dist/ \;
+          echo "Installers to publish:"; ls -la dist
+          # Replace the previous rolling release so the download URL always serves the newest build.
+          gh release delete mac-latest --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag || true
+          gh release create mac-latest dist/*.dmg \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "PLANO macOS (latest build)" \
+            --prerelease \
+            --notes $'Unsigned macOS installers built by CI.\n\n- **Apple Silicon (M1/M2/M3/M4):** the `arm64` .dmg\n- **Intel Macs:** the `x64` .dmg\n\nFirst launch: right-click the app → **Open** to bypass Gatekeeper (the app is not code-signed).'

@@ -44,7 +44,20 @@ export function TerminalPanel({ panel }: { panel: Panel }) {
   })
 
   useEffect(() => {
-    if (props.tabs && props.tabs.length > 0) return
+    if (props.tabs && props.tabs.length > 0) {
+      // Already on the tabs model. Scrub any leftover legacy single-terminal fields an older save may
+      // still carry ALONGSIDE the tabs: a lingering panel-level agentSession is a phantom source that
+      // a brand-new "+" tab would resume (the real one now lives on tab[0]). One-time cleanup.
+      if (props.cwd || props.shell || props.fontSize !== undefined || props.agentSession) {
+        updateProps<'terminal'>(panel.id, {
+          cwd: undefined,
+          shell: undefined,
+          fontSize: undefined,
+          agentSession: undefined,
+        })
+      }
+      return
+    }
     if (!firstIdRef.current) return
     updateProps<'terminal'>(panel.id, {
       tabs: [synthTab()],

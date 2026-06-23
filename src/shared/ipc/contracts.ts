@@ -54,6 +54,11 @@ export interface TerminalExitEvent {
 /** A local dev-server URL (localhost:PORT, …) printed in this terminal's output. */
 export interface DevUrlDetectedEvent {
   ptyId: string
+  /**
+   * Stable owner of the PTY. Including it avoids a renderer-startup race where output can arrive
+   * before the renderer has populated its transient ptyId → terminal-tab map.
+   */
+  panelId: string
   /** Normalized http(s) URL, e.g. "http://localhost:5173". */
   url: string
 }

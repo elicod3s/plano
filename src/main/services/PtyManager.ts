@@ -594,7 +594,7 @@ export class PtyManager {
     // Watch output for a local dev-server URL → renderer opens it inside PLANO (only when the
     // terminal is on-screen; we don't auto-open browsers for background-space terminals).
     this.deps.devUrls.register(ptyId, (url) => {
-      if (entry.attached) this.deps.post(CH.terminalUrlDetected, { ptyId, url })
+      if (entry.attached) this.deps.post(CH.terminalUrlDetected, { ptyId, panelId: entry.panelId, url })
     })
 
     pty.onData((data) => {

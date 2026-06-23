@@ -10,6 +10,7 @@ import { WorkspaceGitChip } from '@/chrome/WorkspaceGitChip'
 import { AgentManager } from '@/chrome/AgentManager'
 import { TimeChip } from '@/chrome/TimeChip'
 import { cn } from '@/lib/cn'
+import { IS_MAC } from '@/lib/hotkeys'
 
 export function TopBar() {
   const [maximized, setMaximized] = useState(false)
@@ -20,7 +21,13 @@ export function TopBar() {
 
   return (
     <header
-      className="app-drag relative z-30 flex h-11 shrink-0 items-center gap-3 border-b border-subtle px-3"
+      className={cn(
+        'app-drag relative z-30 flex h-11 shrink-0 items-center gap-3 border-b border-subtle pr-3',
+        // macOS draws native traffic-light controls on the LEFT (titleBarStyle:'hidden' +
+        // trafficLightPosition); reserve room for them so the brand isn't tucked under them.
+        // Windows/Linux are frameless with our own controls on the right → normal left padding.
+        IS_MAC ? 'pl-20' : 'pl-3',
+      )}
       style={{ background: 'color-mix(in srgb, var(--bg-base) 82%, transparent)', backdropFilter: 'blur(12px)' }}
     >
       {/* brand */}
@@ -50,37 +57,42 @@ export function TopBar() {
           onClick={() => useSettingsStore.getState().setOpen(true)}
         />
 
-        <div className="ml-1 flex items-center">
-          <WindowButton icon="Minus" label="Minimize" onClick={() => window.plano.window.minimize()} />
-          <WindowButton
-            icon={maximized ? 'Copy' : 'Square'}
-            label="Maximize"
-            onClick={() => {
-              window.plano.window.toggleMaximize()
-              setMaximized((m) => !m)
-            }}
-          />
-          <WindowButton
-            icon="X"
-            label="Close"
-            danger
-            onClick={() => {
-              const { warnBeforeQuit } = useSettingsStore.getState().settings.general
-              if (!warnBeforeQuit) {
-                window.plano.window.close()
-                return
-              }
-              void confirm({
-                title: 'Quit PLANO',
-                message: 'Quit PLANO? Your workspace is autosaved.',
-                confirmLabel: 'Quit',
-                danger: true,
-              }).then((ok) => {
-                if (ok) window.plano.window.close()
-              })
-            }}
-          />
-        </div>
+        {/* Custom window controls — Windows/Linux only. On macOS the native traffic lights
+            (drawn by Electron at trafficLightPosition) own min/zoom/close, so we hide ours to
+            avoid duplicate controls. */}
+        {!IS_MAC && (
+          <div className="ml-1 flex items-center">
+            <WindowButton icon="Minus" label="Minimize" onClick={() => window.plano.window.minimize()} />
+            <WindowButton
+              icon={maximized ? 'Copy' : 'Square'}
+              label="Maximize"
+              onClick={() => {
+                window.plano.window.toggleMaximize()
+                setMaximized((m) => !m)
+              }}
+            />
+            <WindowButton
+              icon="X"
+              label="Close"
+              danger
+              onClick={() => {
+                const { warnBeforeQuit } = useSettingsStore.getState().settings.general
+                if (!warnBeforeQuit) {
+                  window.plano.window.close()
+                  return
+                }
+                void confirm({
+                  title: 'Quit PLANO',
+                  message: 'Quit PLANO? Your workspace is autosaved.',
+                  confirmLabel: 'Quit',
+                  danger: true,
+                }).then((ok) => {
+                  if (ok) window.plano.window.close()
+                })
+              }}
+            />
+          </div>
+        )}
       </div>
     </header>
   )
