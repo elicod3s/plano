@@ -54,8 +54,14 @@ jobs:
       - name: Rebuild node-pty against Electron's ABI
         run: npm run rebuild
 
-      - name: Build renderer/main and package the .dmg
-        run: npm run dist:mac
+      - name: Generate app icons
+        run: npm run icons
+
+      - name: Build main + renderer bundles
+        run: npm run build
+
+      - name: Package the .dmg (no publish — the release job handles that)
+        run: npx --no-install electron-builder --mac --publish never
         env:
           # No Apple Developer certs in CI → skip code signing so the build doesn't fail.
           # Produces an UNSIGNED installer (works via right-click → Open on first launch).
