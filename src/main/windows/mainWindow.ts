@@ -74,6 +74,7 @@ export function createMainWindow(): BrowserWindow {
     if (!isDev && !url.startsWith('file://')) event.preventDefault()
   })
 
+  grantAppMediaPermission(win)
   hardenWebviews(win)
 
   if (is.dev && process.env.ELECTRON_RENDERER_URL) {
@@ -99,6 +100,22 @@ export function createMainWindow(): BrowserWindow {
   }
 
   return win
+}
+
+/**
+ * Allow the microphone for the app's OWN renderer (the Odla voice assistant uses getUserMedia).
+ * This is the default session, which only ever hosts PLANO's trusted, sandboxed, local content —
+ * never remote pages (browser panels run in the separate, locked-down BROWSER_PARTITION). Media is
+ * granted explicitly so the mic works on every machine regardless of Electron's version default;
+ * other permissions on this session keep Electron's standard behavior.
+ */
+function grantAppMediaPermission(win: BrowserWindow): void {
+  const ses = win.webContents.session
+  // The app shell is fully trusted (sandboxed, local-only); allowing its permission requests
+  // matches Electron's permissive default while GUARANTEEING the microphone (media) is granted for
+  // Odla. Remote/web content never runs here — it lives in the locked-down BROWSER_PARTITION.
+  ses.setPermissionRequestHandler((_wc, _permission, callback) => callback(true))
+  ses.setPermissionCheckHandler(() => true)
 }
 
 /**

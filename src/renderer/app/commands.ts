@@ -19,6 +19,7 @@ import { openFolder, saveCurrent, createNewSpace, closeWorkspace } from '@/app/w
 import { useUiStore } from '@/stores/useUiStore'
 import { useViewportStore } from '@/stores/useViewportStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
+import { voiceController } from '@/voice/controller'
 import { parseCombo, type ParsedCombo } from '@/lib/keymap'
 
 export type CommandGroup = 'Create' | 'Workspace' | 'View' | 'App'
@@ -57,7 +58,6 @@ const CREATE_ORDER: ReadonlyArray<readonly [PanelType, string]> = [
   ['todo', 'Alt+L'],
   ['pomodoro', 'Alt+P'],
   ['sticky', 'Alt+S'],
-  ['voice', 'Alt+V'],
   ['region', 'Alt+R'],
   ['label', 'Alt+X'],
 ]
@@ -156,6 +156,16 @@ const actionCommands: Command[] = [
     group: 'App',
     bindings: [{ keys: 'Ctrl+,', global: true }],
     run: () => useSettingsStore.getState().setOpen(true),
+  },
+  {
+    // The voice assistant's primary trigger is HOLDing the push-to-talk key (Settings → Voice);
+    // this is the tap-to-toggle entry point for the palette/dock and the Alt+V shortcut.
+    id: 'voice:toggle',
+    label: 'Odla — Voice Assistant',
+    icon: 'Mic',
+    group: 'App',
+    bindings: [{ keys: 'Alt+V', global: true }],
+    run: () => voiceController.toggle(),
   },
 ]
 

@@ -17,6 +17,7 @@ import { SettingsModal } from '@/chrome/settings/SettingsModal'
 import { ConfirmDialog } from '@/chrome/ConfirmDialog'
 import { TerminalCloseDialog } from '@/chrome/TerminalCloseDialog'
 import { EmptyState } from '@/chrome/EmptyState'
+import { VoiceOverlay } from '@/voice/VoiceOverlay'
 import { openFilesPanel } from '@/app/actions'
 import { restoreWorkspaces, openWorkspaceFolder, flushWorkspaceSync } from '@/app/workspaceActions'
 import { scheduleAutosave, cancelAutosave } from '@/app/autosave'
@@ -97,6 +98,7 @@ export function App() {
       <SettingsModal />
       <ConfirmDialog />
       <TerminalCloseDialog />
+      <VoiceOverlay />
     </div>
   )
 }

@@ -7,7 +7,7 @@
  * Grouped by the Settings UI sections so a section maps to exactly one key here.
  */
 
-export const SETTINGS_VERSION = 3
+export const SETTINGS_VERSION = 7
 
 // ── enums (kept as string unions so they round-trip through JSON untouched) ──
 export type ThemeId =
@@ -126,6 +126,53 @@ export interface AdvancedSettings {
   hardwareAcceleration: boolean
 }
 
+/** Optional language hint for the (multilingual) voice model. 'auto' lets it detect es/en/… itself. */
+export type VoiceLanguage = 'auto' | 'es' | 'en'
+
+export interface VoiceSettings {
+  /** Master switch for the global voice orchestrator "Odla" (overlay aura + push-to-talk key). */
+  enabled: boolean
+  /** Hold-to-talk combo, parsed by the keymap (e.g. "Ctrl+Shift+Space"). Held = listening. */
+  pushToTalkKey: string
+  /**
+   * Auto-send: run the command the moment you STOP talking (end-of-speech detection), without needing
+   * to release the key — feels instant + hands-free. Releasing the key still fires immediately. When
+   * off, it waits for release / a second tap.
+   */
+  autoSend: boolean
+  /**
+   * Which microphone to capture from. '' = auto (prefer a real physical mic, avoiding virtual/router
+   * devices like SteelSeries Sonar / VoiceMeeter / Stereo Mix, whose AI noise-gates can silence
+   * speech). Otherwise a specific mediaDevices deviceId chosen in Settings → Odla.
+   */
+  inputDeviceId: string
+  /** Spoken-command language hint; the bundled Parakeet model is multilingual (es + en + …). */
+  language: VoiceLanguage
+  /** Speak short confirmations back via the OS speech synthesizer. */
+  speakResponses: boolean
+  /**
+   * Gemini is the primary intent "engine" — it turns free speech into actions, so Odla can open and
+   * move anything you describe. When it's off / unreachable / slow, the built-in local fuzzy grammar
+   * takes over (so voice never breaks). The key lives here and the call is made from the main process.
+   */
+  gemini: {
+    enabled: boolean
+    apiKey: string
+    /** Cheapest + fastest current model; flash-lite is plenty for command parsing. */
+    model: string
+  }
+  /**
+   * OPTIONAL extra free-form fallback (an OpenAI-compatible endpoint, e.g. a local Ollama). Off by
+   * default; the fuzzy grammar is the real fallback when Gemini is unavailable.
+   */
+  llmFallback: {
+    enabled: boolean
+    /** OpenAI-compatible base URL; defaults to a local Ollama so nothing leaves the machine. */
+    baseUrl: string
+    model: string
+  }
+}
+
 export interface PlanoSettings {
   version: number
   general: GeneralSettings
@@ -136,6 +183,7 @@ export interface PlanoSettings {
   browser: BrowserSettings
   privacy: PrivacySettings
   advanced: AdvancedSettings
+  voice: VoiceSettings
 }
 
 export const DEFAULT_SETTINGS: PlanoSettings = {
@@ -200,6 +248,27 @@ export const DEFAULT_SETTINGS: PlanoSettings = {
   advanced: {
     hardwareAcceleration: true,
   },
+  voice: {
+    enabled: true,
+    pushToTalkKey: 'Ctrl+Shift+Space',
+    autoSend: true,
+    inputDeviceId: '',
+    language: 'auto',
+    speakResponses: false,
+    gemini: {
+      enabled: true,
+      // Never hardcode a key here — it would ship inside the installer's asar. The key lives only in
+      // the user's local settings.json (userData) / the Settings → Odla field. Empty = Gemini stays
+      // dormant and the local fuzzy engine handles everything (still fully functional).
+      apiKey: '',
+      model: 'gemini-3.1-flash-lite',
+    },
+    llmFallback: {
+      enabled: false,
+      baseUrl: 'http://localhost:11434/v1',
+      model: 'llama3.1',
+    },
+  },
 }
 
 /**
@@ -225,6 +294,7 @@ export function mergeSettings(stored: unknown): PlanoSettings {
     browser: group('browser'),
     privacy: group('privacy'),
     advanced: group('advanced'),
+    voice: group('voice'),
   }
   // v2→v3: PLANO now ships Deska's airier terminal rhythm (lineHeight 1.4), made safe by turning
   // customGlyphs OFF in the engine so box-drawing/block-art tiles from the font instead of tearing.
@@ -236,6 +306,12 @@ export function mergeSettings(stored: unknown): PlanoSettings {
   // Keep terminal lineHeight in a sane band. With customGlyphs off the glyphs carry their own metrics,
   // so values up to ~2 only add leading without tearing; clamp out-of-range stored/edited values on load.
   merged.terminal.lineHeight = Math.min(2.0, Math.max(1.0, merged.terminal.lineHeight || 1.4))
+  // Browser media-device aliases are not real microphones. They can point at virtual routers like
+  // SteelSeries Sonar and break Auto by pinning capture to a silent default. Empty string is Auto.
+  if (merged.voice.inputDeviceId === 'default' || merged.voice.inputDeviceId === 'communications') {
+    merged.voice.inputDeviceId = ''
+  }
+
   return merged
 }
 

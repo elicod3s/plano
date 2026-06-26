@@ -69,6 +69,8 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
   const toggleLock = usePanelStore((s) => s.toggleLock)
   const isFront = usePanelStore((s) => s.zCounter === panel.z)
   const snapping = useUiStore((s) => s.snapping)
+  // True briefly while Odla auto-arranges the canvas — eases every panel to its new slot.
+  const arranging = useUiStore((s) => s.arranging)
   const locked = !!panel.locked
 
   // A terminal panel hosts one or more terminals (tabs); the chrome (agent morph, title, controls)
@@ -364,12 +366,13 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
     height: panel.rect.height,
     transform: `translate3d(${panel.rect.x}px, ${panel.rect.y}px, 0)`,
     zIndex: zIndex ?? panel.z,
-    // Only the one-shot tile-drop eases; live dragging stays instant (no transition) so the
-    // panel tracks the cursor 1:1.
-    transition: settling
-      ? 'transform 220ms var(--ease-settle), width 220ms var(--ease-settle), height 220ms var(--ease-settle)'
-      : undefined,
-    willChange: settling ? 'transform, width, height' : undefined,
+    // The one-shot tile-drop AND Odla's auto-arrange ease; live dragging stays instant (no
+    // transition) so the panel tracks the cursor 1:1.
+    transition:
+      settling || arranging
+        ? 'transform 320ms var(--ease-settle), width 320ms var(--ease-settle), height 320ms var(--ease-settle)'
+        : undefined,
+    willChange: settling || arranging ? 'transform, width, height' : undefined,
   }
   if (agentAccent) (positionStyle as Record<string, string>)['--agent-accent'] = agentAccent
 
@@ -438,6 +441,41 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
           ))}
         </span>
         <span className="h-1.5 w-1.5 shrink-0 rounded-pill" style={{ background: statusColor }} />
+
+        {/* Persistent terminal index — TYPESET, not badged. A hairline mono "#" sentinel + a
+            tabular numeral set directly on the header surface (no box, no fill), so it reads as
+            integral chrome rather than a stuck-on pill. Shown for EVERY terminal, even in agent
+            mode (sits before the AgentTitle), so the user — and Odla — can always say "focus
+            terminal 2". Monochrome by design: the FRONT-most terminal is promoted by WEIGHT and
+            CONTRAST only — the numeral goes white/semibold and the "#" brightens — so the active
+            one reads at a glance without competing with the state dot beside it. The leading "#"
+            is dropped for screen readers (the aria-label already says "Terminal N"). */}
+        {panel.type === 'terminal' &&
+          typeof (panel.props as TerminalProps).terminalNumber === 'number' && (
+            <span
+              title={`Terminal ${(panel.props as TerminalProps).terminalNumber}`}
+              aria-label={`Terminal ${(panel.props as TerminalProps).terminalNumber}`}
+              className="inline-flex shrink-0 select-none items-baseline font-mono leading-none transition-colors duration-150"
+            >
+              <span
+                aria-hidden
+                className={cn(
+                  'text-[10px] tracking-label transition-colors duration-150',
+                  isFront ? 'text-text-tertiary' : 'text-text-quaternary',
+                )}
+              >
+                #
+              </span>
+              <span
+                className={cn(
+                  'min-w-[0.9ch] text-center text-[13px] tabular-nums transition-colors duration-150',
+                  isFront ? 'font-semibold text-text-primary' : 'font-medium text-text-secondary',
+                )}
+              >
+                {(panel.props as TerminalProps).terminalNumber}
+              </span>
+            </span>
+          )}
 
         {agentActive ? (
           // Agent detected → Warp-style identity strip (brand + first prompt + Working/Done).

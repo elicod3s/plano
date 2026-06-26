@@ -40,6 +40,7 @@ export function TerminalPanel({ panel }: { panel: Panel }) {
     cwd: props.cwd,
     shell: props.shell,
     fontSize: props.fontSize,
+    bootCommand: props.bootCommand,
     agentSession: props.agentSession,
   })
 
@@ -48,11 +49,12 @@ export function TerminalPanel({ panel }: { panel: Panel }) {
       // Already on the tabs model. Scrub any leftover legacy single-terminal fields an older save may
       // still carry ALONGSIDE the tabs: a lingering panel-level agentSession is a phantom source that
       // a brand-new "+" tab would resume (the real one now lives on tab[0]). One-time cleanup.
-      if (props.cwd || props.shell || props.fontSize !== undefined || props.agentSession) {
+      if (props.cwd || props.shell || props.fontSize !== undefined || props.agentSession || props.bootCommand) {
         updateProps<'terminal'>(panel.id, {
           cwd: undefined,
           shell: undefined,
           fontSize: undefined,
+          bootCommand: undefined,
           agentSession: undefined,
         })
       }
@@ -65,10 +67,28 @@ export function TerminalPanel({ panel }: { panel: Panel }) {
       cwd: undefined,
       shell: undefined,
       fontSize: undefined,
+      bootCommand: undefined,
       agentSession: undefined,
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [panel.id, hasTabs])
+
+  // Assign a stable, human-facing terminal number (smallest free integer) on first mount, so each
+  // terminal has a visible identifier the user — and Odla — can refer to ("focus terminal 2").
+  useEffect(() => {
+    if (typeof props.terminalNumber === 'number') return
+    const used = new Set<number>()
+    for (const p of Object.values(usePanelStore.getState().panels)) {
+      if (p.type === 'terminal' && p.id !== panel.id) {
+        const n = (p.props as TerminalProps).terminalNumber
+        if (typeof n === 'number') used.add(n)
+      }
+    }
+    let n = 1
+    while (used.has(n)) n++
+    updateProps<'terminal'>(panel.id, { terminalNumber: n })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [panel.id])
 
   const tabs = hasTabs ? props.tabs! : [synthTab()]
   // Resolve the active terminal, tolerating a stale/absent activeTabId.

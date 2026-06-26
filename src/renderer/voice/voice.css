@@ -1,0 +1,354 @@
+/**
+ * Odla's aura — a full-window glow that ignites while listening and breathes with your voice.
+ *
+ * PERFORMANCE: the only thing that changes per audio frame is `opacity` (and a small `transform`),
+ * both compositor-only — so the giant blur is rasterized ONCE and never recomputed. (The previous
+ * version animated a full-screen blurred box-shadow every frame, which janked the whole app.)
+ * Intensity comes from the `--voice-energy` CSS variable the controller writes each frame; color is
+ * the accent token. The global reduced-motion rules damp the pulse automatically.
+ */
+
+.voice-aura {
+  --va: var(--accent-primary);
+  position: fixed;
+  inset: 0;
+  z-index: 45;
+  pointer-events: none;
+  /* display:none when idle so there is NO permanent full-screen compositing layer over the canvas
+     (a leftover GPU layer was leaving the workspace blank until the first repaint). */
+  display: none;
+  contain: layout paint style;
+}
+.voice-aura.active {
+  display: block;
+  animation: voice-aura-in 220ms var(--ease-settle);
+}
+.voice-aura.error {
+  --va: var(--destructive);
+}
+@keyframes voice-aura-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* The voice-reactive glow: a soft accent bloom rising from the bottom-centre (where the command bar
+   lives) + a gentle rim. Its OPACITY follows the heavily-smoothed mic level and GLIDES (long ease-out),
+   so it swells and settles like breathing — never a strobe/flicker. Compositor-only (opacity + scale). */
+.voice-aura__glow {
+  position: absolute;
+  inset: 0;
+  /* Bottom-only bloom — no inset rim, so the top edge stays clean (no weird border / no conflict). */
+  background: radial-gradient(115% 78% at 50% 128%, color-mix(in srgb, var(--va) 36%, transparent) 0%, transparent 60%);
+  opacity: calc(0.26 + var(--voice-energy, 0) * 0.4);
+  transform: scale(calc(1 + var(--voice-energy, 0) * 0.012));
+  transform-origin: 50% 100%;
+  transition: opacity 220ms ease-out, transform 260ms ease-out;
+}
+/* A slow, always-on ambient breath UNDER the reactive glow, so the aura feels alive and calm even in
+   silence — its own layer, so it never fights the energy-driven opacity above. */
+.voice-aura__glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(110% 92% at 50% 122%, color-mix(in srgb, var(--va) 22%, transparent) 0%, transparent 55%);
+  transform-origin: 50% 100%;
+  animation: voice-aura-breath 5s ease-in-out infinite;
+  will-change: opacity, transform;
+}
+@keyframes voice-aura-breath {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: scale(0.99);
+  }
+  50% {
+    opacity: 0.5;
+    transform: scale(1.04);
+  }
+}
+.voice-aura.active .voice-aura__glow {
+  will-change: opacity, transform;
+}
+
+/* While the model is thinking (no live energy), a calm opacity heartbeat on the glow. */
+.voice-aura.thinking .voice-aura__glow {
+  animation: voice-breathe 1.5s ease-in-out infinite;
+}
+@keyframes voice-breathe {
+  0%,
+  100% {
+    opacity: 0.32;
+  }
+  50% {
+    opacity: 0.62;
+  }
+}
+
+/* ── The command bar (bottom-center): a mic button + a "speak or type" input ──
+   One clean, unified affordance — talk to Odla OR type the same command. Senior-grade: a single
+   focusable bar, the mic to its left, a transient status line above for the live transcript/result. */
+.voice-bar {
+  --va: var(--accent-primary);
+  position: fixed;
+  left: 50%;
+  bottom: 92px;
+  transform: translateX(-50%);
+  z-index: 46;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 10px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+  border: 1px solid var(--border-default);
+  box-shadow: var(--shadow-popover);
+  backdrop-filter: blur(14px);
+  transition: opacity 200ms var(--ease-settle), border-color 200ms var(--ease-settle),
+    box-shadow 200ms var(--ease-settle);
+}
+.voice-bar.idle {
+  opacity: 0.72;
+}
+.voice-bar.idle:hover,
+.voice-bar:focus-within {
+  opacity: 1;
+}
+.voice-bar.listening {
+  border-color: color-mix(in srgb, var(--accent-primary) 55%, var(--border-strong));
+  box-shadow: var(--shadow-popover), 0 0 0 1px color-mix(in srgb, var(--accent-primary) 30%, transparent);
+}
+.voice-bar.error {
+  --va: var(--destructive);
+  border-color: var(--destructive-border);
+}
+
+/* The mic button (round); shows the live equalizer while listening, an icon otherwise. */
+.voice-mic-btn {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--text-primary);
+  cursor: pointer;
+  transition: background 150ms var(--ease-settle), transform 150ms var(--ease-settle);
+}
+.voice-mic-btn:hover {
+  background: var(--accent-soft-strong);
+}
+.voice-mic-btn:active {
+  transform: scale(0.94);
+}
+.voice-bar.listening .voice-mic-btn {
+  background: color-mix(in srgb, var(--accent-primary) 24%, transparent);
+}
+.voice-bar.error .voice-mic-btn {
+  color: var(--destructive-hover);
+}
+
+/* The type-a-command input. */
+.voice-input {
+  flex: 1 1 auto;
+  width: 240px;
+  min-width: 180px;
+  max-width: 380px;
+  height: 100%;
+  padding: 0 6px;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 13px;
+}
+.voice-input::placeholder {
+  color: var(--text-quaternary);
+}
+.voice-input:disabled {
+  color: var(--text-secondary);
+}
+
+/* Keyboard hint pill (↵) at the far right when there's text to submit. */
+.voice-enter {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-quaternary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-xs);
+  padding: 1px 5px;
+}
+
+/* Transient status line ABOVE the bar — live transcript while speaking, then the result/error. */
+.voice-status {
+  position: fixed;
+  left: 50%;
+  bottom: 146px;
+  transform: translateX(-50%);
+  z-index: 46;
+  max-width: 60vw;
+  padding: 6px 13px;
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--surface-3) 94%, transparent);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-popover);
+  backdrop-filter: blur(12px);
+  color: var(--text-secondary);
+  font-family: var(--font-display);
+  font-size: 12.5px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  animation: voice-aura-in 180ms var(--ease-settle);
+}
+.voice-status strong {
+  color: var(--text-primary);
+  font-weight: 500;
+}
+.voice-status.error {
+  color: var(--destructive-hover);
+  border-color: var(--destructive-border);
+}
+
+/* The leading disc inside the mic button (icon / equalizer). */
+.voice-mic {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+  color: var(--text-primary);
+}
+
+/* Live equalizer — five bars that scale to the voice frequency bands (compositor-only transform). */
+.voice-eq {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  width: 22px;
+  height: 18px;
+}
+.voice-eq i {
+  display: block;
+  width: 3px;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent-primary);
+  transform-origin: center;
+  transform: scaleY(calc(0.16 + var(--b, 0) * 0.84));
+  transition: transform 70ms linear;
+  opacity: 0.95;
+}
+/* Bind each bar to its frequency band directly (no inline indirection) so it reliably dances. */
+.voice-eq i:nth-child(1) {
+  --b: var(--voice-b0);
+}
+.voice-eq i:nth-child(2) {
+  --b: var(--voice-b1);
+}
+.voice-eq i:nth-child(3) {
+  --b: var(--voice-b2);
+}
+.voice-eq i:nth-child(4) {
+  --b: var(--voice-b3);
+}
+.voice-eq i:nth-child(5) {
+  --b: var(--voice-b4);
+}
+
+/* ── "Thinking" — one clean, perfectly-centred breathing circle in the mic disc ──────────────────
+   A steady accent core (opacity breath) + a soft halo that breathes around it. The halo is pinned to
+   the core's centre (left/top 50% + negative margin), and the core animates opacity only — so nothing
+   ever drifts off-centre. Single accent, GPU-cheap, damped under reduced-motion. */
+.voice-bar.thinking {
+  border-color: color-mix(in srgb, var(--accent-primary) 40%, var(--border-strong));
+  box-shadow: var(--shadow-popover), 0 0 0 1px color-mix(in srgb, var(--accent-primary) 22%, transparent);
+}
+.voice-bar.thinking .voice-mic-btn {
+  background: color-mix(in srgb, var(--accent-primary) 20%, transparent);
+}
+.voice-think-dot {
+  position: relative;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  animation: odla-core 1.4s ease-in-out infinite;
+}
+.voice-think-dot::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 22px;
+  height: 22px;
+  margin: -11px 0 0 -11px;
+  border-radius: 50%;
+  background: radial-gradient(circle, color-mix(in srgb, var(--accent-primary) 36%, transparent) 0%, transparent 65%);
+  opacity: 0.4;
+  animation: odla-halo 1.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes odla-core {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes odla-halo {
+  0%,
+  100% {
+    transform: scale(0.5);
+    opacity: 0.18;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+}
+
+/* "Done" — a confident little pop on the status word and the mic disc; the Check sits crisp + centred. */
+.voice-done {
+  display: inline-block;
+  animation: odla-done 300ms var(--ease-settle) both;
+}
+.voice-mic.done {
+  animation: odla-done 300ms var(--ease-settle) both;
+}
+@keyframes odla-done {
+  0% {
+    transform: scale(0.82);
+    opacity: 0;
+  }
+  60% {
+    transform: scale(1.1);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .voice-think-dot,
+  .voice-think-dot::after,
+  .voice-done,
+  .voice-mic.done {
+    animation: none;
+  }
+}
+

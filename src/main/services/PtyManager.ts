@@ -275,15 +275,27 @@ function encodePwshCommand(script: string): string {
  * quoting can't bite) and we keep the session interactive with -NoExit. Other shells handle UTF-8
  * and history natively → no args.
  */
-function buildShellArgs(shell: string, predictiveHistory: boolean): string[] {
+function buildShellArgs(shell: string, predictiveHistory: boolean, bootCommand?: string): string[] {
   const base = (shell.split(/[\\/]/).pop() || shell).toLowerCase().replace(/\.exe$/, '')
   if (base === 'powershell' || base === 'pwsh') {
     const core = predictiveHistory ? `${PS_UTF8_INIT}\n${PS_PREDICTIVE_INIT}` : PS_UTF8_INIT
     // OSC-7 cwd reporting is always on (independent of predictive history) so the git badge tracks `cd`.
-    const script = `${core}\n${PS_OSC7_CWD_INIT}`
+    // A boot command is appended LAST so it runs the instant the (interactive) shell is set up — far
+    // faster than waiting for the first prompt + a renderer round-trip. -NoExit keeps the session
+    // alive after the agent exits, dropping the user at a normal prompt.
+    const script = bootCommand
+      ? `${core}\n${PS_OSC7_CWD_INIT}\n${bootCommand}`
+      : `${core}\n${PS_OSC7_CWD_INIT}`
     return ['-NoLogo', '-NoExit', '-EncodedCommand', encodePwshCommand(script)]
   }
   return []
+}
+
+/** Does this shell receive its startup script via -EncodedCommand (so a boot command is injected
+ *  there) vs. needing the boot command written to its stdin after spawn (bash/zsh/cmd)? */
+function shellTakesArgsScript(shell: string): boolean {
+  const base = (shell.split(/[\\/]/).pop() || shell).toLowerCase().replace(/\.exe$/, '')
+  return base === 'powershell' || base === 'pwsh'
 }
 
 /**
@@ -518,7 +530,12 @@ export class PtyManager {
     }
 
     const cwd = resolveCwd(req.cwd, req.autoDetectRoot)
-    const predictive = req.predictiveHistory ?? true
+    const boot = req.bootCommand?.trim() || undefined
+    // A boot (agent launch) skips the predictive-history init: it's the slowest part of PowerShell
+    // startup (a PSReadLine 2.1 module import on 5.1) and is irrelevant while the agent owns the
+    // shell — so the agent appears noticeably faster. The shell keeps it for normal terminals.
+    const predictive = boot ? false : (req.predictiveHistory ?? true)
+    let usedShell = shell
     const spawnOpts = {
       name: 'xterm-256color',
       cols: Math.max(2, req.cols || 80),
@@ -531,7 +548,7 @@ export class PtyManager {
 
     let usedShellName = shellName
     let fallbackNotice = ''
-    let spawned = safeSpawn(mod, shell, buildShellArgs(shell, predictive), spawnOpts)
+    let spawned = safeSpawn(mod, shell, buildShellArgs(shell, predictive, boot), spawnOpts)
 
     // A requested shell that can't launch (missing pwsh, a bad explicit shell path, …) must not
     // kill the terminal: retry once with the platform default so the user still gets a working
@@ -539,10 +556,11 @@ export class PtyManager {
     if (spawned instanceof Error) {
       const fallback = defaultShell()
       if (fallback.toLowerCase() !== shell.toLowerCase()) {
-        const retry = safeSpawn(mod, fallback, buildShellArgs(fallback, predictive), spawnOpts)
+        const retry = safeSpawn(mod, fallback, buildShellArgs(fallback, predictive, boot), spawnOpts)
         if (!(retry instanceof Error)) {
           fallbackNotice = shellFellBackMessage(shell, fallback, spawned.message)
           usedShellName = (fallback.split(/[\\/]/).pop() || fallback).replace(/\.exe$/i, '')
+          usedShell = fallback
           spawned = retry
         }
       }
@@ -570,6 +588,22 @@ export class PtyManager {
       bufferLen: 0,
     }
     this.entries.set(ptyId, entry)
+
+    // Shells that don't take a startup script via args (bash/zsh/cmd) get the boot command written to
+    // stdin once the shell has had a moment to reach its first prompt. (PowerShell already had it
+    // injected into -EncodedCommand above, so it ran instantly with the init.)
+    if (boot && !shellTakesArgsScript(usedShell)) {
+      setTimeout(() => {
+        const e = this.entries.get(ptyId)
+        if (e && !e.exited) {
+          try {
+            e.pty.write(`${boot}\r`)
+          } catch {
+            /* shell may have exited */
+          }
+        }
+      }, 500)
+    }
 
     // Surface the fallback note first (buffered too, so a reattach from another space still shows it).
     if (fallbackNotice) {

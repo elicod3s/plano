@@ -12,6 +12,7 @@ export type SettingsSection =
   | 'terminal'
   | 'canvas'
   | 'browser'
+  | 'voice'
   | 'privacy'
   | 'advanced'
 

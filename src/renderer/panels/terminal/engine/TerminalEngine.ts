@@ -546,6 +546,9 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     const savedAgent = t0?.agentSession ?? legacy?.agentSession
     const termCwd = savedAgent?.cwd ?? t0?.cwd ?? legacy?.cwd
     const cwd = termCwd ?? useWorkspaceStore.getState().folderPath ?? undefined
+    // One-shot launch command (e.g. `claude` from a voice command). Runs once the shell is ready;
+    // skipped when we're resuming a saved agent (that flow drives its own command).
+    const boot = t0?.bootCommand ?? legacy?.bootCommand
 
     void window.plano.terminal
       .create({
@@ -556,6 +559,9 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
         autoDetectRoot: !termCwd,
         shell: t0?.shell ?? legacy?.shell ?? resolveShell(ts0),
         predictiveHistory: ts0.predictiveHistory,
+        // Launch an agent (voice "open Claude Code") via the shell's startup so it appears instantly.
+        // Skipped when resuming a saved agent — that flow drives its own resume command below.
+        bootCommand: savedAgent ? undefined : boot,
       })
       .then((res) => {
         if (disposed) {
@@ -575,6 +581,14 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
         // The PTY was created at the pre-fit 80×24 default; now that ptyId exists, publish the real
         // fitted grid (the mount-time fit ran before ptyId was set, so its publishSize was a no-op).
         requestFit()
+
+        // The boot command (agent launch) was injected into the shell's startup by main, so it's
+        // already running — just clear the one-shot prop so a reattach / workspace reopen never
+        // re-launches it. (Resuming a saved agent is handled separately, below.)
+        if (boot) {
+          if (t0) usePanelStore.getState().updateTerminalTab(panelId, termId, { bootCommand: undefined })
+          else usePanelStore.getState().updateProps<'terminal'>(panelId, { bootCommand: undefined })
+        }
 
         // Reopen the agent conversation this terminal last had (gated by the setting). Only on a true
         // fresh spawn — reattach never resumes. Fully guarded (cwd match + on-disk existence) inside.

@@ -9,6 +9,9 @@ dist/
 release/
 *.tsbuildinfo
 
+# Bundled voice model (downloaded by scripts/fetch-model.mjs, shipped via extraResources — not committed)
+resources/models/
+
 # Native build artifacts
 build/Release/
 *.node

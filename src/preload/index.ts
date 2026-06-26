@@ -25,6 +25,8 @@ import type {
   TimeAddActiveRequest,
   GitStatusRequest,
   WorkspaceStateSaveRequest,
+  VoiceTranscribeRequest,
+  VoiceInterpretRequest,
 } from '@shared/ipc/contracts'
 
 function subscribe<T>(channel: string, cb: (payload: T) => void): () => void {
@@ -97,6 +99,12 @@ const api: PlanoApi = {
   settings: {
     get: () => ipcRenderer.invoke(CH.settingsGet),
     save: (settings) => ipcRenderer.invoke(CH.settingsSave, settings),
+  },
+  voice: {
+    status: () => ipcRenderer.invoke(CH.voiceStatus),
+    prepare: () => ipcRenderer.invoke(CH.voicePrepare),
+    transcribe: (req: VoiceTranscribeRequest) => ipcRenderer.invoke(CH.voiceTranscribe, req),
+    interpret: (req: VoiceInterpretRequest) => ipcRenderer.invoke(CH.voiceInterpret, req),
   },
   session: {
     get: () => ipcRenderer.invoke(CH.sessionGet),

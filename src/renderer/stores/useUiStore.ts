@@ -12,6 +12,9 @@ interface UiState {
   commandPaletteOpen: boolean
   minimapVisible: boolean
   snapping: boolean
+  /** True for a short window while panels are being auto-arranged, so PanelFrame eases each panel
+   *  to its new slot (tile-drop transition) instead of snapping instantly. */
+  arranging: boolean
 
   openContextMenu: (screen: Point, world: Point) => void
   closeContextMenu: () => void
@@ -21,6 +24,7 @@ interface UiState {
   setMinimap: (visible: boolean) => void
   toggleSnapping: () => void
   setSnapping: (on: boolean) => void
+  setArranging: (on: boolean) => void
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -28,6 +32,7 @@ export const useUiStore = create<UiState>((set) => ({
   commandPaletteOpen: false,
   minimapVisible: true,
   snapping: true,
+  arranging: false,
 
   openContextMenu: (screen, world) => set({ contextMenu: { open: true, screen, world } }),
   closeContextMenu: () =>
@@ -38,4 +43,5 @@ export const useUiStore = create<UiState>((set) => ({
   setMinimap: (minimapVisible) => set({ minimapVisible }),
   toggleSnapping: () => set((s) => ({ snapping: !s.snapping })),
   setSnapping: (snapping) => set({ snapping }),
+  setArranging: (arranging) => set({ arranging }),
 }))

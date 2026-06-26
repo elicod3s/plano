@@ -20,6 +20,13 @@ export interface TerminalCreateRequest {
   /** Enable the shell's inline predictive-history engine (Warp-style). Defaults to on. */
   predictiveHistory?: boolean
   /**
+   * One-shot command launched the instant the shell becomes interactive (e.g. `claude` for a voice
+   * "open Claude Code"). Injected into the shell's startup so it runs immediately — no prompt-ready
+   * round-trip — and the heavy predictive-history init is skipped for it so the agent appears fast.
+   * Trusted: only ever set by PLANO's own launchers (a fixed agent-command table), never user text.
+   */
+  bootCommand?: string
+  /**
    * When true (a plain terminal opened on the workspace folder), main may refine `cwd` to the real
    * project root inside a container folder — so npm/git/etc. work without a manual `cd`. Left false
    * for a terminal explicitly rooted at a folder the user picked (e.g. Files panel "open here").
@@ -272,6 +279,62 @@ export interface WorkspaceStateSaveRequest {
   workspaces: Space[]
 }
 
+// ── voice assistant (local Parakeet ASR) ──
+/** Lifecycle of the local speech-to-text engine, surfaced to the Voice settings + HUD. */
+export type VoiceEngineState =
+  | 'missing' // the native engine OR the bundled model isn't present (degraded — never crashes)
+  | 'idle' //    available but not loaded yet
+  | 'loading' // model is being read into memory
+  | 'ready' //   loaded and warm; transcription is instant-ish
+  | 'error' //   load/transcribe failed (see `message`)
+export interface VoiceStatus {
+  state: VoiceEngineState
+  /** True when the engine binary loaded (sherpa-onnx). */
+  engineAvailable: boolean
+  /** True when the bundled Parakeet model files were found on disk. */
+  modelAvailable: boolean
+  /** Human-readable detail for the missing/error states. */
+  message?: string
+  /** Model identifier, e.g. "parakeet-tdt-0.6b-v3-int8". */
+  model?: string
+}
+export interface VoiceTranscribeRequest {
+  /** Raw mono PCM as 32-bit floats in [-1, 1] (the utterance captured while the key was held). */
+  pcm: ArrayBuffer
+  /** Sample rate of `pcm`; sherpa-onnx resamples internally to the model's 16 kHz. */
+  sampleRate: number
+  /** Renderer-side capture device metadata, persisted only in local voice-debug diagnostics. */
+  inputDeviceId?: string
+  inputDeviceLabel?: string
+  inputDeviceAuto?: boolean
+  inputDeviceCandidates?: string[]
+  /** True for the authoritative end-of-utterance decode (not a live partial). When set, main dumps
+   *  the audio + transcript to userData/voice-debug for inspection. */
+  final?: boolean
+}
+export interface VoiceTranscribeResult {
+  ok: boolean
+  /** Recognized text (trimmed); empty when nothing intelligible was heard. */
+  text: string
+  /** Set when ok is false (engine/model missing, or a decode error). */
+  error?: string
+}
+/** Ask the cloud model (Gemini) to turn a transcript into a structured canvas action. */
+export interface VoiceInterpretRequest {
+  transcript: string
+  /** Compact snapshot of the live canvas so the model can resolve references ("the 2nd terminal"). */
+  context: string
+  /** Gemini API key + model (kept in settings; the call is made from main to avoid CORS). */
+  apiKey: string
+  model: string
+}
+export interface VoiceInterpretResult {
+  ok: boolean
+  /** The action object the model returned; the renderer maps it to an Intent. Null on any failure. */
+  action: Record<string, unknown> | null
+  error?: string
+}
+
 /**
  * The full surface exposed to the renderer. Grouped by domain. Methods are async
  * (invoke) or fire-and-forget (void); `on*` register events and return an unsubscribe.
@@ -371,6 +434,16 @@ export interface PlanoApi {
     get(): Promise<PlanoSettings>
     /** Persist the full settings document; returns the merged/normalized result. */
     save(settings: PlanoSettings): Promise<{ ok: true; settings: PlanoSettings }>
+  }
+  voice: {
+    /** Current engine + model availability (for the Voice settings panel + HUD readiness). */
+    status(): Promise<VoiceStatus>
+    /** Warm the recognizer (load the bundled model into memory). Idempotent; returns final status. */
+    prepare(): Promise<VoiceStatus>
+    /** Transcribe one captured utterance entirely on the local model (no network). */
+    transcribe(req: VoiceTranscribeRequest): Promise<VoiceTranscribeResult>
+    /** Interpret a transcript into a structured action via Gemini (cloud). Null action → use fuzzy. */
+    interpret(req: VoiceInterpretRequest): Promise<VoiceInterpretResult>
   }
   session: {
     /** The project open at last quit (for launch restore), plus whether a session was ever recorded. */

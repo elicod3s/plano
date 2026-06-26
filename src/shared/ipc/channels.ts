@@ -65,6 +65,12 @@ export const CH = {
   settingsGet: 'settings:get',
   settingsSave: 'settings:save',
 
+  // ── voice assistant "Odla" (local Parakeet ASR; the orchestrator's ears) ──
+  voiceStatus: 'voice:status', // is the engine/model available + loaded?
+  voicePrepare: 'voice:prepare', // warm the recognizer (load the model into memory)
+  voiceTranscribe: 'voice:transcribe', // PCM utterance → text (offline, on the local model)
+  voiceInterpret: 'voice:interpret', // transcript → structured action via Gemini (cloud), fuzzy is the fallback
+
   // ── session (the live "which project is open" pointer, for launch restore) ──
   sessionGet: 'session:get',
   sessionSet: 'session:set',

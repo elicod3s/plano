@@ -33,6 +33,8 @@ import type { GitService } from '../services/GitService'
 import type { TimeTrackingService } from '../services/TimeTrackingService'
 import type { SettingsService } from '../services/SettingsService'
 import type { SessionService } from '../services/SessionService'
+import type { VoiceService } from '../services/VoiceService'
+import type { VoiceTranscribeRequest, VoiceInterpretRequest } from '@shared/ipc/contracts'
 import type { AgentSessionService } from '../services/AgentSessionService'
 
 export interface Services {
@@ -45,6 +47,7 @@ export interface Services {
   time: TimeTrackingService
   settings: SettingsService
   session: SessionService
+  voice: VoiceService
   agentSession: AgentSessionService
 }
 
@@ -69,7 +72,7 @@ function sanitizeRef(raw: unknown): AgentSessionRef | null {
 }
 
 export function registerIpc(services: Services, env: IpcEnv): void {
-  const { pty, workspace, workspaceState, fs, fileWatcher, git, time, settings, session, agentSession } = services
+  const { pty, workspace, workspaceState, fs, fileWatcher, git, time, settings, session, voice, agentSession } = services
 
   // ── terminal ──
   ipcMain.handle(CH.terminalCreate, (_e, req: TerminalCreateRequest) => pty.create(req))
@@ -194,6 +197,22 @@ export function registerIpc(services: Services, env: IpcEnv): void {
   // ── settings ──
   ipcMain.handle(CH.settingsGet, () => settings.get())
   ipcMain.handle(CH.settingsSave, (_e, doc: unknown) => settings.save(doc))
+
+  // ── voice assistant (local Parakeet ASR) ──
+  ipcMain.handle(CH.voiceStatus, () => voice.status())
+  ipcMain.handle(CH.voicePrepare, () => voice.prepare())
+  ipcMain.handle(CH.voiceTranscribe, (_e, req: VoiceTranscribeRequest) => {
+    if (!req || (!(req.pcm instanceof ArrayBuffer) && !ArrayBuffer.isView(req.pcm))) {
+      return { ok: false, text: '', error: 'Invalid audio payload.' }
+    }
+    return voice.transcribe(req)
+  })
+  ipcMain.handle(CH.voiceInterpret, (_e, req: VoiceInterpretRequest) => {
+    if (!req || typeof req.transcript !== 'string' || typeof req.apiKey !== 'string') {
+      return { ok: false, action: null, error: 'Invalid interpret request' }
+    }
+    return voice.interpret(req)
+  })
 
   // ── session (open-project pointer for launch restore) ──
   ipcMain.handle(CH.sessionGet, () => session.get())

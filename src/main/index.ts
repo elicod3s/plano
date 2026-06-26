@@ -22,6 +22,7 @@ import { GitService } from './services/GitService'
 import { TimeTrackingService } from './services/TimeTrackingService'
 import { SettingsService } from './services/SettingsService'
 import { SessionService } from './services/SessionService'
+import { VoiceService } from './services/VoiceService'
 
 let mainWindow: BrowserWindow | null = null
 let services: Services | null = null
@@ -92,6 +93,7 @@ if (!app.requestSingleInstanceLock()) {
       time: new TimeTrackingService(),
       settings: new SettingsService(),
       session: new SessionService(),
+      voice: new VoiceService(),
       agentSession,
     }
     registerIpc(services, {

@@ -16,10 +16,11 @@
     "typecheck": "npm run typecheck:node && npm run typecheck:web",
     "rebuild": "electron-rebuild -f -w node-pty",
     "icons": "node scripts/make-icons.mjs",
-    "dist": "npm run icons && electron-vite build && electron-builder",
-    "dist:win": "npm run icons && electron-vite build && electron-builder --win",
-    "dist:mac": "npm run icons && electron-vite build && electron-builder --mac",
-    "dist:linux": "npm run icons && electron-vite build && electron-builder --linux"
+    "model": "node scripts/fetch-model.mjs",
+    "dist": "npm run model && npm run icons && electron-vite build && electron-builder",
+    "dist:win": "npm run model && npm run icons && electron-vite build && electron-builder --win",
+    "dist:mac": "npm run model && npm run icons && electron-vite build && electron-builder --mac",
+    "dist:linux": "npm run model && npm run icons && electron-vite build && electron-builder --linux"
   },
   "build": {
     "appId": "app.plano.desktop",
@@ -35,7 +36,17 @@
     ],
     "asar": true,
     "asarUnpack": [
-      "**/node_modules/node-pty/**"
+      "**/node_modules/node-pty/**",
+      "**/node_modules/sherpa-onnx-*/**"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/models",
+        "to": "models",
+        "filter": [
+          "**/*"
+        ]
+      }
     ],
     "npmRebuild": false,
     "compression": "maximum",
@@ -73,7 +84,10 @@
       "artifactName": "${productName}-${version}-${arch}.${ext}",
       "darkModeSupport": true,
       "identity": null,
-      "gatekeeperAssess": false
+      "gatekeeperAssess": false,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "PLANO uses the microphone for its local voice assistant. Speech is transcribed on-device and never leaves your machine."
+      }
     },
     "dmg": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
@@ -110,6 +124,7 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.6.0",
+    "sherpa-onnx-node": "^1.13.3",
     "zod": "^3.23.8",
     "zustand": "^4.5.5"
   },

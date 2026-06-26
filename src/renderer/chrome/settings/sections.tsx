@@ -5,8 +5,8 @@
  */
 import { useEffect, useState, type ReactElement } from 'react'
 import { useSettingsStore, type SettingsSection } from '@/stores/useSettingsStore'
-import { SEARCH_ENGINES, type SearchEngineId, type ShellChoice, type TerminalUrlAction } from '@shared/domain/settings'
-import type { AppInfo } from '@shared/ipc/contracts'
+import { SEARCH_ENGINES, type SearchEngineId, type ShellChoice, type TerminalUrlAction, type VoiceLanguage } from '@shared/domain/settings'
+import type { AppInfo, VoiceStatus } from '@shared/ipc/contracts'
 import { Toggle } from '@/design-system/Toggle'
 import { Button } from '@/design-system/Button'
 import { Icon } from '@/design-system/Icon'
@@ -23,6 +23,7 @@ import {
   type Opt,
 } from './controls'
 import { ThemeGallery, AccentSwatches, TerminalThemeGallery, GridStylePicker } from './galleries'
+import { listInputDevices, releaseMic } from '@/voice/audio/mic'
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`
 
@@ -249,6 +250,155 @@ function BrowserSection() {
   )
 }
 
+// ── Voice ─────────────────────────────────────────────────────────────────────
+const PTT_OPTS: Opt<string>[] = [
+  { value: 'Ctrl+Shift+Space', label: 'Ctrl + Shift + Space' },
+  { value: 'Ctrl+Space', label: 'Ctrl + Space' },
+  { value: 'Ctrl+Shift+V', label: 'Ctrl + Shift + V' },
+  { value: 'F4', label: 'F4' },
+]
+const VOICE_LANG_OPTS: Opt<VoiceLanguage>[] = [
+  { value: 'auto', label: 'Auto-detect' },
+  { value: 'es', label: 'Spanish' },
+  { value: 'en', label: 'English' },
+]
+
+const ENGINE_LABEL: Record<VoiceStatus['state'], string> = {
+  ready: 'Ready',
+  loading: 'Loading model…',
+  idle: 'Idle (loads on first use)',
+  missing: 'Unavailable',
+  error: 'Error',
+}
+
+function VoiceEngineRow() {
+  const [status, setStatus] = useState<VoiceStatus | null>(null)
+  const [busy, setBusy] = useState(false)
+  const refresh = (): void => {
+    void window.plano.voice.status().then(setStatus).catch(() => undefined)
+  }
+  useEffect(refresh, [])
+  const warm = async (): Promise<void> => {
+    setBusy(true)
+    try {
+      setStatus(await window.plano.voice.prepare())
+    } catch {
+      /* ignore */
+    } finally {
+      setBusy(false)
+    }
+  }
+  const ok = status?.state === 'ready' || status?.state === 'idle' || status?.state === 'loading'
+  return (
+    <div className="mt-2 rounded-md border border-subtle bg-surface-inset p-3 font-mono text-[11px] text-text-tertiary">
+      <div className="flex items-center justify-between">
+        <span>Speech engine</span>
+        <span className={ok ? 'text-text-secondary' : 'text-destructive-hover'}>
+          {status ? ENGINE_LABEL[status.state] : 'Checking…'}
+        </span>
+      </div>
+      <div className="mt-1 flex items-center justify-between">
+        <span>Model</span>
+        <span className="text-text-secondary">{status?.model ?? '—'}</span>
+      </div>
+      {status?.message && <div className="mt-2 text-text-quaternary">{status.message}</div>}
+      <div className="mt-3 flex gap-2">
+        <Button variant="secondary" size="sm" onClick={warm} disabled={busy || status?.state === 'ready' || status?.state === 'missing'}>
+          <Icon name={busy ? 'Loader2' : 'Sparkles'} size={14} className={busy ? 'animate-spin' : undefined} />
+          {status?.state === 'ready' ? 'Loaded' : 'Warm up model'}
+        </Button>
+        <Button variant="ghost" size="sm" onClick={refresh}>
+          <Icon name="RefreshCw" size={14} />
+          Recheck
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function VoiceMicRow() {
+  const deviceId = useSettingsStore((st) => st.settings.voice.inputDeviceId)
+  const patch = useSettingsStore((st) => st.patch)
+  const [devices, setDevices] = useState<{ deviceId: string; label: string }[]>([])
+  useEffect(() => {
+    void listInputDevices().then(setDevices).catch(() => undefined)
+  }, [])
+  const opts: Opt<string>[] = [
+    { value: '', label: 'Auto (prefer real mic)' },
+    ...devices.map((d) => ({ value: d.deviceId, label: d.label })),
+  ]
+  return (
+    <SettingRow
+      title="Microphone"
+      description="Which mic Odla listens to. Auto avoids virtual / router devices (SteelSeries Sonar, VoiceMeeter, Stereo Mix…) whose noise-gates can silence your speech — pick your real microphone if Auto guesses wrong."
+    >
+      <Select
+        value={deviceId}
+        options={opts}
+        width={260}
+        onChange={(id) => {
+          patch('voice', { inputDeviceId: id })
+          releaseMic() // drop the old stream so the next utterance opens the newly-chosen device
+        }}
+      />
+    </SettingRow>
+  )
+}
+
+function VoiceSection() {
+  const s = useSettingsStore((st) => st.settings.voice)
+  const patch = useSettingsStore((st) => st.patch)
+  const set = (p: Partial<typeof s>): void => patch('voice', p)
+  const setGemini = (p: Partial<typeof s.gemini>): void => patch('voice', { gemini: { ...s.gemini, ...p } })
+  const setLlm = (p: Partial<typeof s.llmFallback>): void => patch('voice', { llmFallback: { ...s.llmFallback, ...p } })
+  return (
+    <>
+      <SectionTitle>Odla — Voice</SectionTitle>
+      <SettingRow title="Odla voice assistant" description="A hands-free orchestrator that opens, closes and arranges panels from your voice — fully on-device.">
+        <Toggle checked={s.enabled} onChange={(enabled) => set({ enabled })} />
+      </SettingRow>
+      <SettingRow title="Push-to-talk" description="Hold this shortcut anywhere to talk; release to run the command. Click the puck to toggle hands-free.">
+        <Select value={s.pushToTalkKey} options={PTT_OPTS} onChange={(pushToTalkKey) => set({ pushToTalkKey })} width={190} />
+      </SettingRow>
+      <SettingRow title="Auto-send when you stop talking" description="Runs the command the instant you finish speaking — no need to release the key (releasing still sends immediately). Off = send only on release / second tap.">
+        <Toggle checked={s.autoSend} onChange={(autoSend) => set({ autoSend })} />
+      </SettingRow>
+      <VoiceMicRow />
+      <SettingRow title="Language" description="Spoken-command language. The bundled model is multilingual — Auto understands both Spanish and English.">
+        <Select value={s.language} options={VOICE_LANG_OPTS} onChange={(language) => set({ language })} width={150} />
+      </SettingRow>
+      <SettingRow title="Speak responses" description="Read short confirmations back aloud after a command runs.">
+        <Toggle checked={s.speakResponses} onChange={(speakResponses) => set({ speakResponses })} />
+      </SettingRow>
+      <SettingBlock title="Understanding (Gemini)" description="Odla's primary intelligence: Gemini turns your speech into actions, so it can open and move whatever you describe. If it's off or unreachable, the built-in local grammar takes over automatically — voice never breaks.">
+        <SettingRow title="Use Gemini" description="Cloud understanding for free-form commands. Falls back to the local engine when off/unreachable.">
+          <Toggle checked={s.gemini.enabled} onChange={(enabled) => setGemini({ enabled })} />
+        </SettingRow>
+        <SettingRow title="API key" description="Your Google Gemini API key. Used only from the app's main process for command parsing.">
+          <TextField value={s.gemini.apiKey} placeholder="AIza… / AQ…" onChange={(apiKey) => setGemini({ apiKey })} width={240} />
+        </SettingRow>
+        <SettingRow title="Model" description="flash-lite is the cheapest + fastest and plenty for commands.">
+          <TextField value={s.gemini.model} placeholder="gemini-3.1-flash-lite" onChange={(model) => setGemini({ model })} width={200} />
+        </SettingRow>
+      </SettingBlock>
+      <SettingBlock title="Local engine" description="Runs NVIDIA Parakeet locally via sherpa-onnx for speech-to-text. The model ships inside PLANO — no download, no account, nothing leaves your machine.">
+        <VoiceEngineRow />
+      </SettingBlock>
+      <SettingBlock title="Free-form commands (optional)" description="Off by default. When on, requests the built-in grammar can't parse are sent to an OpenAI-compatible endpoint (a local Ollama by default) for interpretation.">
+        <SettingRow title="Enable LLM fallback" description="Only used for utterances the local grammar doesn't recognize.">
+          <Toggle checked={s.llmFallback.enabled} onChange={(enabled) => setLlm({ enabled })} />
+        </SettingRow>
+        <SettingRow title="Endpoint" description="OpenAI-compatible base URL. Defaults to a local Ollama so nothing leaves the machine.">
+          <TextField value={s.llmFallback.baseUrl} placeholder="http://localhost:11434/v1" onChange={(baseUrl) => setLlm({ baseUrl })} width={220} />
+        </SettingRow>
+        <SettingRow title="Model" description="Model name the endpoint should use.">
+          <TextField value={s.llmFallback.model} placeholder="llama3.1" onChange={(model) => setLlm({ model })} width={160} />
+        </SettingRow>
+      </SettingBlock>
+    </>
+  )
+}
+
 // ── Privacy ─────────────────────────────────────────────────────────────────
 function PrivacySection() {
   const s = useSettingsStore((st) => st.settings.privacy)
@@ -335,6 +485,7 @@ export const SECTIONS: { id: SettingsSection; label: string; icon: string }[] = 
   { id: 'terminal', label: 'Terminal', icon: 'SquareTerminal' },
   { id: 'canvas', label: 'Canvas', icon: 'LayoutGrid' },
   { id: 'browser', label: 'Browser', icon: 'Globe' },
+  { id: 'voice', label: 'Odla', icon: 'Mic' },
   { id: 'privacy', label: 'Privacy', icon: 'ShieldCheck' },
   { id: 'account', label: 'Account', icon: 'UserRound' },
   { id: 'advanced', label: 'Advanced', icon: 'Wrench' },
@@ -348,6 +499,7 @@ export const SECTION_COMPONENTS: Record<SettingsSection, () => ReactElement> = {
   terminal: TerminalSection,
   canvas: CanvasSection,
   browser: BrowserSection,
+  voice: VoiceSection,
   privacy: PrivacySection,
   advanced: AdvancedSection,
 }
@@ -389,6 +541,11 @@ export const SETTINGS_INDEX: { section: SettingsSection; title: string; keywords
   { section: 'browser', title: 'Homepage', keywords: 'browser url start' },
   { section: 'browser', title: 'Search engine', keywords: 'google bing duckduckgo brave' },
   { section: 'browser', title: 'URLs from terminal', keywords: 'links open localhost dev server preview port npm run auto' },
+  { section: 'voice', title: 'Odla voice assistant', keywords: 'odla voice speech microphone parakeet hands-free orchestrator control panels dictation' },
+  { section: 'voice', title: 'Push-to-talk', keywords: 'shortcut hold key mic talk listen' },
+  { section: 'voice', title: 'Language', keywords: 'spanish english multilingual espanol ingles' },
+  { section: 'voice', title: 'Speak responses', keywords: 'tts text to speech voice reply' },
+  { section: 'voice', title: 'LLM fallback', keywords: 'ollama openai free form natural language endpoint model' },
   { section: 'privacy', title: 'Telemetry', keywords: 'analytics tracking' },
   { section: 'privacy', title: 'Save terminal history', keywords: 'scrollback persist' },
   { section: 'advanced', title: 'Hardware acceleration', keywords: 'gpu performance' },

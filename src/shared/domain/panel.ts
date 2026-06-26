@@ -38,6 +38,9 @@ export interface TerminalTab {
   shell?: string
   /** Per-terminal font-size override in px (Ctrl +/−); falls back to the global setting. */
   fontSize?: number
+  /** One-shot command run automatically once the shell is ready (e.g. `claude` to launch an agent
+   *  from a voice command). Cleared after it runs so a reattach/reopen never re-launches it. */
+  bootCommand?: string
   /** Resumable reference to the AI-agent conversation last detected in THIS terminal (captured
    *  live, persisted so a workspace reopen can re-enter it; gated by `restoreAgentSessions`). */
   agentSession?: AgentSessionRef
@@ -48,6 +51,12 @@ export interface TerminalProps {
    *  panels (and brand-new ones) — synthesized into one tab from the legacy fields on first mount. */
   tabs?: TerminalTab[]
   activeTabId?: string
+  /** Stable, human-facing identifier for this terminal panel ("Terminal 1", "2", …). Shown as a
+   *  badge and used by the voice assistant ("focus terminal 2"). Smallest-free integer, assigned on
+   *  first mount; persisted so it stays put across reloads. */
+  terminalNumber?: number
+  /** One-shot boot command for a brand-new panel before its first tab exists (migrated into tab[0]). */
+  bootCommand?: string
   /** Per-panel color theme override (shared by all tabs); falls back to the global terminal theme. */
   theme?: TerminalThemeId
   /** Local dev-server URLs (localhost:PORT) this panel has already auto-opened. Persisted so a
@@ -187,7 +196,9 @@ export interface PanelMeta {
 }
 
 export const PANEL_META: Record<PanelType, PanelMeta> = {
-  terminal: { type: 'terminal', label: 'New Terminal', icon: 'SquareTerminal', defaultSize: { width: 520, height: 340 } },
+  // Spawns roomy so a fresh terminal — and an agent CLI (Claude/Codex) that morphs into agent mode,
+  // incl. when opened by voice — is legible from the start instead of a cramped little box.
+  terminal: { type: 'terminal', label: 'New Terminal', icon: 'SquareTerminal', defaultSize: { width: 720, height: 480 } },
   // Unified Files panel: a file-tree explorer that grows into a code editor / image
   // viewer when a file is opened. Starts compact (tree-only) per `defaultSize`.
   editor: { type: 'editor', label: 'New Files', icon: 'FolderTree', defaultSize: { width: 300, height: 480 } },

@@ -57,6 +57,19 @@ jobs:
       - name: Generate app icons
         run: npm run icons
 
+      # The local voice assistant (Odla) runs NVIDIA Parakeet via sherpa-onnx. The ~640 MB model is
+      # gitignored (too big for the repo) and fetched here so electron-builder's `extraResources` can
+      # bundle it into the .app. Cached across runs (fetch-model is idempotent) so we don't re-download
+      # 640 MB every build. Without this step the .dmg ships with a broken voice feature.
+      - name: Cache bundled voice model (Parakeet)
+        uses: actions/cache@v4
+        with:
+          path: resources/models
+          key: voice-model-parakeet-tdt-0.6b-v3-int8-v1
+
+      - name: Fetch bundled voice model (Parakeet ~640 MB)
+        run: npm run model
+
       - name: Build main + renderer bundles
         run: npm run build
 
