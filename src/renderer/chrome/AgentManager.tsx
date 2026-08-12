@@ -90,9 +90,13 @@ export function AgentManager() {
         aria-label={`${count} agent${count > 1 ? 's' : ''} running — manage`}
         title={`${count} agent${count > 1 ? 's' : ''} running`}
         className={cn(
-          'app-no-drag flex items-center gap-1.5 rounded-pill border border-glass py-1 pl-2.5 pr-2.5 transition-colors',
+          // h-7 + px-2.5 + gap-1.5 is the shared TopBar chip geometry (MobileChip, TimeChip,
+          // WorkspaceGitChip). This one used py-1 instead, so it measured a hair shorter than its
+          // neighbours and broke the row's alignment.
+          'app-no-drag flex h-7 shrink-0 items-center gap-1.5 rounded-pill border border-glass px-2.5 leading-none transition-colors',
           open ? 'border-glass-hover bg-glass-hover' : 'hover:border-glass-hover hover:bg-glass',
         )}
+        style={{ background: open ? undefined : 'var(--glass)' }}
       >
         <span
           className="h-1.5 w-1.5 shrink-0 rounded-pill animate-status-pulse"

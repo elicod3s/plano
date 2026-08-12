@@ -107,8 +107,8 @@ export function TimeChip() {
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         className={cn(
-          'app-no-drag flex h-7 items-center gap-1.5 rounded-pill border border-glass px-2.5',
-          'font-mono text-[11.5px] tabular-nums text-text-2 transition-colors',
+          'app-no-drag flex h-7 shrink-0 items-center gap-1.5 rounded-pill border border-glass px-2.5',
+          'font-mono text-[11.5px] leading-none tabular-nums text-text-2 transition-colors',
           'hover:border-glass-hover hover:bg-glass hover:text-text-1',
         )}
         style={{ background: 'var(--glass)' }}

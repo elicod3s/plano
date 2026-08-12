@@ -51,19 +51,23 @@ export function MobileChip() {
       }
       onClick={() => useSettingsStore.getState().openTo('mobile')}
       className={cn(
-        'app-no-drag relative flex h-7 shrink-0 cursor-pointer items-center gap-2 rounded-pill border border-glass px-2.5 text-[12.5px] transition-colors',
+        // Shared TopBar chip geometry (h-7 / px-2.5 / gap-1.5 / 11.5px), so this sits on exactly
+        // the same optical row as the agent, time and git chips.
+        'app-no-drag relative flex h-7 shrink-0 cursor-pointer items-center gap-1.5 rounded-pill border border-glass px-2.5 text-[11.5px] transition-colors',
         state.phoneConnected
           ? 'border-[rgba(52,211,153,0.35)] text-[#6ee7b7]'
           : 'text-text-2 hover:border-glass-hover hover:bg-glass hover:text-text-1',
       )}
       style={{ background: state.phoneConnected ? 'rgba(52,211,153,0.08)' : 'var(--glass)' }}
     >
-      {/* Icon with the live-status dot on its corner — always centered via flex. */}
+      {/* Icon with the live-status dot on its corner. The dot is inset by 2px, not 4: hanging it
+          further out pushed it against the pill's top border and made the whole chip read as
+          vertically off. */}
       <span className="relative flex h-4 w-4 items-center justify-center">
         <Icon name="Smartphone" size={13} strokeWidth={1.7} />
         <span
           className={cn(
-            'absolute -right-1 -top-1 h-[6px] w-[6px] rounded-full border transition-colors',
+            'absolute -right-0.5 -top-0.5 h-[6px] w-[6px] rounded-full border transition-colors',
             state.phoneConnected ? 'border-[rgba(52,211,153,0.2)] bg-[#34d399]' : 'border-glass-strong bg-text-muted',
           )}
           style={{ boxShadow: state.phoneConnected ? '0 0 6px rgba(52, 211, 153, 0.7)' : 'none' }}

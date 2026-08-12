@@ -149,16 +149,42 @@ initIdentity(userData)
 // Belt and braces: none of this may ever prevent the Agent Host from starting. Without the
 // daemon there are no terminals at all, so a failure here degrades the mesh, never the app.
 setUserDataDir(userData)
-try {
-  installCli(userData)
-  const docs = installAgentDocs()
-  const hooks = installAgentHooks(userData)
-  log(`agent hooks: ${hooks.installed.join(', ') || 'none'}${hooks.skipped.length ? ` (skipped: ${hooks.skipped.map((s) => `${s.harness}=${s.reason}`).join('; ')})` : ''}`)
-  cleanupMcpEntries()
-  log(`mesh provisioning: cli + docs for ${docs.provisioned.join(', ') || 'none'}`)
-} catch (err) {
-  log(`mesh provisioning skipped: ${String(err)}`)
+
+/**
+ * Install the CLI + teach every harness about the mesh. Idempotent by construction: the CLI is
+ * rewritten (so it can never drift from this daemon), and the doc/hook writers no-op when the
+ * content already matches.
+ */
+function provisionAgents(reason: 'boot' | 'rescan'): string {
+  try {
+    installCli(userData)
+    const docs = installAgentDocs()
+    const hooks = installAgentHooks(userData)
+    const summary = `cli + docs for ${docs.provisioned.join(', ') || 'none'} | hooks: ${hooks.installed.join(', ') || 'none'}${hooks.skipped.length ? ` (skipped: ${hooks.skipped.map((s) => `${s.harness}=${s.reason}`).join('; ')})` : ''}`
+    if (reason === 'boot') {
+      cleanupMcpEntries()
+      log(`mesh provisioning: ${summary}`)
+    }
+    return summary
+  } catch (err) {
+    log(`mesh provisioning skipped: ${String(err)}`)
+    return `error: ${String(err)}`
+  }
 }
+
+// The daemon deliberately OUTLIVES the app, so provisioning only at boot would miss the most
+// common case: a harness installed AFTER PLANO (someone installs Codex next week and wonders why
+// their agent has never heard of the mesh). Re-scan on a slow timer so a newly installed CLI
+// becomes mesh-aware on its own. Nothing is written unless it actually differs, and the log only
+// speaks when the outcome changes — a quiet machine stays quiet.
+const REPROVISION_INTERVAL_MS = 30 * 60_000
+let lastProvisionSummary = provisionAgents('boot')
+setInterval(() => {
+  const summary = provisionAgents('rescan')
+  if (summary === lastProvisionSummary) return
+  lastProvisionSummary = summary
+  log(`mesh provisioning (rescan): ${summary}`)
+}, REPROVISION_INTERVAL_MS).unref?.()
 
 // Mesh bus + CLI endpoint (plan v5 A1): the daemon owns roster/mailboxes/timeline, survives app
 // closes, and answers agents on the fixed loopback endpoint (/cli, native JSON-RPC).

@@ -6,6 +6,7 @@
  */
 import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { useSettingsStore, type SettingsSection } from '@/stores/useSettingsStore'
+import { useUpdateStore } from '@/stores/useUpdateStore'
 import { cn } from '@/lib/cn'
 import { SEARCH_ENGINES, type SearchEngineId, type ShellChoice, type TerminalUrlAction, type VoiceLanguage, type GridSize } from '@shared/domain/settings'
 import type { AppInfo, VoiceStatus } from '@shared/ipc/contracts'
@@ -708,6 +709,72 @@ function PrivacyBlock() {
   )
 }
 
+/** "3 min ago" / "just now" — the only thing that makes a check button trustworthy. */
+function sinceLabel(at: number): string {
+  const mins = Math.floor((Date.now() - at) / 60_000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins} min ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours} h ago`
+  return `${Math.floor(hours / 24)} d ago`
+}
+
+/**
+ * Software update — the manual counterpart to the automatic check (15 s after launch, then
+ * every 4 h; see main/services/UpdateService). The button reflects the real updater phase, so
+ * pressing it can never lie: it downloads through the same pipeline the banner renders.
+ */
+function UpdateRow() {
+  // Own its version read: nesting this under AboutRow made the update button vanish whenever
+  // getInfo() failed, which is exactly when a user is most likely to go looking for it.
+  const [current, setCurrent] = useState('')
+  useEffect(() => {
+    void window.plano.app
+      .getInfo()
+      .then((i) => setCurrent(i.versions.app))
+      .catch(() => undefined)
+  }, [])
+  const phase = useUpdateStore((s) => s.phase)
+  const canCheck = useUpdateStore((s) => s.canCheck)
+  const target = useUpdateStore((s) => s.version)
+  const percent = useUpdateStore((s) => s.percent)
+  const message = useUpdateStore((s) => s.message)
+  const checkedAt = useUpdateStore((s) => s.checkedAt)
+  const checkNow = useUpdateStore((s) => s.checkNow)
+  const installNow = useUpdateStore((s) => s.installNow)
+
+  const status = ((): string => {
+    if (!canCheck) return 'Development build'
+    if (phase === 'checking') return 'Checking…'
+    if (phase === 'downloading') return `Downloading ${target ?? ''} · ${Math.round(percent ?? 0)}%`
+    if (phase === 'downloaded') return `${target ?? 'Update'} ready to install`
+    if (phase === 'error') return message ?? 'Check failed'
+    if (checkedAt) return `Checked ${sinceLabel(checkedAt)}`
+    return ''
+  })()
+
+  return (
+    <SettingRow title={current ? `Version ${current}` : 'Version'} description={status || undefined}>
+      {phase === 'downloaded' ? (
+        <Button variant="primary" size="sm" onClick={() => void installNow()}>
+          <Icon name="RefreshCw" size={14} />
+          Restart to update
+        </Button>
+      ) : (
+        <Button
+          variant="secondary"
+          size="sm"
+          disabled={!canCheck || phase === 'checking' || phase === 'downloading'}
+          onClick={() => void checkNow()}
+        >
+          <Icon name="RefreshCw" size={14} className={phase === 'checking' ? 'animate-spin' : undefined} />
+          Check for updates
+        </Button>
+      )}
+    </SettingRow>
+  )
+}
+
 function AboutRow() {
   const [info, setInfo] = useState<AppInfo | null>(null)
   useEffect(() => {
@@ -717,7 +784,7 @@ function AboutRow() {
   const v = info.versions
   return (
     <div className="mt-2 rounded-[12px] border border-glass bg-surface-inset p-3 font-mono text-[11px] text-text-tertiary">
-      <div className="flex justify-between"><span>PLANO</span><span className="text-text-secondary">Personal build</span></div>
+      <div className="flex justify-between"><span>PLANO</span><span className="text-text-secondary">{v.app}</span></div>
       <div className="flex justify-between"><span>Electron</span><span className="text-text-secondary">{v.electron}</span></div>
       <div className="flex justify-between"><span>Chromium</span><span className="text-text-secondary">{v.chrome}</span></div>
       <div className="flex justify-between"><span>Node</span><span className="text-text-secondary">{v.node}</span></div>
@@ -762,6 +829,7 @@ function AdvancedSection() {
       <PrivacyBlock />
       <div className="pt-4">
         <div className="label-caps mb-1 px-1">About</div>
+        <UpdateRow />
         <AboutRow />
       </div>
     </>
@@ -857,4 +925,5 @@ export const SETTINGS_INDEX: { section: SettingsSection; title: string; keywords
   { section: 'advanced', title: 'Telemetry', keywords: 'analytics tracking privacy' },
   { section: 'advanced', title: 'Save terminal history', keywords: 'scrollback persist privacy' },
   { section: 'advanced', title: 'About', keywords: 'version electron node chromium' },
+  { section: 'advanced', title: 'Check for updates', keywords: 'update upgrade version release download install' },
 ]
