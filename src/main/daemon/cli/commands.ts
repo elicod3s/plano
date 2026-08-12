@@ -22,7 +22,7 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * finished, already-idle (with the transcript), blocked on a prompt, or timed out with the
  * output so far — so a 10-minute default only made a caller sit on keepalives for nothing.
  */
-const WAIT_DEFAULT_TIMEOUT_MS = 300_000
+const WAIT_DEFAULT_TIMEOUT_MS = 180_000
 
 function needClient(client: MeshClient): void {
   if (!client.ready) {
@@ -116,7 +116,7 @@ export async function run(key: string, p: ParsedArgs, client: MeshClient): Promi
       const to = pos[0]
       const text = pos.slice(1).join(' ')
       if (!to || !text) throw usage('ask <to> <text>')
-      const timeoutMs = num(flags, 'timeout-ms', 120_000)
+      const timeoutMs = num(flags, 'timeout-ms', 60_000)
       const res = await client.call('plano_ask', { to, text, timeoutMs }, { timeoutMs: timeoutMs + 30_000, keepalive: true })
       if (json) return { output: JSON.stringify(res, null, 2), exitCode: 0 }
       if (!res.ok) return { output: failText(res), exitCode: 1 }

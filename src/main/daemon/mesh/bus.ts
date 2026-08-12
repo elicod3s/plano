@@ -18,34 +18,48 @@ const MAX_TIMELINE = 200
 const MAX_BROADCAST_TARGETS = 12
 const MAX_HOPS = 4
 const MAX_MESSAGE_LEN = 4000
-/** v3 A3: mailbox drains on a timer too, never only on idle transitions. */
-const DRAIN_POLL_MS = 2000
+/**
+ * v3 A3: mailbox drains on a timer too, never only on idle transitions. This is a RETRY net, not
+ * the delivery path — a message to a free agent is typed into its terminal immediately, and a
+ * queued one drains the instant its target reports idle. The tick only catches a target that
+ * missed both, so it can be short: the work is a loop over the roster.
+ */
+const DRAIN_POLL_MS = 750
 /** v3 A3: a queued message that cannot be delivered within this TTL expires. */
 const DEFAULT_TTL_MS = 10 * 60_000
 /** v3 A3: delivery attempts before a message becomes undeliverable. */
 const MAX_DELIVERY_ATTEMPTS = 5
-/** v3 A4: window to observe receiver output beyond the typed echo. */
-const CONFIRM_WINDOW_MS = 3000
+/**
+ * v3 A4: window to observe receiver output beyond the typed echo. Paid on EVERY send, so it is the
+ * single biggest tax on an agent-to-agent exchange; a peer that reacts at all reacts well inside
+ * this, and one that doesn't is reported as unconfirmed rather than waited on.
+ */
+const CONFIRM_WINDOW_MS = 1200
 /** v3 C: ask default timeout and hard cap (10 min). */
-const ASK_DEFAULT_TIMEOUT_MS = 120_000
+const ASK_DEFAULT_TIMEOUT_MS = 60_000
 const ASK_MAX_TIMEOUT_MS = 10 * 60_000
 /** v3 C: inferred reply tail cap. */
 const ASK_REPLY_MAX_CHARS = 2000
 /** v5 A1: wait-for-idle default timeout (5 min — every outcome answers, see A3) and cap (4 h). */
-const WAIT_DEFAULT_TIMEOUT_MS = 5 * 60_000
+const WAIT_DEFAULT_TIMEOUT_MS = 3 * 60_000
 const WAIT_MAX_TIMEOUT_MS = 4 * 60 * 60_000
-/** v5 A1: a wait resolves only after the target stays non-working this long (mid-turn blips). */
-const WAIT_DEFAULT_QUIET_MS = 2000
+/**
+ * v5 A1: a wait resolves only after the target stays non-working this long (mid-turn blips).
+ * Kept short because turn boundaries now come from the harness HOOKS (turn-start/turn-end), which
+ * are authoritative — this window only has to outlast the gap between two tool calls, not stand in
+ * for the turn signal itself. Raise it only if a harness without hooks starts reporting early.
+ */
+const WAIT_DEFAULT_QUIET_MS = 800
 /** v5 A1: wait output delta cap (bigger than an ask reply — the CLI returns the whole turn). */
 const WAIT_DELTA_MAX_CHARS = 64_000
 /** v5 A1: how long a spawn prompt stays the anchor for the first wait on that newborn. */
 const SPAWN_PROMPT_ANCHOR_TTL_MS = 10 * 60_000
 /** v5 A3: a peer stuck on a permission prompt this long ends the wait as `blocked`, not a timeout. */
-const WAIT_BLOCKED_STABLE_MS = 8000
+const WAIT_BLOCKED_STABLE_MS = 3500
 /** v4 B3: an agent is "finished" only after this much stable idle content. */
-const CHAIN_IDLE_STABLE_MS = 4000
+const CHAIN_IDLE_STABLE_MS = 1800
 /** v4 B1: chain default timeout (30 min) and hard cap (4 h). */
-const CHAIN_DEFAULT_TIMEOUT_MS = 30 * 60_000
+const CHAIN_DEFAULT_TIMEOUT_MS = 15 * 60_000
 const CHAIN_MAX_TIMEOUT_MS = 4 * 60 * 60_000
 /** v4 B4: loop protection + limits. */
 const CHAIN_MAX_HOPS = 4
