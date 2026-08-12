@@ -40,6 +40,12 @@ interface ToastState {
   toasts: Toast[]
   push: (t: Omit<Toast, 'id'>) => void
   dismiss: (id: number) => void
+  /**
+   * Retire whatever currently occupies a dedupe key. The counterpart to push()'s replace-in-place:
+   * a persistent toast (ttl 0) is owned by a live condition, so whoever raised it needs a way to
+   * take it back down when the condition ends — the toast has no timer to save it.
+   */
+  dismissKey: (dedupeKey: string) => void
 }
 
 let nextId = 1
@@ -62,4 +68,10 @@ export const useToastStore = create<ToastState>((set) => ({
     }
   },
   dismiss: (id) => set((s) => ({ toasts: s.toasts.filter((toast) => toast.id !== id) })),
+  dismissKey: (dedupeKey) =>
+    set((s) =>
+      s.toasts.some((t) => t.dedupeKey === dedupeKey)
+        ? { toasts: s.toasts.filter((t) => t.dedupeKey !== dedupeKey) }
+        : s,
+    ),
 }))

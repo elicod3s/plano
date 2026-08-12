@@ -43,6 +43,7 @@ function mergeAgentStats(persisted: AgentTimeStat[], pending: Record<string, num
  */
 export function TimeChip() {
   const [open, setOpen] = useState(false)
+  const [range, setRange] = useState<'today' | 'week'>('today')
   const [pos, setPos] = useState<{ right: number; top: number } | null>(null)
   const chipRef = useRef<HTMLDivElement>(null)
   const popoverRef = useRef<HTMLDivElement>(null)
@@ -95,9 +96,11 @@ export function TimeChip() {
 
   // Per-agent: merge today's persisted + live, keep the week's persisted snapshot.
   const agentsToday = mergeAgentStats(base.agentsToday, agentPending, pending)
-  const agentsWeek = base.agentsWeek
-  const agentsTotal = mergeAgentStats(base.agentsWeek, {}, 0) // union for the section header
-  const agentsTodayMax = Math.max(1, ...agentsToday.map((a) => a.seconds))
+  // The week snapshot already holds today's FLUSHED time; overlaying the same pending seconds the
+  // week total uses keeps the list and the "This week" headline telling the same story.
+  const agentsWeek = mergeAgentStats(base.agentsWeek, agentPending, pending)
+  const rangeRows = range === 'today' ? agentsToday : agentsWeek
+  const rangeMax = Math.max(1, ...rangeRows.map((a) => a.seconds))
 
   return (
     <div ref={chipRef} className="relative">
@@ -127,40 +130,60 @@ export function TimeChip() {
             className="animate-menu-in surface-layer surface-layer--popover fixed z-[var(--z-popover)] w-[300px] origin-top-right overflow-hidden rounded-[18px]"
             style={{ right: pos.right, top: pos.top }}
           >
-            <div className="px-4 pb-1 pt-4">
-              <div className="mb-3 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-label text-text-3">
-                <Icon name="Clock" size={11} />
-                Time tracked
+            {/* One headline, not a list of three. Today is the number you actually came for, so it
+                gets the size; the session ticks quietly beside the title and the week sits over its
+                own chart, where it belongs. */}
+            <div className="px-4 pb-3.5 pt-3.5">
+              <div className="flex items-center justify-between">
+                <span className="text-[13px] font-medium text-text-1">Time</span>
+                <span className="font-mono text-[11px] tabular-nums text-text-3">
+                  Session {formatDuration(session)}
+                </span>
               </div>
 
-              <div className="space-y-2">
-                <StatRow label="This session" value={formatDuration(session)} emphasize />
-                <StatRow label="Today" value={formatDuration(today)} />
-                <StatRow label="This week" value={formatDuration(week)} />
+              <div className="mt-2.5">
+                <div className="font-mono text-[28px] font-medium leading-none tracking-[-0.02em] tabular-nums text-text-1">
+                  {formatDuration(today)}
+                </div>
+                <div className="mt-1.5 text-[12px] text-text-3">Today</div>
               </div>
 
               {weekReady && (
-                <div className="mt-4 border-t border-glass pt-3.5">
-                  <div className="flex items-end gap-1.5" style={{ height: CHART_MAX_PX + 16 }}>
+                <>
+                  <div className="mt-4 flex items-center justify-between">
+                    <span className="text-[12px] text-text-3">This week</span>
+                    <span className="font-mono text-[12px] tabular-nums text-text-2">{formatDuration(week)}</span>
+                  </div>
+                  {/* Every day carries a full-height TRACK and the bar grows from its floor. The old
+                      chart drew a bare 2px stub for an empty day, which read as a broken dashed line
+                      rather than "nothing tracked". */}
+                  <div className="mt-2.5 flex items-end gap-1.5">
                     {base.weekDays.map((day, i) => {
                       const seconds = secondsFor(day)
                       const isToday = day.key === todayKey
-                      const barPx = Math.max(2, Math.round((seconds / maxDay) * CHART_MAX_PX))
+                      const barPx = seconds > 0 ? Math.max(3, Math.round((seconds / maxDay) * CHART_MAX_PX)) : 0
                       return (
                         <div
                           key={day.key}
-                          className="flex flex-1 flex-col items-center justify-end gap-1.5"
+                          className="flex flex-1 flex-col items-center gap-1.5"
                           title={`${formatDuration(seconds)}`}
                         >
                           <div
-                            className={cn('w-full rounded-xs', isToday ? 'bg-text-primary' : 'bg-text-quaternary')}
-                            style={{ height: barPx }}
-                          />
-                          <span
-                            className={cn(
-                              'text-[9px] leading-none',
-                              isToday ? 'text-text-secondary' : 'text-text-quaternary',
+                            className="flex w-full items-end overflow-hidden rounded-[4px] bg-[rgba(255,255,255,0.045)]"
+                            style={{ height: CHART_MAX_PX }}
+                          >
+                            {barPx > 0 && (
+                              <div
+                                className={cn(
+                                  'w-full rounded-[4px]',
+                                  isToday ? 'bg-text-1' : 'bg-[rgba(255,255,255,0.22)]',
+                                )}
+                                style={{ height: barPx }}
+                              />
                             )}
+                          </div>
+                          <span
+                            className={cn('text-[10px] leading-none', isToday ? 'text-text-2' : 'text-text-3')}
                           >
                             {WEEKDAY_LABELS[i]}
                           </span>
@@ -168,55 +191,67 @@ export function TimeChip() {
                       )
                     })}
                   </div>
-                </div>
+                </>
               )}
             </div>
 
             {/* per-agent breakdown */}
-            <div className="border-t border-glass px-4 pb-4 pt-3.5">
-              <div className="mb-2.5 flex items-center justify-between">
-                <span className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-label text-text-3">
-                  <Icon name="Sparkles" size={11} />
-                  Time by agent
-                </span>
-                <span className="flex items-center gap-3 font-mono text-[9px] uppercase tracking-label text-text-4">
-                  <span>Today</span>
-                  <span>Week</span>
-                </span>
+            <div className="border-t border-glass px-3 pb-3 pt-3">
+              <div className="mb-2 flex items-center justify-between px-1">
+                <span className="text-[12px] text-text-3">By agent</span>
+                {/* A range SWITCH, not two columns. Today and Week used to be printed side by side
+                    under headers that sat over neither of them; one column of numbers and an
+                    explicit toggle says the same thing without the reader decoding an alignment. */}
+                <div className="flex items-center gap-0.5 rounded-pill bg-[rgba(255,255,255,0.045)] p-0.5">
+                  {(['today', 'week'] as const).map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setRange(r)}
+                      className={cn(
+                        'rounded-pill px-2.5 py-[3px] text-[10.5px] capitalize transition-colors',
+                        range === r ? 'bg-glass-active font-medium text-text-1' : 'text-text-3 hover:text-text-2',
+                      )}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
               </div>
 
-              {agentsTotal.length === 0 && agentsToday.length === 0 ? (
-                <div className="py-1.5 text-[12px] leading-relaxed text-text-4">
+              {rangeRows.length === 0 ? (
+                <div className="px-1 py-1.5 text-[12px] leading-relaxed text-text-4">
                   Agents you run (Claude, Pi, Codex…) are counted here.
                 </div>
               ) : (
-                <div className="space-y-1">
-                  {agentsToday.map((a) => {
+                <div className="space-y-0.5">
+                  {rangeRows.map((a) => {
                     const info = AGENTS[a.kind as keyof typeof AGENTS]
                     const display = info?.displayName ?? a.kind
                     const accent = info?.accent ?? '#ffffff'
-                    const weekEntry = agentsWeek.find((w) => w.kind === a.kind)
-                    const weekSecs = weekEntry?.seconds ?? 0
-                    const pct = Math.round((a.seconds / agentsTodayMax) * 100)
+                    // A share this small still has to look like a bar and not like dust on the screen.
+                    const pct = Math.max(6, Math.round((a.seconds / rangeMax) * 100))
                     return (
-                      <div key={a.kind} className="rounded-[10px] px-1.5 py-1.5 transition-colors hover:bg-glass">
-                        <div className="flex items-center gap-2.5">
-                          <AgentLogo kind={a.kind as never} size={15} color={accent} className="shrink-0" />
-                          <span className="min-w-0 flex-1 truncate text-[12.5px] text-text-1">{display}</span>
-                          <span className="w-14 text-right font-mono text-[12px] tabular-nums text-text-1">
-                            {formatDuration(a.seconds)}
-                          </span>
-                          <span className="w-14 text-right font-mono text-[11px] tabular-nums text-text-4">
-                            {weekSecs > 0 ? formatDuration(weekSecs) : '—'}
-                          </span>
+                      <div
+                        key={a.kind}
+                        className="flex items-center gap-2.5 rounded-[10px] px-1 py-1.5 transition-colors hover:bg-glass"
+                      >
+                        <AgentLogo kind={a.kind as never} size={15} color={accent} className="shrink-0" />
+                        {/* Name AND bar share one column, so the bar can never run beneath the number
+                            the way a full-width one did — that overlap is what made the list read as
+                            a tangle of underlines. */}
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[12.5px] text-text-1">{display}</div>
+                          <div className="mt-[7px] h-[3px] overflow-hidden rounded-pill bg-[rgba(255,255,255,0.055)]">
+                            <div
+                              className="h-full rounded-pill transition-[width] duration-300"
+                              style={{ width: `${pct}%`, background: accent }}
+                            />
+                          </div>
                         </div>
-                        {/* proportion bar of today's share */}
-                        <div className="ml-[22px] mt-1.5 h-[3px] overflow-hidden rounded-pill bg-glass">
-                          <div
-                            className="h-full rounded-pill transition-[width] duration-300"
-                            style={{ width: `${pct}%`, background: accent }}
-                          />
-                        </div>
+                        <span className="shrink-0 font-mono text-[12px] tabular-nums text-text-1">
+                          {formatDuration(a.seconds)}
+                        </span>
                       </div>
                     )
                   })}
@@ -230,18 +265,3 @@ export function TimeChip() {
   )
 }
 
-function StatRow({ label, value, emphasize }: { label: string; value: string; emphasize?: boolean }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-[12px] text-text-secondary">{label}</span>
-      <span
-        className={cn(
-          'font-mono text-[12px] tabular-nums',
-          emphasize ? 'text-text-primary' : 'text-text-secondary',
-        )}
-      >
-        {value}
-      </span>
-    </div>
-  )
-}

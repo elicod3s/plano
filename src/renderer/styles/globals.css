@@ -181,6 +181,46 @@
     var(--layer-shadow-contact),
     var(--layer-shadow-panel-front);
 }
+/* ── Panel state material: resting / awake / picked ──────────────────────────────────────
+   Three states, each carried by the EDGE and the ELEVATION rather than by content fading, so a
+   background terminal stays readable while still reading as "further away".
+
+   resting  — the shell's inline opacity (PanelFrame) plus a quieter edge: the contour recedes
+              first, which is what makes the surface read as distant instead of disabled.
+   awake    — focused/hovered/front: full opacity, a brighter edge that catches light.
+   picked   — marquee selection: the accent takes the edge and a soft halo sits outside it. A
+              picked panel is never dimmed (PanelFrame), so selecting a background terminal
+              visibly wakes it.
+
+   Halos are SPREAD-only rings (no blur radius): they cost a flat fill instead of a gaussian, so
+   selecting twenty panels can't do what twenty 48px blurs would. */
+/* :not() rather than [data-panel-selected='false'] — a docked GROUP shell carries no selected
+   attribute at all, and an equality match would have skipped it, leaving groups on the old edge. */
+.surface-layer--panel[data-panel-focused='false']:not([data-panel-selected='true']) {
+  border-color: rgba(var(--glass-white), 0.055);
+}
+.surface-layer--panel[data-panel-focused='true'] {
+  border-color: rgba(var(--glass-white), 0.13);
+}
+.surface-layer--panel[data-panel-selected='true'] {
+  border-color: color-mix(in srgb, var(--selection) 52%, transparent);
+  box-shadow:
+    var(--layer-shadow-contact),
+    var(--layer-shadow-panel),
+    0 0 0 1px color-mix(in srgb, var(--selection) 40%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--selection) 11%, transparent);
+}
+.surface-layer--panel.surface-layer--front[data-panel-selected='true'] {
+  box-shadow:
+    var(--layer-shadow-contact),
+    var(--layer-shadow-panel-front),
+    0 0 0 1px color-mix(in srgb, var(--selection) 40%, transparent),
+    0 0 0 5px color-mix(in srgb, var(--selection) 11%, transparent);
+}
+/* The halo ARRIVES by transition, not by @keyframes: this element already owns `animation` for
+   the panel's mount/close (animate-panel-in / animate-panel-out), and a second animation on the
+   same node would cancel whichever ran last — a panel closing while selected would lose its
+   exit. The box-shadow transition in PanelFrame's shellStyle carries the bloom instead. */
 .surface-layer--chrome {
   border-radius: 14px;
   background-color: var(--layer-chrome-bg);

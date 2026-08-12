@@ -9,6 +9,12 @@ const DANGER_FOR_RING = DANGER
 
 /** Gauge geometry — one source of truth for both the drawn circle and its dasharray. */
 const RING_RADIUS = 9.6
+/**
+ * Brand mark size inside the gauge. The ring's inner diameter is ~17.5px (2·9.6 minus the 1.7
+ * stroke); a mark much past 10px starts touching that stroke, and the widest brands (Grok's X,
+ * which spans its full viewBox corner to corner) crossed it outright.
+ */
+const MARK_SIZE = 10
 
 /**
  * One provider quota chip: brand mark inside its own usage ring, then one number per window.
@@ -74,8 +80,17 @@ export function UsageChip({
         </svg>
         {/* The brand mark carries its OWN colour — it is what makes a row identifiable at a
             glance, and it is the established accent precedent (launcher chips, panel tint).
-            It only greys out when the provider has nothing to report. */}
-        <AgentLogo kind={meta.kind} size={11} color={accent} className={win ? undefined : 'opacity-45'} />
+            It only greys out when the provider has nothing to report.
+
+            Centred in its OWN absolute layer, exactly like the ring, so both are positioned by the
+            same 22px box instead of one being laid out in flow next to the other — that mismatch is
+            what left the marks sitting low and left of their gauge. `leading-none` kills the line
+            box an inline SVG would otherwise inherit. Size is MARK_SIZE, not the ring's inner
+            width: a glyph that reaches the stroke (Grok's X did) reads as a collision, not a
+            centred object. */}
+        <span className="absolute inset-0 flex items-center justify-center leading-none">
+          <AgentLogo kind={meta.kind} size={MARK_SIZE} color={accent} className={win ? undefined : 'opacity-45'} />
+        </span>
       </span>
       {/* Every window this provider bills separately gets its own number — Claude alone has
           three (5h, 7d, Fable) and showing only one would misreport what is left. */}

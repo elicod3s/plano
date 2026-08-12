@@ -150,6 +150,17 @@
   --layer-shadow-ambient: 0 16px 48px -12px rgba(0, 0, 0, 0.6);
   --layer-shadow-modal: 0 24px 64px -16px rgba(0, 0, 0, 0.72), 0 8px 24px -8px rgba(0, 0, 0, 0.55);
 
+  /* ── Selection ──
+     "Picked" speaks in PLANO's OWN colour: the app accent. Not an invented hue — a selection is a
+     first-party action, so it should carry the same colour as everything else the app does, and it
+     re-tints for free when a theme or the user's accent changes.
+
+     What keeps it from reading as the stock selection box is the FORM, not the colour: corner
+     brackets instead of a filled rectangle, and an edge + halo on the panel instead of a flat ring.
+     Named separately from --accent-primary so selection can be retuned in one place without
+     touching every accented control. */
+  --selection: var(--accent-primary);
+
   /* ── Overlays ── */
   /* Neutral black scrim — NO hue of its own, so dimming never re-tints the canvas into a
      different-looking theme. */

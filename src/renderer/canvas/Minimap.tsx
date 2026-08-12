@@ -10,6 +10,8 @@ import { viewportController } from './ViewportController'
 const W = 200
 const H = 140
 const PAD = 12
+/** Breathing room between the map surface and the card's rounded edge. */
+const INSET = 8
 
 /**
  * Spatial overview: panels as filled rects + the current viewport rectangle. Hidden by default;
@@ -93,19 +95,31 @@ export function Minimap() {
     <div
       data-surface-layer="popover"
       className="surface-layer surface-layer--chrome absolute bottom-6 right-20 z-[var(--z-chrome)] overflow-hidden rounded-[26px]"
-      style={{ width: W }}
+      style={{ width: W + INSET * 2 }}
     >
-      <div className="flex h-6 items-center justify-between px-2">
-        <span className="label-caps">Map</span>
+      {/* Header sits on the same gutter as the map below it, so the title, the close button and
+          the map's left edge all line up on one vertical. */}
+      <div className="flex h-7 items-center justify-between" style={{ paddingLeft: INSET + 2, paddingRight: INSET }}>
+        {/* A floating card titles itself in the UI face, like the usage panel's own header.
+            `label-caps` is the GROUP-label vocabulary ("Running agents", "Timeline") and forces
+            the mono data face — as a card title it read as a stray terminal string. */}
+        <span className="text-[10px] font-medium uppercase tracking-label text-text-3">Map</span>
         <button type="button" onClick={hide} aria-label="Hide map" className="text-text-tertiary hover:text-text-primary">
           <Icon name="X" size={13} />
         </button>
       </div>
+      {/* The map is an INSET surface, not a full-bleed one: run it to the card's edge and the
+          card's own 26px radius slices the map's corners off diagonally, cutting whatever panel
+          happens to sit there. Its own smaller radius nests inside the card's, the way an inset
+          always reads one step tighter than the shell holding it. */}
+      <div
+        className="overflow-hidden rounded-[14px]"
+        style={{ margin: INSET, marginTop: 0, width: W, height: H, background: 'var(--surface-inset)' }}
+      >
       <svg
         width={W}
         height={H}
         className="block cursor-grab touch-none active:cursor-grabbing"
-        style={{ background: 'var(--surface-inset)' }}
         onPointerDown={startPan}
         onPointerMove={panToEvent}
         onPointerUp={endPan}
@@ -133,6 +147,7 @@ export function Minimap() {
           strokeWidth={1}
         />
       </svg>
+      </div>
     </div>
   )
 }

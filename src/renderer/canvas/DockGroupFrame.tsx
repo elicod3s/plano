@@ -235,7 +235,12 @@ function DockGroupFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number 
         style={{
           borderRadius: 26,
           opacity: !focused && !hovered ? UNFOCUSED_OPACITY : 1,
-          transition: 'opacity 180ms var(--ease-settle)',
+          // Same asymmetric wake/recede as a floating panel (PanelFrame) so a docked group and a
+          // loose one never settle at different speeds side by side.
+          transition:
+            !focused && !hovered
+              ? 'opacity 300ms var(--ease-settle), border-color 300ms var(--ease-settle)'
+              : 'opacity 130ms var(--ease-settle), border-color 130ms var(--ease-settle)',
           // NO `content-visibility: auto` — same reason as PanelFrame: inside the scaled,
           // promoted world layer Chromium's relevance check lags the live transform, so the
           // group blanked while it moved. `contain` on .surface-layer--panel does the work.

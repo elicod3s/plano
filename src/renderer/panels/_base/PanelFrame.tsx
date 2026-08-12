@@ -41,8 +41,12 @@ import { prefersReducedMotion } from '@/lib/motion'
 const GRID = 8
 const MIN_W = 200
 const MIN_H = 120
-/** Deska UNFOCUSED_OPACITY: every floating surface that is neither focused nor hovered rests here. */
-export const UNFOCUSED_OPACITY = 0.75
+/**
+ * Resting opacity for a surface that is neither focused, hovered nor selected. Nudged up from
+ * 0.75 because the recede no longer rides on opacity alone — the edge dims with it now, so less
+ * fade buys the same distance while a background terminal stays readable.
+ */
+export const UNFOCUSED_OPACITY = 0.78
 /** Terminal drags arm on pointer-down but reveal the ghost only after the pointer has
  *  traveled this far in SCREEN px — a plain click must never flicker the panel (§5.1). */
 const MOVE_THRESHOLD_PX = 5
@@ -91,7 +95,9 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
   const isFocusMode = useUiStore((s) => s.focusedPanelId === panel.id)
   // Same narrow-selector trick for the marquee selection: a boolean, and only while MORE than one
   // panel is selected, so a normal single click never re-renders a panel for a ring it won't draw.
-  const multiSelected = useSelectionStore((s) => s.ids.length > 1 && s.ids.includes(panel.id))
+  // Deliberate selection only — a plain click sets an implicit one-panel selection so a drag knows
+  // its subject, and painting that would put a gold ring around every panel you touch.
+  const multiSelected = useSelectionStore((s) => s.explicit && s.ids.includes(panel.id))
   // Hover is LOCAL state so a pointer move over one panel never touches another (and never runs
   // on pointer-move frames — only on enter/leave state changes).
   const [hovered, setHovered] = useState(false)
@@ -518,9 +524,12 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
   // and exit animations live here as one piece; nothing inside moves independently.
   const shellAnim = closing ? 'animate-panel-out' : mountAnim ? 'animate-panel-in' : ''
   const dragging = gesturing && gesture.current?.kind === 'move'
-  // Deska focus/hover opacity: focused OR hovered → 1, otherwise 0.75. Content and shell dim
-  // together (opacity sits on the whole shell). Mounting/closing panels keep their animation.
-  const dimmed = !mountAnim && !closing && !focused && !hovered
+  // Resting opacity: focused, hovered OR marquee-selected → awake; everything else rests dim.
+  // Selection counts as awake because picking a panel out of the canvas and having it stay faded
+  // reads as "nothing happened" — the act of selecting is what should bring it forward.
+  // Content and shell dim together (opacity sits on the whole shell); mounting/closing panels
+  // keep their animation.
+  const dimmed = !mountAnim && !closing && !focused && !hovered && !multiSelected
   const shellStyle: CSSProperties = {
     // Focus mode: the shell stops obeying the panel's canvas rect and fills the stage. `position`
     // flips to relative so `inset-0` inside the portal host resolves against the stage, not the
@@ -534,11 +543,18 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
     // dragging. The shell itself stays untransformed.
     transform: undefined,
     transformOrigin: '50% 50%',
+    // Asymmetric by intent: waking is a RESPONSE to the user and lands almost immediately, while
+    // receding is ambient and takes its time — the same way a surface you stop touching settles
+    // rather than snaps. One symmetric 180ms curve for both is what made the effect feel cheap.
+    // Edge and halo ride the same timing as the opacity so a panel changes state as one object.
     transition:
       !mountAnim && !closing
-        ? dragging
-          ? 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms var(--ease-settle)'
-          : 'transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms var(--ease-settle)'
+        ? [
+            `transform ${dragging ? 140 : 240}ms cubic-bezier(0.22, 1, 0.36, 1)`,
+            `opacity ${dimmed ? 300 : 130}ms var(--ease-settle)`,
+            `border-color ${dimmed ? 300 : 130}ms var(--ease-settle)`,
+            `box-shadow ${dimmed ? 320 : 190}ms var(--ease-settle)`,
+          ].join(', ')
         : undefined,
     willChange: dragging ? 'transform' : undefined,
     // NO `content-visibility: auto` here. Chromium decides "relevant to the user" from a
@@ -607,9 +623,9 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
         className={cn(
           'surface-layer surface-layer--panel group absolute inset-0 flex flex-col overflow-hidden',
           isFront && 'surface-layer--front',
-          // Only a MULTI-selection is drawn: one selected panel is already the focused one, and a
-          // second ring around it would be noise.
-          multiSelected && 'ring-1 ring-[color-mix(in_srgb,var(--accent-primary)_70%,transparent)]',
+          // Selection is drawn by the shell material itself (globals.css, [data-panel-selected]):
+          // an accent edge plus a soft outer halo. The old flat 1px ring sat on top of the panel's
+          // own border as a second contour and read as a debug outline rather than a picked object.
           panel.type === 'sticky' && 'rounded-[24px]',
           shellAnim,
           closing && 'pointer-events-none',

@@ -196,6 +196,13 @@ export function startAgentNotifier(): void {
   }
 
   onAgentActivity(async (e) => {
+    // The release runs BEFORE the settings gate and without resolving a target: a "needs you" card
+    // already on screen must come down even if notifications were switched off, or the panel was
+    // closed, since nothing else will ever retire it.
+    if (e.type === 'agent-attended') {
+      useToastStore.getState().dismissKey(`awaiting:${e.ptyId}`)
+      return
+    }
     if (!useSettingsStore.getState().settings.general.agentDoneNotify) return
     const t = await resolveTarget(e.ptyId, e.kind)
 

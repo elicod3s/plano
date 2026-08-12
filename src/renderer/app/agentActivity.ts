@@ -35,7 +35,12 @@ const MIN_WORK_MS = 3000
 const FINISH_COOLDOWN_MS = 20_000
 
 export interface AgentActivityEvent {
-  type: 'agent-finished' | 'agent-awaiting'
+  /**
+   * `agent-attended` is the release for `agent-awaiting`: the "needs you" toast is deliberately
+   * persistent (ttl 0), so without an explicit end-of-block event it outlives the block forever —
+   * you answer the agent and the toast still sits there claiming it is waiting.
+   */
+  type: 'agent-finished' | 'agent-awaiting' | 'agent-attended'
   ptyId: string
   /** Canvas panel id hosting the agent ('' when the panel is gone). */
   panelId: string
@@ -225,9 +230,15 @@ export function startAgentActivity(): void {
     const nowAwaiting = new Set(prevAwaiting)
     if (state === 'awaiting-input') nowAwaiting.add(ptyId)
     else nowAwaiting.delete(ptyId)
-    for (const ptyId of nowAwaiting) {
-      if (!prevAwaiting.has(ptyId)) {
-        emit({ type: 'agent-awaiting', ptyId, panelId: meshPanelFor(ptyId).panelId, kind: meshPanelFor(ptyId).kind })
+    for (const id of nowAwaiting) {
+      if (!prevAwaiting.has(id)) {
+        emit({ type: 'agent-awaiting', ptyId: id, panelId: meshPanelFor(id).panelId, kind: meshPanelFor(id).kind })
+      }
+    }
+    // Left the block (answered, resumed working, or the shell exited) → release the toast.
+    for (const id of prevAwaiting) {
+      if (!nowAwaiting.has(id)) {
+        emit({ type: 'agent-attended', ptyId: id, panelId: meshPanelFor(id).panelId, kind: meshPanelFor(id).kind })
       }
     }
     prevAwaiting = nowAwaiting
