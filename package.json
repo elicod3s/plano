@@ -1,8 +1,8 @@
 {
   "name": "plano",
-  "version": "0.2.16",
+  "version": "0.2.17",
   "private": true,
-  "description": "PLANO \u2014 the infinite canvas workspace for builders. One spatial screen per project: terminals, editors, browsers and AI agents, together.",
+  "description": "PLANO — the infinite canvas workspace for builders. One spatial screen per project: terminals, editors, browsers and AI agents, together.",
   "author": "PLANO",
   "license": "MIT",
   "main": "out/main/index.js",

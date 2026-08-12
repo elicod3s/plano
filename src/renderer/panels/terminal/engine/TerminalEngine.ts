@@ -42,9 +42,21 @@ import { makeSmartTitle } from '../smartTitle'
 // context availability and loadWebgl() already falls back safely if allocation fails.
 const MAX_WEBGL_TERMINALS = Number.POSITIVE_INFINITY
 let liveWebglTerminals = 0
-// Match the verified smooth setup: observe real box changes and coalesce a resize burst.
-const FIT_DEBOUNCE_MS = 32
-const FIT_RESIZE_EPSILON = 0.5
+// Observe real box changes and coalesce a resize burst.
+//
+// These two numbers decide how often the PTY is told its grid changed, and a column change is far
+// from free: xterm REFLOWS (re-wraps) the scrollback, and every TUI on the other side repaints.
+// At 32ms/0.5px a panel drag or a canvas zoom published a SIGWINCH ~30x per second, so a full-screen
+// CLI drawing into the normal buffer (Grok, omp) had its already-emitted lines re-wrapped underneath
+// it while it was still writing — old and new frames ended up interleaved on the same rows
+// ("000*Worked for 14m43s/30.00 por cada 500 productos"). Nothing about that is recoverable
+// afterwards: the reflow rewrote the buffer.
+//
+// So: hold the grid still for the whole gesture and resize ONCE when it settles. 140ms is below the
+// ~200ms that reads as lag but well above a drag's frame cadence, and 1.5px ignores the sub-pixel
+// jitter of the zoom animation while still catching any real layout change (a cell is ~8x20px).
+const FIT_DEBOUNCE_MS = 140
+const FIT_RESIZE_EPSILON = 1.5
 
 /**
  * A live terminal session that OUTLIVES React. The xterm `Terminal` instance, its addons, the PTY
@@ -148,6 +160,14 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     // verified build; users can still lower it via the Settings slider.
     lineHeight: Math.max(1.4, ts0.lineHeight),
     letterSpacing: 0, // non-zero corrupts selection geometry (xterm #4881)
+    // Bold must be 600, not xterm's default 700. main.tsx loads JetBrains Mono at 400 and 600
+    // ONLY, so a request for 700 matches the 600 face and the browser then FAKES the missing
+    // weight by dilating the outlines. That synthetic bold is baked into the WebGL glyph atlas,
+    // where it reads as smeared/scribbled text: dilation closes the apertures of `c` and `u`, so
+    // bold lowercase starts looking like small capitals ("enCargué", "sU cUenta"). Asking for the
+    // weight we actually ship makes the renderer use the real face and draw crisp bold.
+    fontWeight: 400,
+    fontWeightBold: 600,
     cursorBlink: ts0.cursorBlink,
     cursorStyle: ts0.cursorStyle,
     cursorWidth: 2,
@@ -481,6 +501,10 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     if (sig === lastSig) return
     lastSig = sig
     term.options.fontFamily = t.fontFamily || TERMINAL_FONT
+    // Re-assert the shipped bold weight: a live terminal created before this fix (or by an
+    // older build) is still on xterm's synthetic-bold default until something reapplies it.
+    term.options.fontWeight = 400
+    term.options.fontWeightBold = 600
     term.options.fontSize = scaledFontFor(currentScale)
     refreshEffScale()
     term.options.lineHeight = Math.max(1, t.lineHeight)
@@ -929,7 +953,14 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
         const prevRows = term.rows
         safeFit(false)
         publishSize()
-        if (wasAtBottom && (term.cols !== prevCols || term.rows !== prevRows)) term.scrollToBottom()
+        if (term.cols !== prevCols || term.rows !== prevRows) {
+          if (wasAtBottom) term.scrollToBottom()
+          // The reflow that just ran rewrote the buffer under whatever the TUI had drawn. Repaint
+          // every row from OUR side too: the CLI redraws on SIGWINCH at its own pace, and until it
+          // does, the rows xterm reflowed are the only thing on screen. Without this the stale
+          // fragments stay visible for as long as the app takes to notice the resize.
+          term.refresh(0, term.rows - 1)
+        }
       } catch {
         /* fit can throw on zero-size frames during transitions */
       }

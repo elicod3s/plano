@@ -15,6 +15,11 @@ export const AGENT_LAUNCH_COMMANDS: Record<string, string> = {
   aider: 'aider',
   gemini: 'gemini',
   cursor: 'cursor-agent',
+  // Grok Build (x.ai) — a native Rust TUI at ~/.grok/bin/grok.exe, which its installer puts
+  // on PATH. Everything else about grok was already wired (kind, capabilities, control,
+  // resume, brand mark); only this row was missing, so `plano spawn grok` failed with
+  // "unknown harness" while the UI happily showed Grok panels.
+  grok: 'grok',
 }
 
 /** The shell command that boots `harness`, or null when the harness is unknown. */

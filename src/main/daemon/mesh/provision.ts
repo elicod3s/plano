@@ -53,6 +53,14 @@ Every command is a subcommand of \`plano\` and prints JSON. Read it with your JS
   [--count N] [--wait]\` — fresh terminal(s) booting the harness appear in the same workspace,
   next to your panel. \`--wait\` blocks until they finish. Orca-style alias:
   \`plano worktree create <folder> --agent <harness> --prompt "<task>" --wait\`.
+  **\`<harness>\` is NOT a closed list.** Known names open straight away:
+  \`claude codex pi omp kiro opencode aider gemini cursor grok\`. Any OTHER name is looked up as
+  an executable installed on this host (PATH plus the usual per-user install dirs), so when the
+  user asks for an agent you have never heard of, **just try it** — \`plano spawn <its-cli-name>\`
+  — instead of telling them it is unsupported. Only if that comes back \`unknown harness\` (the
+  error lists everywhere it looked) is it genuinely not installed; then ask the user for the
+  command that starts it. The name must be a bare tool name: no spaces, paths or shell
+  characters, so a multi-word invocation is not spawnable this way.
 - **Coordinate**: \`plano claim "<task>"\` marks you busy; \`plano handoff <to> "<task>"\` hands
   work on and goes idle.
 - **Chain work forward**: \`plano chain <to> --payload "<text>"\` (or \`--payload file:<path>\`)
@@ -232,6 +240,9 @@ timed out. Run \`plano agent-context\` for the full machine-readable command sch
   receive carries a correlation id (\`#a3f2b\`), answer it with \`plano reply <id> "<summary>"\`.
 - \`plano spawn <harness> [folder] [--prompt "<task>"] [--count N] [--wait]\` — open new agents in
   THIS canvas, next to your panel, and optionally block until they finish their task.
+  \`<harness>\` is not a closed list: \`claude codex pi omp kiro opencode aider gemini cursor grok\`
+  open straight away, and any other name is resolved as an agent CLI installed on this host. If
+  the user names an agent you do not know, TRY IT before saying it is unsupported.
 - \`plano wait <id>\` — block until a peer is stably idle or exits. It always answers: a peer
   that ALREADY finished returns its transcript with \`alreadyIdle\` (add \`--next-turn\` to wait
   for the next turn instead), and a peer stuck on a permission prompt returns \`blocked\` instead

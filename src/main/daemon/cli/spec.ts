@@ -4,6 +4,25 @@
  * the same trick as Orca's agent-context) and the usage errors in commands.ts.
  */
 
+/**
+ * The spawnable harnesses. MUST mirror the keys of AGENT_LAUNCH_COMMANDS in
+ * @shared/domain/agentLaunch — `grok` was bootable by the daemon yet invisible here, so agents
+ * reading `plano help` / `plano agent-context --json` never tried it.
+ *
+ * Deliberately a literal and NOT an import: installCli() copies out/main/cli.js into
+ * <userData>/bin as a SINGLE standalone file, so any import that rollup splits into
+ * ./chunks/* makes the installed CLI die with MODULE_NOT_FOUND. Keep this bundle
+ * dependency-free; when you add a harness, add it in both places.
+ */
+const HARNESSES = 'claude | codex | pi | omp | kiro | opencode | aider | gemini | cursor | grok'
+
+/**
+ * Named harnesses are not a closed set: anything else is looked up as an executable on this
+ * host (PATH plus the usual per-user install dirs), so an agent CLI installed here can be
+ * opened even when this list predates it.
+ */
+const HARNESS_HINT = `${HARNESSES} — or any other agent CLI installed on this host`
+
 export interface FlagSpec {
   flag: string
   /** When present, the flag takes a value (separate token or --flag=value). */
@@ -93,7 +112,7 @@ export const COMMANDS: CommandSpec[] = [
     command: 'spawn',
     summary: 'Create new agent(s) in THIS canvas: fresh terminal(s) booting a harness, placed next to my panel',
     usage: 'plano spawn <harness> [folder] [--prompt <text>] [--count N] [--wait] [--timeout-ms <ms>] [--json]',
-    args: ['<harness>', '[folder]'],
+    args: [`<harness: ${HARNESS_HINT}>`, '[folder]'],
     flags: [
       { flag: '--prompt', arg: '<text>', desc: 'task typed into each new agent once it is up' },
       { flag: '--count', arg: '<n>', desc: 'how many agents to open (max 6)' },
@@ -109,7 +128,7 @@ export const COMMANDS: CommandSpec[] = [
     usage: 'plano worktree create <folder> --agent <harness> [--prompt <text>] [--wait] [--json]',
     args: ['<folder>'],
     flags: [
-      { flag: '--agent', arg: '<harness>', desc: 'claude | codex | opencode | gemini | pi | omp | kiro | aider | cursor' },
+      { flag: '--agent', arg: '<harness>', desc: HARNESS_HINT },
       { flag: '--prompt', arg: '<text>', desc: 'task typed into the new agent once it is up' },
       { flag: '--wait', desc: 'block until the agent finishes its turn (or exits); with --json the result is folded in as wait' },
       F_TIMEOUT,

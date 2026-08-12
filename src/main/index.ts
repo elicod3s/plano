@@ -162,6 +162,13 @@ if (!app.requestSingleInstanceLock()) {
 
     // One shared process-tree snapshot powers both agent detection AND session resolution.
     const processTree = new ProcessTreeService()
+    // Pay the PowerShell worker's cold start HERE, at app startup, rather than at the first
+    // AgentDetectionService.register(). register() fires when a terminal is created, which in
+    // practice is the same second the user types `claude` — so the ~1.5s (up to ~5s on a busy
+    // machine) runtime start-up landed exactly on the keystrokes that follow, and typing felt
+    // stuck for a few seconds while the agent had already drawn its UI. Warming at boot moves
+    // that cost into the window where nothing is waiting on it.
+    processTree.warm()
     const detection = new AgentDetectionService(processTree)
     const agentSession = new AgentSessionService(detection, processTree)
     const terminalHistory = new TerminalHistoryService()

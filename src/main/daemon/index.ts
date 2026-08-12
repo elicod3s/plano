@@ -45,6 +45,7 @@ import { installCli } from './mesh/cli'
 import { installAgentHooks, parseHookRequest } from './agentHooks'
 import { UsageService } from './usage/service'
 import { launchCommandFor } from '@shared/domain/agentLaunch'
+import { probeHarnessOnHost } from './harnessResolve'
 
 /**
  * Type the spawn prompt into the agents we JUST created — addressed by their exact ptyIds.
@@ -242,8 +243,20 @@ mesh.onChainAskUser = async (chainId, from, to) => {
 // handlePhoneCreate emits `external-terminal` (live panel when the app is running, pending
 // panel otherwise) — the exact path mobile-created agents already take.
 mesh.onSpawn = (req) => {
-  const command = launchCommandFor(req.harness)
-  if (!command) return { ok: false, error: `unknown harness: ${req.harness}` }
+  // The curated table wins (some harnesses need a specific invocation, e.g. `kiro-cli chat`).
+  // Anything else falls back to probing the host: if the user names an agent CLI that is
+  // installed here, open it instead of refusing because our list predates it.
+  const known = launchCommandFor(req.harness)
+  const probe = known ? null : probeHarnessOnHost(req.harness)
+  const command = known ?? probe?.command ?? null
+  if (!command) {
+    return {
+      ok: false,
+      error:
+        `unknown harness: ${req.harness} — not in the launch table and no executable by that ` +
+        `name found on this host (searched ${(probe?.searched ?? []).join(', ')})`,
+    }
+  }
   const count = Math.max(1, Math.min(6, req.count || 1))
   // The requester's panel anchors the layout: the canvas puts the newcomers NEXT TO it at the
   // same size, instead of stacking them under the terminal that asked (which is what it did).
