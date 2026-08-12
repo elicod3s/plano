@@ -56,13 +56,25 @@
      visible width and guards against any future overflow:auto viewport. */
   .xterm .xterm-viewport {
     scrollbar-gutter: stable;
+    /* xterm's own stylesheet paints the viewport #000 (for opaque scrollbars). With
+       allowTransparency the cell background is translucent, so that #000 showed through as a
+       dark rectangle below the last rendered row. The panel body already paints the terminal
+       theme background, so the viewport must stay transparent to match it — one seamless color,
+       no inset box. */
+    background-color: transparent;
+  }
+  .xterm .xterm-screen {
+    background-color: transparent;
   }
 }
 
 @layer components {
   /* Uppercase mono micro-label used in headers, palette sections, dimension readouts. */
   .label-caps {
-    font-family: var(--font-mono);
+    /* CHROME label → the data face. `--font-mono` is the TERMINAL stack (JetBrains + symbol
+       fallbacks) and using it here left every caps label on the old typeface while the rest of
+       the chrome moved. */
+    font-family: var(--font-data);
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.08em;
@@ -120,4 +132,249 @@
     outline: 2px solid var(--focus-ring);
     outline-offset: 3px;
   }
+}
+
+@layer components {
+/* ── Layer surface hierarchy ──────────────────────────────────────────────────────
+   Every structural surface uses an OPAQUE background-color (alpha 1) — content
+   underneath can never bleed through. One owner per surface; the classes carry the
+   full material (color + edge + shadows). Internal alpha states (hover/pressed) live
+   on children of an opaque parent.
+
+   NOTE: no background-image gradients on surfaces. A radial/linear gradient in a
+   panel's background forces Chromium to re-paint + re-rasterize the whole panel
+   (terminal text included) on every pointermove over it — visible as blur/low
+   quality while the mouse moves. Solid color + lit top edge only (pre-redesign
+   look). */
+.surface-layer {
+  position: relative;
+  /* One quiet uniform edge — no brighter "top filo" line. A differentiated top border
+     reads as a stray bright line and collides with tinted (agent) borders. Elevation
+     comes entirely from the outer shadow. */
+  border: 1px solid var(--layer-edge);
+  background-color: var(--layer-panel-bg);
+  box-shadow:
+    var(--layer-shadow-contact),
+    var(--layer-shadow-panel);
+}
+.surface-layer--panel {
+  border-radius: 26px;
+  border-color: rgba(var(--glass-white), 0.08);
+  /* Canvas isolation: layout, paint and style recalc are CONTAINED inside each panel, so a
+     growing file tree (thousands of rows) can no longer invalidate the world layer's style
+     tree. Box-shadows live on this same node (not descendants), so they are not clipped;
+     any overlay that must escape a panel is portaled to the chrome (see TreeContextMenu). */
+  contain: layout paint style;
+}
+/* Inactive-surface dimming (Deska focus parity): the focused top-level surface — or any hovered
+   one — renders at full opacity; every other floating surface rests at 0.75 with a 180ms
+   var(--ease-settle) transition. Opacity is applied INLINE by the surface frames (PanelFrame /
+   DockGroupFrame) from the transient canvas-focus store plus local hover state — never from
+   z-order, never on pointer-move frames. Content and shell dim together as one piece, so the
+   shell opacity transition is the only dimming mechanism (no filter/backdrop/blur). */
+/* The ACTIVE (front) panel gets the deep 48px shadow; the rest keep the compact 24px
+   resting one. Front ≠ focus: the front marker follows z-order (bringToFront), the focus
+   marker follows the canvas-focus store. This is the pre-redesign elevation profile — one
+   expensive blur instead of one per panel, which is what kept "many panels" smooth. */
+.surface-layer--front {
+  box-shadow:
+    var(--layer-shadow-contact),
+    var(--layer-shadow-panel-front);
+}
+.surface-layer--chrome {
+  border-radius: 14px;
+  background-color: var(--layer-chrome-bg);
+  border-color: rgba(var(--glass-white), 0.09);
+  box-shadow:
+    0 2px 8px -2px rgba(0, 0, 0, 0.45);
+}
+.surface-layer--popover {
+  border-radius: 16px;
+  border-color: var(--layer-edge-strong);
+  background-color: var(--layer-popover-bg);
+  box-shadow:
+    0 12px 32px -8px rgba(0, 0, 0, 0.6),
+    0 2px 8px -2px rgba(0, 0, 0, 0.5);
+}
+.surface-layer--modal {
+  border-radius: 24px;
+  border-color: var(--layer-edge-strong);
+  background-color: var(--layer-modal-bg);
+  box-shadow:
+    var(--layer-shadow-modal);
+}
+.surface-layer--inset {
+  border-radius: 12px;
+  border-color: transparent;
+  background-color: var(--layer-inset-bg);
+  background-image: none;
+  box-shadow: inset 0 1px 0 rgba(0, 0, 0, 0.35);
+}
+}
+
+/* Plan F7 + v3 E: the mesh link pulses — pure CSS along the bezier (offset-path).
+ * mesh-pulse-loop: persistent 'active' relation, slow continuous travel.
+ * mesh-breathe: waiting dot at the receiver's end. */
+@keyframes mesh-pulse {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+@keyframes mesh-pulse-loop {
+  from { offset-distance: 0%; }
+  to { offset-distance: 100%; }
+}
+@keyframes mesh-breathe {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+/* v4 A3: the awaiting-input dot in the panel header breathes amber. */
+/*
+ * Activity meter (workspace switcher). Gated by PLANO's OWN motion setting (data-motion on the
+ * root) instead of `prefers-reduced-motion`: over RDP — and on any machine with the OS toggle on —
+ * Windows reports "reduce", which silently froze every `motion-safe:` animation even though the
+ * user never asked PLANO to stop moving. The app setting is the one the user actually controls.
+ */
+@keyframes eq-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+[data-motion='full'] .eq-bar {
+  animation: eq-bar 900ms ease-in-out infinite;
+}
+[data-motion='full'] .ws-breathe {
+  animation: mesh-breathe 2.4s ease-in-out infinite;
+}
+
+
+/*
+ * In progress: a thin arc turning — the indeterminate progress indicator Apple uses when work is
+ * running and its length is unknown (Finder copy, Mail fetch). Chosen over an equalizer/waveform
+ * because bars imply sound, and over a pulsing dot because that is the badge every tool ships.
+ */
+@keyframes ws-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+[data-motion='full'] .ws-spin {
+  animation: ws-spin 1000ms linear infinite;
+  transform-origin: center;
+}
+
+/* Blocked: no motion — stillness is the message — and an amber rim that breathes. */
+.ws-blocked {
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.55);
+}
+[data-motion='full'] .ws-blocked {
+  animation: mesh-breathe 1.8s ease-in-out infinite;
+}
+
+.mesh-waiting-dot {
+  animation: mesh-breathe 1.4s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  /*
+ * Activity meter (workspace switcher). Gated by PLANO's OWN motion setting (data-motion on the
+ * root) instead of `prefers-reduced-motion`: over RDP — and on any machine with the OS toggle on —
+ * Windows reports "reduce", which silently froze every `motion-safe:` animation even though the
+ * user never asked PLANO to stop moving. The app setting is the one the user actually controls.
+ */
+@keyframes eq-bar {
+  0%,
+  100% {
+    transform: scaleY(0.35);
+  }
+  50% {
+    transform: scaleY(1);
+  }
+}
+[data-motion='full'] .eq-bar {
+  animation: eq-bar 900ms ease-in-out infinite;
+}
+[data-motion='full'] .ws-breathe {
+  animation: mesh-breathe 2.4s ease-in-out infinite;
+}
+
+
+/*
+ * In progress: a thin arc turning — the indeterminate progress indicator Apple uses when work is
+ * running and its length is unknown (Finder copy, Mail fetch). Chosen over an equalizer/waveform
+ * because bars imply sound, and over a pulsing dot because that is the badge every tool ships.
+ */
+@keyframes ws-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+[data-motion='full'] .ws-spin {
+  animation: ws-spin 1000ms linear infinite;
+  transform-origin: center;
+}
+
+/* Blocked: no motion — stillness is the message — and an amber rim that breathes. */
+.ws-blocked {
+  box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.55);
+}
+[data-motion='full'] .ws-blocked {
+  animation: mesh-breathe 1.8s ease-in-out infinite;
+}
+
+.mesh-waiting-dot {
+    animation: none;
+  }
+}
+
+/* Plan F7: mesh arrival — accent border fade on the receiver panel. */
+.mesh-arrival {
+  border-radius: 26px;
+  opacity: 1;
+  animation: mesh-arrival 1.4s ease-out forwards;
+}
+/* v4 awareness: toasts enter fast (short drop + opacity), leave slow with settle. */
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+.animate-toast-in {
+  animation: toast-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.animate-toast-out {
+  animation: toast-out 240ms var(--ease-settle) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-toast-in,
+  .animate-toast-out {
+    animation-duration: 1ms;
+  }
+}
+@keyframes mesh-arrival {
+  0% { opacity: 1; }
+  70% { opacity: 0.55; }
+  100% { opacity: 0; }
+}
+/* v4 A3: unconfirmed delivery (written-but-unconfirmed) — one dimmer pulse. */
+.mesh-arrival--dim {
+  animation-duration: 0.8s;
+  opacity: 0.5;
 }

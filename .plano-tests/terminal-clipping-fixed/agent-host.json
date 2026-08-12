@@ -1,0 +1,10 @@
+{
+  "pid": 900,
+  "port": 61383,
+  "token": "82d219c8-0ca4-4ab7-8535-8cd839ff7ecd",
+  "webPort": 61384,
+  "mdns": "plano.local",
+  "version": "0.2.2",
+  "startedAt": 1786225118117,
+  "ptyAvailable": true
+}

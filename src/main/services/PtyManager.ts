@@ -1,17 +1,20 @@
 /**
- * PtyManager — owns every node-pty process and bridges it to the renderer.
+ * PtyManager — the main-process owner of terminal lifecycle + the renderer bridge.
  *
- * For each terminal it: spawns a ConPTY/PTY shell, streams output to the renderer AND
- * to AgentDetectionService (same bytes), forwards keystrokes/resizes, and tree-kills
- * cleanly on close. It is the source of each shell's PID (the root for agent detection).
+ * The actual PTY processes live in the detached Agent Host (see AgentHostClient + daemon/index.ts),
+ * so they survive the app quitting — this is the herdr-style guarantee that agents never close. This
+ * class: creates sessions via the host, forwards write/resize/kill, bridges host events (data/exit)
+ * to the renderer, and re-registers agent detection / history / dev-url / agent-session wiring
+ * whenever a session (re)appears — both on create and on restore (an app relaunch re-attaching to
+ * the still-running host).
+ *
+ * Streaming semantics mirror the old in-process design exactly: the host streams output ONLY for
+ * sessions the renderer has `attach`ed (it buffers otherwise, up to a bounded ring), and replays the
+ * buffer on attach. Exit events are delivered even for detached sessions so the renderer's status
+ * stays truthful.
  */
 
-import { execFileSync } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { existsSync, readdirSync, statSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { basename, join } from 'node:path'
-import type { IPty } from 'node-pty'
 import { CH } from '@shared/ipc/channels'
 import type {
   TerminalCreateRequest,
@@ -23,6 +26,8 @@ import type { AgentDetectionService } from './AgentDetectionService'
 import type { AgentSessionService } from './AgentSessionService'
 import type { TerminalHistoryService } from './TerminalHistoryService'
 import type { DevUrlService } from './DevUrlService'
+import type { AgentContextService } from './AgentContextService'
+import { AgentHostClient, type HostCreateRequest } from './AgentHostClient'
 
 type Post = (channel: string, payload: unknown) => void
 
@@ -34,686 +39,371 @@ interface PtyDeps {
   agentSession: AgentSessionService
 }
 
-interface PtyEntry {
-  pty: IPty
+/** Stable identity + live metadata for one PTY — what the agent mesh resolves against. */
+interface PtyMeta {
+  ptyId: string
+  terminalId: string
   panelId: string
+  spaceId: string
+  cwd: string
+  title: string
   shellName: string
-  /**
-   * Whether a renderer panel is currently mounted on this PTY. A terminal whose panel lives
-   * in another workspace ("space") is DETACHED: its shell keeps running, output is buffered,
-   * but nothing is streamed to the renderer until the panel remounts and reattaches.
-   */
-  attached: boolean
-  /** Set once the shell process exits; the entry lingers (with its buffer) until kill(). */
+  pid: number
   exited: boolean
-  exitCode?: number
-  exitSignal?: number
-  /** Bounded ring buffer of recent raw output, replayed on reattach (chunks + total length). */
-  buffer: string[]
-  bufferLen: number
+  attached: boolean
 }
 
-// Recent output kept per terminal so a panel returning from another space can replay it.
-// Generous enough to reconstruct an agent's scrollback; bounded so background terminals
-// can't grow without limit. Trimmed whole-chunk from the front on overflow.
-const REPLAY_BUFFER_MAX = 2_000_000
-
-function defaultShell(): string {
-  if (process.platform === 'win32') return process.env.PLANO_SHELL || 'powershell.exe'
-  return process.env.SHELL || '/bin/bash'
-}
-
-/**
- * Markers that identify a real project root. Presence of ANY one means "this folder is the thing
- * the user came to work on", so a terminal should start here and `npm`/`git`/etc. resolve to it.
- * Kept broad across ecosystems; each is checked as a direct child of the folder.
- */
-const PROJECT_MARKERS = [
-  'package.json',
-  '.git',
-  'pyproject.toml',
-  'requirements.txt',
-  'Pipfile',
-  'Cargo.toml',
-  'go.mod',
-  'pom.xml',
-  'build.gradle',
-  'Gemfile',
-  'composer.json',
-  'CMakeLists.txt',
-]
-
-function hasProjectMarker(dir: string): boolean {
-  return PROJECT_MARKERS.some((m) => existsSync(join(dir, m)))
-}
-
-/**
- * Folder names that are clearly NOT the live project — backups, archives, copies, dated dumps.
- * Skipped when auto-locating the project inside a container folder so a terminal never lands in
- * someone's `…-BACKUP-2026…` / `__OLD__` copy. Matched case-insensitively.
- */
-const NON_PROJECT_DIR =
-  /(?:^|[-_ ])(?:backup|backups|bak|archive|archived|old|orig|copy|dump|snapshot)s?(?:[-_ ]|$)|__|\bv?\d{4}-\d{2}-\d{2}\b/i
-
-/** Loose name comparison so a container like "Click-Sync (working)" matches its inner "Click-Sync". */
-function namesRelated(a: string, b: string): boolean {
-  const na = a.toLowerCase().replace(/[^a-z0-9]/g, '')
-  const nb = b.toLowerCase().replace(/[^a-z0-9]/g, '')
-  if (na.length < 3 || nb.length < 3) return false
-  return na === nb || na.startsWith(nb) || nb.startsWith(na)
-}
-
-/**
- * Locate the project root to open a terminal in, given the workspace folder. The common case —
- * the workspace folder IS the project (it has a package.json/.git/…) — returns it unchanged. The
- * case this fixes: the user opened a *container* folder (e.g. `…\Click-Sync (working)\`, full of
- * backups + zips) whose actual code lives one level down (`…\Click-Sync\`). Then `npm`/`git` typed
- * at the workspace root fail with "no package.json here". So when the root has no project marker we
- * look one level down for a single, unambiguous subproject and start there instead.
- *
- * Conservative by design: descends only ONE level, ignores backup/archive/copy folders, and when
- * several real subprojects exist only descends if exactly one shares the container's name —
- * otherwise it stays at the workspace folder rather than guess wrong. Never throws.
- */
-function findProjectRoot(dir: string): string {
-  try {
-    if (hasProjectMarker(dir)) return dir
-
-    const subdirs = readdirSync(dir, { withFileTypes: true })
-      .filter((e) => e.isDirectory())
-      .map((e) => e.name)
-      .filter((name) => !name.startsWith('.') && name !== 'node_modules')
-
-    const candidates = subdirs.filter(
-      (name) => !NON_PROJECT_DIR.test(name) && hasProjectMarker(join(dir, name)),
-    )
-    if (candidates.length === 0) return dir
-    if (candidates.length === 1) return join(dir, candidates[0])
-
-    // Several real subprojects — only descend if exactly one is named like the container folder.
-    const named = candidates.filter((name) => namesRelated(basename(dir), name))
-    return named.length === 1 ? join(dir, named[0]) : dir
-  } catch {
-    return dir
-  }
-}
-
-/**
- * Resolve the directory a new shell starts in. A terminal carries the open workspace/folder
- * path when there is one; otherwise we default to the user's HOME — exactly where a fresh
- * Windows terminal (or Warp) opens — so per-directory tools run inside it (notably
- * `claude --resume`) see the SAME session history as a normal terminal.
- *
- * When `autoDetectRoot` is set (a plain terminal opened on the workspace folder — NOT one a user
- * explicitly rooted at a folder they picked in the Files panel) we refine that folder to the
- * actual project root inside it via findProjectRoot, so `npm`/`git`/etc. just work with no manual
- * `cd` even when the opened folder is a container holding the real project in a subfolder.
- *
- * We deliberately NEVER fall back to the Electron process cwd: in the packaged app that is
- * PLANO's install folder (…\Programs\PLANO), which silently made `/resume` list a different,
- * empty "project". A requested path that no longer exists also falls back to HOME so a stale
- * folder reference can't stop a terminal from spawning.
- */
-function resolveCwd(requested?: string, autoDetectRoot = false): string {
-  if (requested) {
-    try {
-      if (statSync(requested).isDirectory()) {
-        return autoDetectRoot ? findProjectRoot(requested) : requested
-      }
-    } catch {
-      /* requested cwd vanished — fall through to home */
-    }
-  }
-  return homedir()
-}
-
-/**
- * Startup script injected into PowerShell-family shells to deliver the Warp-style inline
- * predictive history (`predictiveHistory` setting). It enables PSReadLine's history
- * predictor (inline ghost text), rebinds Tab to "accept the suggestion, else complete", and
- * registers an OnIdle drain that lets PLANO inject remembered commands (e.g. an AI CLI's
- * `claude --resume <id>`, captured by TerminalHistoryService) into the LIVE session's history
- * with no echo — so they're predicted in the very terminal they appeared in.
- *
- * Each step is wrapped on its own so a non-VT console (which rejects PredictionViewStyle)
- * still gets the rest. PSReadLine ≥ 2.1 is required for prediction; on 5.1's bundled 2.0.0
- * we force-load a newer side-by-side copy before the first prompt (the proven $PROFILE
- * trick). History persistence works on every version, so this only ever adds capability.
- */
-const PS_PREDICTIVE_INIT = [
-  `try {`,
-  `  $m = Get-Module PSReadLine`,
-  `  if (-not $m -or $m.Version -lt [version]'2.1.0') {`,
-  `    Remove-Module PSReadLine -Force -ErrorAction SilentlyContinue`,
-  `    Import-Module PSReadLine -MinimumVersion 2.1.0 -ErrorAction Stop`,
-  `  }`,
-  `} catch {}`,
-  `try { Set-PSReadLineOption -HistoryNoDuplicates -HistorySaveStyle SaveIncrementally -MaximumHistoryCount 8192 } catch {}`,
-  `try { Set-PSReadLineOption -PredictionSource History -PredictionViewStyle InlineView } catch {}`,
-  `try {`,
-  `  Set-PSReadLineKeyHandler -Key Tab -BriefDescription 'PlanoAcceptOrComplete' -LongDescription 'Accept the inline history prediction, otherwise menu-complete' -ScriptBlock {`,
-  `    param($key, $arg)`,
-  `    $line = $null; $cur = $null`,
-  `    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cur)`,
-  `    $before = $line`,
-  `    [Microsoft.PowerShell.PSConsoleReadLine]::AcceptSuggestion($key, $arg)`,
-  `    [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$line, [ref]$cur)`,
-  `    if ($line -eq $before) { [Microsoft.PowerShell.PSConsoleReadLine]::MenuComplete($key, $arg) }`,
-  `  }`,
-  `} catch {}`,
-  // OnIdle drain: while at an idle prompt, fold any commands PLANO captured (keyed to this
-  // shell's PID) into the in-memory history so they're predicted immediately, without echo.
-  `try {`,
-  `  $global:__planoPending = Join-Path $env:TEMP ('plano_pending_history_' + $PID + '.txt')`,
-  `  Register-EngineEvent -SourceIdentifier PowerShell.OnIdle -Action {`,
-  `    try {`,
-  `      if (Test-Path $global:__planoPending) {`,
-  `        $lines = Get-Content -LiteralPath $global:__planoPending -ErrorAction Stop`,
-  `        Remove-Item -LiteralPath $global:__planoPending -Force -ErrorAction SilentlyContinue`,
-  `        foreach ($l in $lines) { if ($l) { [Microsoft.PowerShell.PSConsoleReadLine]::AddToHistory($l) } }`,
-  `      }`,
-  `    } catch {}`,
-  `  } | Out-Null`,
-  `} catch {}`,
-].join('\n')
-
-/**
- * Force UTF-8 on a PowerShell-family shell: console I/O, the pipeline to native programs, AND the
- * DEFAULT file encoding for Set-Content / Out-File / Add-Content / `>`. Windows PowerShell 5.1
- * otherwise falls back to the legacy OEM/ANSI code page, which turns accents and emoji into
- * mojibake whenever a tool writes or round-trips a UTF-8 file — e.g. `Set-Content` mangled
- * "número café 🚀" into "n�mero caf� ??". This is applied to EVERY PowerShell terminal (not just
- * when predictive history is on), since correct encoding is fundamental, not optional.
- *
- * Each line is wrapped on its own so one rejection (e.g. a host that refuses to set InputEncoding)
- * can't skip the rest. The `$false` constructor arg selects UTF-8 WITHOUT a BOM.
- */
-const PS_UTF8_INIT = [
-  `try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}`,
-  `try { [Console]::InputEncoding  = New-Object System.Text.UTF8Encoding $false } catch {}`,
-  `try { $OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch {}`,
-  `try { $PSDefaultParameterValues['*:Encoding'] = 'utf8' } catch {}`,
-].join('\n')
-
-/**
- * Make a PowerShell shell report its working directory on every prompt via OSC 7
- * (`ESC ] 7 ; file:///<path> BEL`) — the same mechanism Windows Terminal / iTerm use. PLANO's
- * xterm consumes the sequence (it's never displayed) and updates that terminal's git badge, so the
- * badge follows a live `cd` between repos. We WRAP the existing prompt (saving and calling the
- * original) instead of replacing it, so a user's custom prompt (posh-git, Starship, …) is kept; the
- * OSC is written as a side effect BEFORE the prompt string, so it can't affect PSReadLine's width
- * math. Guarded against double-wrapping, and every step is in try/catch so it can never break a shell.
- */
-const PS_OSC7_CWD_INIT = [
-  `try {`,
-  `  if (-not $global:__planoCwdHook) {`,
-  `    $global:__planoCwdHook = $true`,
-  `    $global:__planoOrigPrompt = $function:prompt`,
-  `    function global:prompt {`,
-  `      try {`,
-  `        $loc = $ExecutionContext.SessionState.Path.CurrentLocation`,
-  `        if ($loc -and $loc.Provider.Name -eq 'FileSystem') {`,
-  `          $u = $loc.ProviderPath -replace '\\\\','/'`,
-  `          [Console]::Write([char]27 + ']7;file:///' + $u + [char]7)`,
-  `        }`,
-  `      } catch {}`,
-  `      if ($global:__planoOrigPrompt) { & $global:__planoOrigPrompt } else { 'PS ' + $PWD.Path + '> ' }`,
-  `    }`,
-  `  }`,
-  `} catch {}`,
-].join('\n')
-
-/** PowerShell reads -EncodedCommand as base64 of UTF-16LE — sidesteps all arg-quoting. */
-function encodePwshCommand(script: string): string {
-  return Buffer.from(script, 'utf16le').toString('base64')
-}
-
-/**
- * Extra spawn args for the resolved shell. PowerShell/pwsh ALWAYS gets the UTF-8 startup script
- * (PS_UTF8_INIT) so file + console encoding is correct; when predictive history is on we append
- * the PSReadLine prediction setup (PS_PREDICTIVE_INIT) too. Both run via -EncodedCommand (so
- * quoting can't bite) and we keep the session interactive with -NoExit. Other shells handle UTF-8
- * and history natively → no args.
- */
-function buildShellArgs(shell: string, predictiveHistory: boolean, bootCommand?: string): string[] {
-  const base = (shell.split(/[\\/]/).pop() || shell).toLowerCase().replace(/\.exe$/, '')
-  if (base === 'powershell' || base === 'pwsh') {
-    const core = predictiveHistory ? `${PS_UTF8_INIT}\n${PS_PREDICTIVE_INIT}` : PS_UTF8_INIT
-    // OSC-7 cwd reporting is always on (independent of predictive history) so the git badge tracks `cd`.
-    // A boot command is appended LAST so it runs the instant the (interactive) shell is set up — far
-    // faster than waiting for the first prompt + a renderer round-trip. -NoExit keeps the session
-    // alive after the agent exits, dropping the user at a normal prompt.
-    const script = bootCommand
-      ? `${core}\n${PS_OSC7_CWD_INIT}\n${bootCommand}`
-      : `${core}\n${PS_OSC7_CWD_INIT}`
-    return ['-NoLogo', '-NoExit', '-EncodedCommand', encodePwshCommand(script)]
-  }
-  return []
-}
-
-/** Does this shell receive its startup script via -EncodedCommand (so a boot command is injected
- *  there) vs. needing the boot command written to its stdin after spawn (bash/zsh/cmd)? */
-function shellTakesArgsScript(shell: string): boolean {
-  const base = (shell.split(/[\\/]/).pop() || shell).toLowerCase().replace(/\.exe$/, '')
-  return base === 'powershell' || base === 'pwsh'
-}
-
-/**
- * Names (exact) injected by a launching process that must NOT leak into a fresh shell.
- * Compared case-insensitively (Windows env vars are case-insensitive).
- */
-const ENV_STRIP_EXACT = new Set(['init_cwd', 'electron_run_as_node', 'claudecode', 'claude_effort'])
-/**
- * Name PREFIXES injected by a launcher that must NOT leak into a fresh shell.
- * - `npm_`     → npm's run-context (npm_config_*, npm_lifecycle_*, npm_package_*, npm_execpath …)
- * - `claude_code_` → an AI CLI's child-session identity (CLAUDE_CODE_CHILD_SESSION, _SESSION_ID …)
- * - `vscode_`  → "launched from VS Code" markers
- */
-const ENV_STRIP_PREFIX = ['npm_', 'claude_code_', 'vscode_']
-
-/**
- * Build the environment for a spawned shell.
- *
- * PLANO is very often started via `npm run dev` and/or from inside another tool's session
- * (an AI coding CLI, VS Code, …). Node/npm and those launchers inject a pile of context vars
- * into OUR process — and a naive copy of `process.env` would leak ALL of them into every
- * terminal we spawn, making the shell behave like it's still running inside that launcher
- * instead of being a fresh, normal terminal. This has concretely bitten us:
- *   - npm's run-context (`npm_config_local_prefix`, `npm_lifecycle_*`, `INIT_CWD`, …) made an
- *     `npm install` typed in a PLANO terminal target PLANO's project / a stale prefix instead
- *     of the folder the user is actually in — so it appeared to "do nothing".
- *   - An AI CLI's child-session markers (CLAUDECODE / CLAUDE_CODE_*) made an agent launched
- *     INSIDE a PLANO terminal believe it was a nested/sandboxed child session, so it refused
- *     network + file operations.
- *
- * So we strip the known launcher/run-context pollution. Everything else (PATH, user config,
- * auth tokens, etc.) is preserved, so the terminal behaves exactly like one the user opens
- * from their desktop. node-pty also wants a string→string env with no undefined values.
- */
-function cleanEnv(): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [key, value] of Object.entries(process.env)) {
-    if (typeof value !== 'string') continue
-    const lk = key.toLowerCase()
-    if (ENV_STRIP_EXACT.has(lk)) continue
-    if (ENV_STRIP_PREFIX.some((p) => lk.startsWith(p))) continue
-    out[key] = value
-  }
-  out.TERM = 'xterm-256color'
-  out.COLORTERM = 'truecolor'
-
-  // Windows: refresh PATH from the registry so a terminal sees CLIs installed AFTER PLANO launched
-  // (see liveWindowsPath). Overwrite whichever case-variant key already holds PATH so we never end
-  // up with both `Path` and `PATH`. A failed/empty read leaves the inherited PATH untouched.
-  if (process.platform === 'win32') {
-    let pathKey = 'Path'
-    let current = ''
-    for (const k of Object.keys(out)) {
-      if (k.toLowerCase() === 'path') {
-        pathKey = k
-        current = out[k]
-        break
-      }
-    }
-    const live = liveWindowsPath(current)
-    if (live) out[pathKey] = live
-  }
-
-  return out
-}
-
-/**
- * Read a registry string value (REG_SZ / REG_EXPAND_SZ) via `reg query`. Returns '' if the value
- * is absent or `reg` fails — callers must treat '' as "unknown", never as "empty PATH". Synchronous
- * by design: it runs once per terminal spawn (a discrete user action), and `reg.exe` is a fast
- * native query, so the brief block is imperceptible and keeps the env build straight-line.
- */
-function readRegValue(root: string, name: string): string {
-  try {
-    const out = execFileSync('reg', ['query', root, '/v', name], {
-      encoding: 'utf8',
-      windowsHide: true,
-      timeout: 4000,
-    })
-    // `reg` prints: "    <name>    REG_EXPAND_SZ    <value>" — the value may contain spaces and ';',
-    // so anchor on the type token and take the rest of that line.
-    const m = out.match(/REG_(EXPAND_)?SZ\s+(.*)$/m)
-    if (!m) return ''
-    const value = m[2].trim()
-    // Only REG_EXPAND_SZ carries `%VAR%` references Windows expands; a plain REG_SZ is literal
-    // (so a path that legitimately contains a `%…%` pair isn't mangled).
-    return m[1] ? expandWinVars(value) : value
-  } catch {
-    return ''
-  }
-}
-
-/** Expand `%VAR%` references against the current process env (lookups are case-insensitive on Windows). */
-function expandWinVars(value: string): string {
-  return value.replace(/%([^%]+)%/g, (whole, name: string) => {
-    const v = process.env[name]
-    return typeof v === 'string' ? v : whole
-  })
-}
-
-/**
- * The PATH a freshly-opened Windows terminal would have: Machine PATH followed by User PATH, read
- * LIVE from the registry (HKLM/HKCU Environment) and expanded. PLANO's own `process.env.PATH` is
- * captured at launch and goes stale — when the user installs a CLI (Kiro, etc.) its installer
- * appends to the registry PATH and broadcasts WM_SETTINGCHANGE, but our long-running process never
- * sees it, so the CLI "is not recognized" in a PLANO terminal even though a NEW OS terminal finds
- * it. Re-reading the registry per spawn makes a new PLANO terminal behave like a new OS terminal.
- *
- * Merge order: the live registry PATH first (matching real launch order), then any entry still in
- * our process PATH that isn't already present (appended). So we ADD newly-installed locations
- * without ever LOSING one that already resolved (e.g. a path a launcher injected only into our
- * process). Returns '' if BOTH registry reads fail → the caller keeps the inherited PATH untouched,
- * so a terminal that worked before never breaks.
- */
-function liveWindowsPath(processPath: string): string {
-  const machine = readRegValue(
-    'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
-    'Path',
-  )
-  const user = readRegValue('HKCU\\Environment', 'Path')
-  const registryPath = [machine, user].filter(Boolean).join(';')
-  if (!registryPath) return ''
-
-  const seen = new Set<string>()
-  const parts: string[] = []
-  for (const source of [registryPath, processPath]) {
-    for (const raw of source.split(';')) {
-      const entry = raw.trim()
-      if (!entry) continue
-      // Dedupe case-insensitively, ignoring a trailing slash, so the same dir isn't listed twice.
-      const key = entry.toLowerCase().replace(/[\\/]+$/, '')
-      if (seen.has(key)) continue
-      seen.add(key)
-      parts.push(entry)
-    }
-  }
-  return parts.join(';')
-}
-
-/**
- * node-pty is a native module that must be built against Electron's ABI. We load it
- * lazily and tolerate failure so the whole app still launches if it hasn't been built
- * yet (e.g. `npm run rebuild` not run / no C++ build tools) — terminals then show guidance
- * instead of crashing the main process.
- */
-type PtyModule = typeof import('node-pty')
-let ptyModule: PtyModule | null = null
-let ptyLoadError: string | null = null
-
-function loadPty(): PtyModule | null {
-  if (ptyModule) return ptyModule
-  if (ptyLoadError) return null
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    ptyModule = require('node-pty') as PtyModule
-    return ptyModule
-  } catch (err) {
-    ptyLoadError = err instanceof Error ? err.message : String(err)
-    return null
-  }
-}
-
-const PTY_UNAVAILABLE_MESSAGE =
-  '\r\n\x1b[2m  PLANO — the terminal engine (node-pty) is not built for Electron yet.\r\n' +
-  '  Run \x1b[0m\x1b[1mnpm run rebuild\x1b[0m\x1b[2m (requires the Visual Studio "Desktop development with C++" workload),\r\n' +
-  '  then reopen this terminal.\x1b[0m\r\n'
-
-/**
- * Spawn a PTY, swallowing the failure modes that must NOT crash the IPC handler: a missing or
- * mistyped shell executable (e.g. a Shell setting of `pwsh`/`bash` on a machine without it, or a
- * bad explicit shell path), and node-pty's known ConPTY `AttachConsole failed` throw on Windows
- * (see CLAUDE.md). Returns the live IPty on success or the Error on failure, so the caller can fall
- * back to the platform default and surface a readable message instead of rejecting the call.
- */
-function safeSpawn(
-  mod: PtyModule,
-  shell: string,
-  args: string[],
-  opts: Parameters<PtyModule['spawn']>[2],
-): IPty | Error {
-  try {
-    return mod.spawn(shell, args, opts)
-  } catch (err) {
-    return err instanceof Error ? err : new Error(String(err))
-  }
-}
-
-/** Notice streamed when a requested shell can't launch but the default could (we swapped it in). */
-function shellFellBackMessage(requested: string, fallback: string, err: string): string {
-  return (
-    "\r\n\x1b[2m  PLANO — couldn't start \x1b[0m\x1b[1m" +
-    requested +
-    '\x1b[0m\x1b[2m (' +
-    err +
-    ').\r\n' +
-    '  Using \x1b[0m\x1b[1m' +
-    fallback +
-    '\x1b[0m\x1b[2m instead — change it in Settings → Terminal → Shell.\x1b[0m\r\n'
-  )
-}
-
-/** Message streamed when no shell at all could be launched (the terminal then reports exit). */
-function shellFailedMessage(shell: string, err: string): string {
-  return (
-    "\r\n\x1b[2m  PLANO — couldn't start the shell \x1b[0m\x1b[1m" +
-    shell +
-    '\x1b[0m\x1b[2m.\r\n' +
-    '  ' +
-    err +
-    '\r\n  Check Settings → Terminal → Shell / Shell path, then reopen this terminal.\x1b[0m\r\n'
-  )
-}
+/** Message streamed when the Agent Host can't be reached (degraded, never crashes). */
+const AGENT_HOST_UNAVAILABLE_MESSAGE =
+  '\r\n\x1b[2m  PLANO — the background Agent Host could not be started.\r\n' +
+  '  Terminals can\u2019t spawn right now; check the log at <userData>/logs/agent-host.log\r\n' +
+  '  and reopen this terminal.\x1b[0m\r\n'
 
 export class PtyManager {
-  private readonly entries = new Map<string, PtyEntry>()
+  private readonly host: AgentHostClient
+  private readonly meta = new Map<string, PtyMeta>()
+  /** Canonical context sink (AgentContextService) — attached after construction in main. */
+  private context: AgentContextService | null = null
 
-  constructor(private readonly deps: PtyDeps) {}
+  constructor(
+    private readonly deps: PtyDeps,
+    userDataPath: string,
+    log: (event: string, details?: unknown) => void,
+    webRoot?: string,
+  ) {
+    this.host = new AgentHostClient(userDataPath, log, webRoot)
+    // Bridge host events to the renderer + the sniffers. The host streams ONLY attached sessions;
+    // exit arrives for every session.
+    this.host.onEvent((frame) => {
+      if (frame.event === 'data') {
+        this.onHostData(String(frame.ptyId ?? ''), String(frame.data ?? ''))
+      } else if (frame.event === 'exit') {
+        this.onHostExit(
+          String(frame.ptyId ?? ''),
+          typeof frame.exitCode === 'number' ? frame.exitCode : 0,
+          typeof frame.signal === 'number' ? frame.signal : undefined,
+        )
+      } else if (frame.event === 'session-removed') {
+        // A terminal was closed (e.g. from the phone) — the renderer must drop its canvas panel.
+        this.deps.post(CH.terminalSessionRemoved, {
+          ptyId: String(frame.ptyId ?? ''),
+          panelId: String(frame.panelId ?? ''),
+          terminalId: String(frame.terminalId ?? ''),
+        })
+        this.meta.delete(String(frame.ptyId ?? ''))
+      } else if (frame.event === 'usage') {
+        // Status bar (plan PLAN_STATUS_BAR_LIVE_USAGE): the host's collector pushed a snapshot.
+        this.deps.post(CH.usageChanged, frame.usage)
+      } else if (frame.event === 'statusbar-aux') {
+        // Ports + resources re-scanned by the host.
+        this.deps.post(CH.statusbarAuxChanged, frame.aux)
+      }
+    })
+  }
 
-  create(req: TerminalCreateRequest): TerminalCreateResult {
-    const shell = req.shell || defaultShell()
-    const shellName = (shell.split(/[\\/]/).pop() || shell).replace(/\.exe$/i, '')
+  /** Wire the canonical context service into the PTY lifecycle (register/feed/verdict/exit). */
+  attachContext(context: AgentContextService): void {
+    this.context = context
+  }
+
+  /** v4 A5: fire one raw host RPC (e.g. chainCancel from the Mesh view). */
+  hostRpc(method: string, params: Record<string, unknown>): Promise<unknown> {
+    return this.host.request(method, params)
+  }
+
+  // ── host event plumbing ───────────────────────────────────────────────────
+
+  private onHostData(ptyId: string, data: string): void {
+    if (!ptyId || !data) return
+    const entry = this.meta.get(ptyId)
+    if (!entry || !entry.attached) return
+    this.deps.post(CH.terminalData, { ptyId, data })
+    this.deps.detection.feed(ptyId, data)
+    this.deps.history.feed(ptyId, data)
+    this.deps.devUrls.feed(ptyId, data)
+    this.context?.feed(ptyId, data)
+  }
+
+  private onHostExit(ptyId: string, exitCode: number, signal?: number): void {
+    const entry = this.meta.get(ptyId)
+    if (entry) {
+      entry.exited = true
+      entry.attached = false
+    }
+    // Always post exit — a detached (hibernated) terminal's shell finishing in the background must
+    // still be reflected in the renderer (the supervisor marks its runtime exited + clears the
+    // stale verdict). The `terminal:data` stream stays gated to `attached`, but exit is a one-shot
+    // event, not a stream, so it's cheap to always deliver.
+    this.deps.post(CH.terminalExit, { ptyId, exitCode, signal })
+    this.context?.markExited(ptyId)
+    // The live process is gone, so stop tracking it — but KEEP the meta entry (so a panel that
+    // reattaches still sees the exited flag + replay buffer from the host). Cleared by kill().
+    this.deps.detection.unregister(ptyId)
+    this.deps.agentSession.unregister(ptyId)
+    this.deps.history.unregister(ptyId)
+    this.deps.devUrls.unregister(ptyId)
+  }
+
+  // ── session create / restore ──────────────────────────────────────────────
+
+  /** Wire detection/history/dev-url/agent-session/context for a live shell (create OR restore). */
+  private registerWiring(
+    ptyId: string,
+    pid: number,
+    shellName: string,
+    predictive: boolean,
+    spaceId: string,
+    panelId: string,
+    terminalId: string,
+    cwd: string,
+  ): void {
+    // Preserve a live entry's state: restoreSessions can re-register a session that is ALREADY
+    // attached/streaming (renderer reload, repeated restore calls) — clobbering `attached` back
+    // to false would make main drop its data until the next attach.
+    const existing = this.meta.get(ptyId)
+    this.meta.set(ptyId, {
+      ptyId,
+      terminalId,
+      panelId,
+      spaceId,
+      cwd,
+      title: existing?.title ?? '',
+      shellName,
+      pid,
+      exited: existing?.exited ?? false,
+      attached: existing?.attached ?? false,
+    })
+    this.deps.detection.register(ptyId, pid, (verdict) => {
+      this.deps.post(CH.agentSignal, { ptyId, verdict })
+      this.context?.updateVerdict(ptyId, verdict)
+      // Keep the mobile view truthful: push the rich verdict to the host, which relays it to
+      // phone WebSocket clients (fallback: the host's own light detection when the app is closed).
+      void this.host.reportVerdict(ptyId, verdict).catch(() => undefined)
+    })
+    this.deps.agentSession.register(ptyId, pid)
+    this.deps.history.register(ptyId, shellName, pid, predictive)
+    this.context?.register(ptyId)
+    this.deps.devUrls.register(ptyId, (url) => {
+      if (this.meta.get(ptyId)?.attached) {
+        this.deps.post(CH.terminalUrlDetected, { ptyId, panelId: this.meta.get(ptyId)?.panelId ?? '', url })
+      }
+    })
+  }
+
+  private unregisterWiring(ptyId: string): void {
+    this.meta.delete(ptyId)
+    this.deps.detection.unregister(ptyId)
+    this.deps.agentSession.unregister(ptyId)
+    this.deps.history.unregister(ptyId)
+    this.deps.devUrls.unregister(ptyId)
+    this.context?.unregister(ptyId)
+  }
+
+  async create(req: TerminalCreateRequest): Promise<TerminalCreateResult> {
     const ptyId = randomUUID()
-
-    const mod = loadPty()
-    if (!mod) {
-      // Degrade gracefully: stream a guidance message, then report exit.
+    try {
+      await this.host.ensureHost()
+    } catch {
+      // Host down (rare — it's detached, so normally it's up): degrade like the node-pty-missing
+      // path — stream a guidance message, then report exit.
       queueMicrotask(() => {
-        this.deps.post(CH.terminalData, { ptyId, data: PTY_UNAVAILABLE_MESSAGE })
+        this.deps.post(CH.terminalData, { ptyId, data: AGENT_HOST_UNAVAILABLE_MESSAGE })
         this.deps.post(CH.terminalExit, { ptyId, exitCode: 1 })
       })
       return { ptyId, pid: -1, shellName: 'unavailable', cwd: '' }
     }
 
-    const cwd = resolveCwd(req.cwd, req.autoDetectRoot)
-    const boot = req.bootCommand?.trim() || undefined
-    // A boot (agent launch) skips the predictive-history init: it's the slowest part of PowerShell
-    // startup (a PSReadLine 2.1 module import on 5.1) and is irrelevant while the agent owns the
-    // shell — so the agent appears noticeably faster. The shell keeps it for normal terminals.
-    const predictive = boot ? false : (req.predictiveHistory ?? true)
-    let usedShell = shell
-    const spawnOpts = {
-      name: 'xterm-256color',
-      cols: Math.max(2, req.cols || 80),
-      rows: Math.max(1, req.rows || 24),
-      cwd,
-      env: cleanEnv(),
-      // ConPTY on Windows 10 1809+; node-pty falls back automatically if unavailable.
-      useConpty: process.platform === 'win32',
-    }
-
-    let usedShellName = shellName
-    let fallbackNotice = ''
-    let spawned = safeSpawn(mod, shell, buildShellArgs(shell, predictive, boot), spawnOpts)
-
-    // A requested shell that can't launch (missing pwsh, a bad explicit shell path, …) must not
-    // kill the terminal: retry once with the platform default so the user still gets a working
-    // shell, with a one-line note explaining the swap.
-    if (spawned instanceof Error) {
-      const fallback = defaultShell()
-      if (fallback.toLowerCase() !== shell.toLowerCase()) {
-        const retry = safeSpawn(mod, fallback, buildShellArgs(fallback, predictive, boot), spawnOpts)
-        if (!(retry instanceof Error)) {
-          fallbackNotice = shellFellBackMessage(shell, fallback, spawned.message)
-          usedShellName = (fallback.split(/[\\/]/).pop() || fallback).replace(/\.exe$/i, '')
-          usedShell = fallback
-          spawned = retry
-        }
-      }
-    }
-
-    // Nothing launched (the default shell failed too, or it WAS the requested one): degrade like the
-    // node-pty-missing path — stream a clear message and report exit instead of rejecting the IPC.
-    if (spawned instanceof Error) {
-      const message = shellFailedMessage(shell, spawned.message)
-      queueMicrotask(() => {
-        this.deps.post(CH.terminalData, { ptyId, data: message })
-        this.deps.post(CH.terminalExit, { ptyId, exitCode: 1 })
-      })
-      return { ptyId, pid: -1, shellName: 'unavailable', cwd }
-    }
-
-    const pty = spawned
-    const entry: PtyEntry = {
-      pty,
+    const hostReq: HostCreateRequest = {
+      ptyId,
       panelId: req.panelId,
-      shellName: usedShellName,
-      attached: true,
-      exited: false,
-      buffer: [],
-      bufferLen: 0,
+      terminalId: req.terminalId,
+      spaceId: req.spaceId,
+      cwd: req.cwd,
+      shell: req.shell,
+      cols: req.cols,
+      rows: req.rows,
+      predictiveHistory: req.predictiveHistory,
+      bootCommand: req.bootCommand,
+      autoDetectRoot: req.autoDetectRoot,
     }
-    this.entries.set(ptyId, entry)
-
-    // Shells that don't take a startup script via args (bash/zsh/cmd) get the boot command written to
-    // stdin once the shell has had a moment to reach its first prompt. (PowerShell already had it
-    // injected into -EncodedCommand above, so it ran instantly with the init.)
-    if (boot && !shellTakesArgsScript(usedShell)) {
-      setTimeout(() => {
-        const e = this.entries.get(ptyId)
-        if (e && !e.exited) {
-          try {
-            e.pty.write(`${boot}\r`)
-          } catch {
-            /* shell may have exited */
-          }
-        }
-      }, 500)
+    let result
+    try {
+      result = await this.host.create(hostReq)
+    } catch {
+      result = { ok: false, error: 'host-error' }
+    }
+    if (!result.ok || typeof result.pid !== 'number') {
+      // The host already streamed the failure message + exit event (it owns the ptyId) — the
+      // renderer will show the explanation + "[process exited]" exactly like the old flow.
+      return { ptyId, pid: -1, shellName: 'unavailable', cwd: '' }
     }
 
-    // Surface the fallback note first (buffered too, so a reattach from another space still shows it).
-    if (fallbackNotice) {
-      this.appendBuffer(entry, fallbackNotice)
-      this.deps.post(CH.terminalData, { ptyId, data: fallbackNotice })
-    }
-
-    // Agent detection roots at this shell's PID; emit verdicts only on change. The renderer keeps the
-    // xterm instance alive in its registry across space/tab switches and never detaches there, so
-    // `attached` stays true for the session's life and verdicts stream continuously (the panel in any
-    // space stays correctly morphed). The `attached` gate only closes during a dev HMR reload window.
-    this.deps.detection.register(ptyId, pty.pid, (verdict) => {
-      if (entry.attached) this.deps.post(CH.agentSignal, { ptyId, verdict })
-    })
-
-    // Track the agent CLI's resumable conversation under this shell, for workspace-reopen restore.
-    this.deps.agentSession.register(ptyId, pty.pid)
-
-    // Remember "resume" commands an AI CLI prints on exit (gated by the same setting).
-    this.deps.history.register(ptyId, usedShellName, pty.pid, predictive)
-
-    // Watch output for a local dev-server URL → renderer opens it inside PLANO (only when the
-    // terminal is on-screen; we don't auto-open browsers for background-space terminals).
-    this.deps.devUrls.register(ptyId, (url) => {
-      if (entry.attached) this.deps.post(CH.terminalUrlDetected, { ptyId, panelId: entry.panelId, url })
-    })
-
-    pty.onData((data) => {
-      // Always buffer + feed detection so an agent keeps being tracked. The renderer Terminal
-      // persists across space/tab switches (off-screen but live), so `attached` is normally true and
-      // output streams to it continuously — keeping it a perfect mirror, so a return is a pure DOM
-      // re-parent with no replay. The buffer is consumed only on a dev HMR reload (renderer registry
-      // reset while the PTY survived) via attach().
-      this.appendBuffer(entry, data)
-      if (entry.attached) this.deps.post(CH.terminalData, { ptyId, data })
-      this.deps.detection.feed(ptyId, data)
-      this.deps.history.feed(ptyId, data)
-      this.deps.devUrls.feed(ptyId, data)
-    })
-
-    pty.onExit(({ exitCode, signal }) => {
-      entry.exited = true
-      entry.exitCode = exitCode
-      entry.exitSignal = signal
-      if (entry.attached) this.deps.post(CH.terminalExit, { ptyId, exitCode, signal })
-      // The live process is gone, so stop tracking it — but KEEP the entry (with its replay
-      // buffer + exited flag) so a panel returning from another space still sees the final
-      // output and the "[process exited]" notice. The entry is cleared only by kill()/dispose.
-      this.deps.detection.unregister(ptyId)
-      this.deps.agentSession.unregister(ptyId)
-      this.deps.history.unregister(ptyId)
-      this.deps.devUrls.unregister(ptyId)
-    })
-
-    return { ptyId, pid: pty.pid, shellName: usedShellName, cwd }
-  }
-
-  /** Append output to the replay buffer, trimming whole chunks off the front past the cap. */
-  private appendBuffer(entry: PtyEntry, data: string): void {
-    entry.buffer.push(data)
-    entry.bufferLen += data.length
-    while (entry.bufferLen > REPLAY_BUFFER_MAX && entry.buffer.length > 1) {
-      entry.bufferLen -= entry.buffer.shift()!.length
-    }
+    const cwd = result.cwd ?? req.cwd ?? ''
+    this.registerWiring(
+      ptyId,
+      result.pid,
+      result.shellName ?? '',
+      req.predictiveHistory ?? true,
+      req.spaceId,
+      req.panelId,
+      req.terminalId,
+      cwd,
+    )
+    const entry = this.meta.get(ptyId)
+    if (entry) entry.attached = true // freshly spawned sessions stream immediately
+    return { ptyId, pid: result.pid, shellName: result.shellName ?? '', cwd }
   }
 
   /**
-   * Re-bind to a PTY that kept running while the renderer-side xterm instance was gone. With the
-   * renderer registry persisting the Terminal across space/tab switches, this is now reached ONLY on
-   * a dev HMR reload — the renderer registry was reset while a PTY (and its store entry) survived, so
-   * a brand-new Terminal needs main's buffered output replayed once to reconstruct the screen. Returns
-   * the buffer (rather than posting it) so a StrictMode throwaway mount can discard it. Re-syncs the
-   * current agent verdict.
+   * Re-discover the host's live sessions on app launch (or renderer reload). Re-registers the
+   * sniffers for each surviving session and returns them so the renderer can seed its terminal
+   * registry BEFORE panels mount — those terminals then reattach (replay buffer) instead of
+   * respawning. Sessions whose terminalId no longer exists in any workspace are orphan cleanup:
+   * killed so they can't pin the host (and an agent) alive forever.
    */
-  attach(ptyId: string): TerminalAttachResult {
-    const entry = this.entries.get(ptyId)
-    if (!entry) return { ok: false, exited: true, buffer: '' }
-    entry.attached = true
+  async restoreSessions(keptTerminalIds?: string[]): Promise<RestoredTerminalSession[]> {
+    try {
+      await this.host.ensureHost()
+    } catch {
+      return [] // host unreachable → terminals spawn fresh (current behavior)
+    }
+    const kept = new Set(keptTerminalIds ?? [])
+    const out: RestoredTerminalSession[] = []
+    let sessions
+    try {
+      sessions = await this.host.sessions()
+    } catch {
+      return []
+    }
+    // Phone-created (pending) sessions must NEVER be orphan-killed, whatever the renderer passed:
+    // union their terminal ids into the kept set unconditionally.
+    try {
+      const pending = await this.host.pendingPanels()
+      for (const p of pending) {
+        if (typeof p.terminalId === 'string' && p.terminalId) kept.add(p.terminalId)
+      }
+    } catch {
+      /* best effort */
+    }
+    for (const s of sessions) {
+      if (kept.size > 0 && !kept.has(s.terminalId)) {
+        try {
+          await this.host.kill(s.ptyId)
+        } catch {
+          /* best effort */
+        }
+        continue
+      }
+      if (this.meta.has(s.ptyId)) {
+        // Already wired (a create raced the restore, or a previous restore ran — e.g. renderer
+        // reload or repeated calls). NEVER clobber the live attached/exited state: doing so made
+        // main drop a streaming session's data until the next attach.
+        out.push({
+          ptyId: s.ptyId,
+          panelId: s.panelId,
+          terminalId: s.terminalId,
+          spaceId: s.spaceId,
+          pid: s.pid,
+          shellName: s.shellName,
+          cwd: s.cwd,
+          exited: s.exited,
+        })
+        continue
+      }
+      this.registerWiring(s.ptyId, s.pid, s.shellName, true, s.spaceId, s.panelId, s.terminalId, s.cwd)
+      const meta = this.meta.get(s.ptyId)
+      if (meta) {
+        meta.exited = s.exited
+        meta.attached = false // streams resume when the renderer attaches (panel mount)
+      }
+      out.push({
+        ptyId: s.ptyId,
+        panelId: s.panelId,
+        terminalId: s.terminalId,
+        spaceId: s.spaceId,
+        pid: s.pid,
+        shellName: s.shellName,
+        cwd: s.cwd,
+        exited: s.exited,
+      })
+    }
+    return out
+  }
+
+  // ── renderer bridge ───────────────────────────────────────────────────────
+
+  /**
+   * Re-bind to a session that kept running in the host (panel remount after hibernation, renderer
+   * HMR reload, or an app relaunch). The host replays its bounded buffer once; we also replay it
+   * through the sniffers (they saw nothing while detached) and re-post the current agent verdict.
+   */
+  async attach(ptyId: string): Promise<TerminalAttachResult> {
+    // Sessions created from the MOBILE web app (or a renderer reload racing restore) may not be
+    // wired yet — pull the daemon's session info and register so data streams + sniffers run.
+    if (!this.meta.has(ptyId)) {
+      try {
+        const sessions = await this.host.sessions()
+        const s = sessions.find((x) => x.ptyId === ptyId)
+        if (s) {
+          this.registerWiring(ptyId, s.pid, s.shellName, true, s.spaceId, s.panelId, s.terminalId, s.cwd)
+        }
+      } catch {
+        /* attach below will surface the failure */
+      }
+    }
+    // Mark attached OPTIMISTICALLY: the host streams immediately on its side, so the first data
+    // batch can arrive at main BEFORE this RPC resolves — if we waited, main would drop it as
+    // "detached" (the race that killed the reattached stream). Reset on failure.
+    const meta = this.meta.get(ptyId)
+    if (meta) meta.attached = true
+    let result
+    try {
+      result = await this.host.attach(ptyId)
+    } catch {
+      if (meta) meta.attached = false
+      return { ok: false, exited: true, buffer: '' }
+    }
+    if (meta) {
+      meta.attached = result.ok
+      meta.exited = result.exited
+    }
+    if (result.ok && result.buffer) {
+      this.deps.detection.feed(ptyId, result.buffer)
+      this.deps.history.feed(ptyId, result.buffer)
+      this.deps.devUrls.feed(ptyId, result.buffer)
+      this.context?.feed(ptyId, result.buffer)
+    }
     // Verdict changes were suppressed while detached — push the current one so the panel morphs.
     this.deps.post(CH.agentSignal, { ptyId, verdict: this.deps.detection.currentVerdict(ptyId) })
-    return { ok: true, exited: entry.exited, buffer: entry.buffer.join('') }
+    return { ok: result.ok, exited: result.exited, buffer: result.ok ? result.buffer : '' }
   }
 
-  /** Stop streaming to the renderer while keeping the shell running. No longer called on a space/tab
-   *  switch (the renderer keeps its Terminal attached and mirroring); retained for completeness and
-   *  any future caller that genuinely wants main to buffer instead of stream. */
-  detach(ptyId: string): void {
-    const entry = this.entries.get(ptyId)
-    if (entry) entry.attached = false
-  }
-
-  write(ptyId: string, data: string): void {
-    const entry = this.entries.get(ptyId)
-    if (!entry || entry.exited) return
+  /** Stop streaming to the renderer while keeping the shell running (hibernation / app quit). */
+  async detach(ptyId: string): Promise<void> {
+    const meta = this.meta.get(ptyId)
+    if (meta) meta.attached = false
     try {
-      entry.pty.write(data)
+      await this.host.detach(ptyId)
+    } catch {
+      /* host may be mid-teardown */
+    }
+  }
+
+  async write(ptyId: string, data: string): Promise<void> {
+    try {
+      await this.host.write(ptyId, data)
     } catch {
       /* pty died between frames; ignore */
     }
   }
 
-  resize(ptyId: string, cols: number, rows: number): void {
-    const entry = this.entries.get(ptyId)
-    if (!entry || entry.exited) return
+  async resize(ptyId: string, cols: number, rows: number): Promise<void> {
     try {
-      entry.pty.resize(Math.max(2, cols), Math.max(1, rows))
-      this.deps.detection.ping(ptyId)
+      await this.host.resize(ptyId, cols, rows)
     } catch {
-      /* resize can throw if the pty died between frames; ignore */
+      /* pty died between frames; ignore */
     }
+    this.deps.detection.ping(ptyId)
   }
 
   ping(ptyId: string): void {
@@ -725,30 +415,145 @@ export class PtyManager {
    * it's matched with the same signatures (no raw OS process tree, no unrelated noise).
    */
   listProcesses(ptyId: string): Promise<TerminalProcessInfo[]> {
-    if (!this.entries.has(ptyId)) return Promise.resolve([])
+    if (!this.meta.has(ptyId)) return Promise.resolve([])
     return this.deps.detection.listAgentProcesses(ptyId)
   }
 
-  kill(ptyId: string): { ok: boolean } {
-    const entry = this.entries.get(ptyId)
-    if (!entry) return { ok: false }
+  async kill(ptyId: string): Promise<{ ok: boolean }> {
+    let ok = false
     try {
-      entry.pty.kill()
+      ok = await this.host.kill(ptyId)
     } catch {
-      /* already gone */
+      /* host may be gone */
     }
-    this.deps.detection.unregister(ptyId)
-    this.deps.agentSession.unregister(ptyId)
-    this.deps.history.unregister(ptyId)
-    this.deps.devUrls.unregister(ptyId)
-    this.entries.delete(ptyId)
-    return { ok: true }
+    this.unregisterWiring(ptyId)
+    return { ok }
   }
 
-  disposeAll(): void {
-    for (const id of [...this.entries.keys()]) this.kill(id)
+  /** Handle data requests the host makes of the app (getWorkspaces / resolveSpace). */
+  onHostRequest(handler: (method: string, params: Record<string, unknown>) => unknown | Promise<unknown>): void {
+    this.host.onRequest(handler)
+  }
+
+  /** A terminal/agent was created from the mobile web app while PLANO is running. */
+  onExternalTerminal(handler: (session: Record<string, unknown>) => void): void {
+    this.host.onExternalTerminal(handler)
+  }
+
+  /** Plan F7: mesh timeline events → renderer link layer / audit trail. */
+  onMeshEvent(handler: (event: Record<string, unknown>) => void): void {
+    this.host.onMeshEvent(handler)
+  }
+
+  /**
+   * Register a session created from the MOBILE web app so main streams its data + runs the
+   * sniffers. The daemon created the PTY directly (not via `create`), so main never wired it.
+   */
+  registerExternalSession(session: {
+    ptyId: string
+    panelId: string
+    terminalId: string
+    spaceId: string
+    pid: number
+    shellName: string
+    cwd: string
+  }): void {
+    if (this.meta.has(session.ptyId)) return
+    this.registerWiring(
+      session.ptyId,
+      session.pid,
+      session.shellName || 'shell',
+      true,
+      session.spaceId || '',
+      session.panelId,
+      session.terminalId,
+      session.cwd || '',
+    )
+  }
+
+  /** Phone-created terminals recorded while the app was closed (materialize at launch). */
+  async pendingPanels(): Promise<Array<Record<string, unknown>>> {
+    return this.host.pendingPanels()
+  }
+
+  async clearPendingPanels(): Promise<void> {
+    await this.host.clearPendingPanels()
+  }
+
+  /** Number of connected phone WebSocket clients (TopBar badge). */
+  async phoneClients(): Promise<number> {
+    return this.host.phoneClients()
+  }
+
+
+  /**
+   * The stable identity + live metadata of one PTY, for the agent-mesh runtime registry.
+   * Returns null when the pty is unknown/killed.
+   */
+  runtimeMeta(ptyId: string): {
+    ptyId: string
+    terminalId: string
+    panelId: string
+    spaceId: string
+    cwd: string
+    title: string
+    shellName: string
+    pid: number
+    exited: boolean
+    attached: boolean
+  } | null {
+    const entry = this.meta.get(ptyId)
+    if (!entry) return null
+    return {
+      ptyId,
+      terminalId: entry.terminalId,
+      panelId: entry.panelId,
+      spaceId: entry.spaceId,
+      cwd: entry.cwd,
+      title: entry.title,
+      shellName: entry.shellName,
+      pid: entry.pid,
+      exited: entry.exited,
+      attached: entry.attached,
+    }
+  }
+
+  /**
+   * Push an updated working directory + title for a PTY (OSC-7/OSC-0 from the shell).
+   * Called from the mesh context wiring when the shell reports a live `cd`.
+   */
+  updateRuntimeMeta(ptyId: string, patch: { cwd?: string; title?: string }): void {
+    const entry = this.meta.get(ptyId)
+    if (!entry) return
+    if (patch.cwd) entry.cwd = patch.cwd
+    if (patch.title) entry.title = patch.title
+  }
+
+  /**
+   * App teardown. With "keep agents running" (the default) the host connection drops and every
+   * session keeps running in the background — exactly like herdr detach. With it off, the host is
+   * told to kill everything (the old behavior).
+   */
+  shutdown(keepAgents: boolean): void {
+    if (keepAgents) {
+      this.host.disconnect()
+    } else {
+      this.host.shutdownSync()
+    }
     // Also tear down agent detection so its shared process-enumeration worker (a long-lived
     // powershell.exe on Windows) is killed rather than orphaned when the app quits.
     this.deps.detection.disposeAll()
   }
+}
+
+/** A session rediscovered on the host at app launch, for the renderer's restore. */
+export interface RestoredTerminalSession {
+  ptyId: string
+  panelId: string
+  terminalId: string
+  spaceId: string
+  pid: number
+  shellName: string
+  cwd: string
+  exited: boolean
 }

@@ -34,6 +34,49 @@ export interface Space {
   viewport: Viewport
   panels: Panel[]
   regions: Region[]
+  /**
+   * The user's own label colour, from the curated `SPACE_COLORS` set — Finder-tag semantics:
+   * CHOSEN, so it means whatever the user decided, and absent by default so an untagged
+   * workspace stays monochrome. It replaces the old hash-of-id tint, which painted every
+   * workspace a different colour that stood for nothing.
+   */
+  color?: SpaceColor
+}
+
+/** The curated workspace label palette. Warm-leaning, muted — never a saturated rainbow. */
+export const SPACE_COLORS = {
+  graphite: '#8A8A85',
+  rust: '#C2704A',
+  amber: '#C79A3E',
+  moss: '#6E8F63',
+  teal: '#4E8C8A',
+  indigo: '#6A72B8',
+  plum: '#9A6BA8',
+} as const
+
+export type SpaceColor = keyof typeof SPACE_COLORS
+
+export const SPACE_COLOR_KEYS = Object.keys(SPACE_COLORS) as SpaceColor[]
+
+/** A colour picked at random from the curated set — assigned once, when a workspace is created. */
+export function randomSpaceColor(): SpaceColor {
+  return SPACE_COLOR_KEYS[Math.floor(Math.random() * SPACE_COLOR_KEYS.length)]
+}
+
+/**
+ * The colour a workspace wears.
+ *
+ * It is CHOSEN ONCE (at creation, at random from the curated set) and then persisted, so it
+ * belongs to that workspace forever. Assigning by position instead made the menu read as a
+ * rainbow ramp and — worse — shuffled every colour whenever a workspace was deleted or moved.
+ * A pre-colour workspace falls back to a stable hash of its id: still one fixed colour per
+ * workspace, just derived instead of stored.
+ */
+export function spaceColorFor(space: { id: string; color?: SpaceColor }): string {
+  if (space.color) return SPACE_COLORS[space.color]
+  let h = 0
+  for (let i = 0; i < space.id.length; i += 1) h = (h * 31 + space.id.charCodeAt(i)) >>> 0
+  return SPACE_COLORS[SPACE_COLOR_KEYS[h % SPACE_COLOR_KEYS.length]]
 }
 
 export interface WorkspaceMeta {
@@ -57,7 +100,7 @@ export interface RecentWorkspace {
 
 /** A blank workspace with the given id + display name (no folder picked unless one is passed). */
 export function createSpace(id: string, name: string, folderPath: string | null = null): Space {
-  return { id, name, folderPath, viewport: { x: 0, y: 0, zoom: 1 }, panels: [], regions: [] }
+  return { id, name, folderPath, viewport: { x: 0, y: 0, zoom: 1 }, panels: [], regions: [], color: randomSpaceColor() }
 }
 
 /**

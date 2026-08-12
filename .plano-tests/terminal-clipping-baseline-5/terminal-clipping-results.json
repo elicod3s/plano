@@ -1,0 +1,60 @@
+{
+  "failures": 3,
+  "results": [
+    {
+      "name": "terminal mounted",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "initial grid stays inside visible viewport",
+      "pass": true,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":741,\"scale\":1,\"overflowLayout\":-7,\"overflowScreen\":-7,\"rightDelta\":-7}"
+    },
+    {
+      "name": "terminal input focused",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "font zoom keeps the last column visible",
+      "pass": true,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":743,\"scale\":1,\"overflowLayout\":-5,\"overflowScreen\":-5,\"rightDelta\":-5}"
+    },
+    {
+      "name": "panel test resize applied",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "panel shrink refits before clipping",
+      "pass": true,
+      "details": "{\"renderBoxWidth\":419,\"xtermWidth\":419,\"viewportClientWidth\":409,\"viewportOffsetWidth\":419,\"screenOffsetWidth\":403,\"scale\":1,\"overflowLayout\":-6,\"overflowScreen\":-6,\"rightDelta\":-6}"
+    },
+    {
+      "name": "live PTY found for marker output",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "full-width marker keeps its right sentinel visible",
+      "pass": true,
+      "details": "{\"found\":true,\"text\":\"LXXXXXXXXXXXXXXXXXXXXXXXXXXR\",\"glyphRight\":458.1875,\"visibleRight\":510,\"clearance\":51.8125}"
+    },
+    {
+      "name": "stale oversized grid injected",
+      "pass": false,
+      "details": ""
+    },
+    {
+      "name": "stale oversized grid self-heals to the visible viewport",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":419,\"xtermWidth\":419,\"viewportClientWidth\":409,\"viewportOffsetWidth\":419,\"screenOffsetWidth\":433,\"scale\":1,\"overflowLayout\":24,\"overflowScreen\":24,\"rightDelta\":24}"
+    },
+    {
+      "name": "fractional canvas scale keeps the last column visible",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":419,\"xtermWidth\":419,\"viewportClientWidth\":409,\"viewportOffsetWidth\":419,\"screenOffsetWidth\":433,\"scale\":0.6300000029133727,\"overflowLayout\":24,\"overflowScreen\":15.11997683577431,\"rightDelta\":15.11997683577431}"
+    }
+  ]
+}

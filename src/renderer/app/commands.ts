@@ -136,6 +136,28 @@ const actionCommands: Command[] = [
     run: () => useViewportStore.getState().zoomTo(1, viewport()),
   },
   {
+    // Surfaces the LAST prompt sent to every terminal that has an agent running — so the user can
+    // recall what they last asked each agent without scrolling back through its output. Global so it
+    // fires straight from inside a focused agent terminal. Terminals whose agent hasn't been prompted
+    // yet simply don't appear (nothing to show).
+    id: 'agents:last-prompts',
+    label: 'Last Agent Prompts',
+    icon: 'MessageSquareText',
+    group: 'View',
+    bindings: [{ keys: 'F2', global: true }],
+    run: () => useUiStore.getState().toggleLastPrompts(),
+  },
+  {
+    // The Agent Mesh — cross-workspace agent control center (roster + compose + snippets + context
+    // + timeline). Ctrl+Shift+A: verified collision-free against the rest of the keymap.
+    id: 'agents:control-center',
+    label: 'Agent Mesh',
+    icon: 'Waypoints',
+    group: 'View',
+    bindings: [{ keys: 'Ctrl+Shift+A', global: true }],
+    run: () => useUiStore.getState().toggleAgentControl(),
+  },
+  {
     id: 'view:minimap',
     label: 'Toggle Minimap',
     icon: 'Map',

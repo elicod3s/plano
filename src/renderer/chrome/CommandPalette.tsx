@@ -73,8 +73,6 @@ export function CommandPalette() {
       run: () => switchSpace(s.id),
     }))
 
-    // Everything else — panel creation + app/view/workspace actions — comes from the registry, so
-    // each row shows the exact key that fires it. Hide "open palette" (can't open it from inside).
     const fromRegistry = (group: CommandGroup): Cmd[] =>
       COMMANDS.filter((c) => c.group === group && c.id !== 'app:palette').map((c) => ({
         id: c.id,
@@ -134,14 +132,15 @@ export function CommandPalette() {
   let lastSection = ''
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-start justify-center pt-[14vh]" style={{ background: 'var(--scrim)', backdropFilter: 'blur(16px)' }} onPointerDown={() => setOpen(false)}>
+    <div className="fixed inset-0 z-[var(--z-modal)] flex items-start justify-center pt-[14vh]" style={{ background: 'var(--scrim)' }} onPointerDown={() => setOpen(false)}>
       <div
-        className="animate-palette-in w-[640px] max-w-[92vw] overflow-hidden rounded-xl border border-strong shadow-overlay"
-        style={{ background: 'color-mix(in srgb, var(--bg-base) 96%, transparent)' }}
+        data-surface-layer="popover"
+        className="animate-palette-in surface-layer surface-layer--popover w-[620px] max-w-[92vw] overflow-hidden rounded-[24px]"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        <div className="flex h-[52px] items-center gap-3 border-b border-subtle px-4">
-          <Icon name="Search" size={18} className="text-text-tertiary" />
+        {/* search row */}
+        <div className="flex h-14 items-center gap-3 px-[18px]">
+          <Icon name="Search" size={17} className="shrink-0 text-text-3" />
           <input
             ref={inputRef}
             value={query}
@@ -149,11 +148,19 @@ export function CommandPalette() {
             onKeyDown={onKeyDown}
             placeholder="Search files, terminals, commands…"
             spellCheck={false}
-            className="h-full flex-1 bg-transparent text-[16px] text-text-primary placeholder:text-text-tertiary focus:outline-none"
+            className="h-full flex-1 bg-transparent text-[15.5px] text-text-1 placeholder:text-text-3 focus:outline-none"
           />
-          <span className="font-mono text-[11px] text-text-tertiary">esc</span>
+          <span
+            className="flex h-[22px] shrink-0 items-center rounded-[7px] border border-glass px-2 font-mono text-[10.5px] text-text-3"
+            style={{ background: 'rgba(0,0,0,0.2)' }}
+          >
+            esc
+          </span>
         </div>
 
+        <div className="h-px w-full bg-[rgba(255,255,255,0.08)]" />
+
+        {/* list */}
         <div className="max-h-[52vh] overflow-y-auto p-1.5">
           {filtered.length === 0 && (
             <div className="px-3 py-8 text-center text-[13px] text-text-tertiary">No matches</div>
@@ -163,28 +170,38 @@ export function CommandPalette() {
             lastSection = item.section
             return (
               <div key={item.id}>
-                {showSection && <div className="label-caps px-2 pb-1 pt-2">{item.section}</div>}
+                {showSection && (
+                  <div className="flex h-6 items-center px-3 font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-text-4">
+                    {item.section}
+                  </div>
+                )}
                 <button
                   type="button"
                   onMouseMove={() => setIndex(i)}
                   onClick={() => choose(i)}
                   className={cn(
-                    'flex h-10 w-full items-center gap-3 rounded-sm px-2.5 text-left',
-                    i === index ? 'bg-accent-soft' : 'hover:bg-accent-soft',
+                    'relative flex h-10 w-full items-center gap-3 rounded-[11px] px-3 text-left',
+                    i === index ? 'bg-glass-hover' : 'hover:bg-glass',
                   )}
                 >
-                  {i === index && <span className="absolute left-0 h-6 w-[2px] rounded-pill bg-accent" />}
-                  <Icon name={item.icon} size={16} className="text-text-secondary" />
-                  <span className="flex-1 text-[14px] text-text-primary">{item.label}</span>
-                  {item.hint && <span className="font-mono text-[11px] text-text-tertiary">{item.hint}</span>}
-                  {item.shortcut && <span className="font-mono text-[11px] text-text-tertiary">{fmtKeys(item.shortcut)}</span>}
+                  {i === index && (
+                    <span className="absolute left-0 top-1/2 h-[18px] w-[2px] -translate-y-1/2 rounded-pill bg-accent" />
+                  )}
+                  <Icon name={item.icon} size={16} className="shrink-0 text-text-2" />
+                  <span className="flex-1 truncate text-[13.5px] text-text-1">{item.label}</span>
+                  {item.hint && <span className="font-mono text-[10.5px] text-text-4">{item.hint}</span>}
+                  {item.shortcut && <span className="font-mono text-[10.5px] text-text-3">{fmtKeys(item.shortcut)}</span>}
                 </button>
               </div>
             )
           })}
         </div>
 
-        <div className="flex h-9 items-center gap-4 border-t border-subtle bg-surface-2 px-4 font-mono text-[11px] text-text-tertiary">
+        {/* footer */}
+        <div
+          className="flex h-[42px] items-center gap-4 px-[18px] font-mono text-[11px] text-text-4"
+          style={{ borderTop: '1px solid var(--border-glass)' }}
+        >
           <span>↑↓ Navigate</span>
           <span>↵ Select</span>
           <span>esc Close</span>

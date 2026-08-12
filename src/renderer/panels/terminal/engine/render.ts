@@ -27,11 +27,6 @@ export function snapRenderScale(zoom: number): number {
   return 1.0
 }
 
-/** Trailing-edge debounce for the fit loop — a continuous resize/zoom gesture coalesces to one fit. */
-export const FIT_DEBOUNCE_MS = 32
-/** Minimum px delta before re-fitting. Pure CSS-transform changes (pan/zoom) leave clientWidth
- *  alone, so this short-circuits before touching xterm. */
-export const FIT_RESIZE_EPSILON = 0.5
 /** Frames to retry a fit when a freshly (re)attached render box still measures zero — covers the
  *  layout gap right after term.element is re-parented into a new container (Deska's attach retry). */
 export const FIT_RETRY_FRAMES = 5
@@ -71,6 +66,43 @@ export function resolveShell(t: TerminalSettings): string | undefined {
     default:
       return undefined // 'auto'
   }
+}
+
+// ── Emoji width parity with Windows Terminal ───────────────────────────────────────────────────────
+// xterm's Unicode-11 wcwidth already gives 2 cells to almost every emoji (U+1F300+ and the 2705-style
+// BMP marks), but a handful of BMP emoji-presentation characters (❤ ⚡ ☀ ⭐ ⌚ …) are classified
+// "ambiguous" and come out 1 cell — Windows Terminal/ConPTY render them 2 cells wide. The exact
+// Emoji_Presentation=Yes list from Unicode's emoji-data.txt. Deliberately EXCLUDES the text-presentation
+// marks CLIs use inline (✓✗✻★☆⚠ are not in the list), so monospace alignment never breaks.
+const EMOJI_PRESENTATION_RANGES: ReadonlyArray<readonly [number, number]> = [
+  [0x231a, 0x231b], [0x23e9, 0x23ec], [0x23f0, 0x23f0], [0x23f3, 0x23f3], [0x25fd, 0x25fe],
+  [0x2614, 0x2615], [0x2648, 0x2653], [0x267f, 0x267f], [0x2693, 0x2693], [0x26a1, 0x26a1],
+  [0x26aa, 0x26ab], [0x26bd, 0x26be], [0x26c4, 0x26c5], [0x26ce, 0x26ce], [0x26d4, 0x26d4],
+  [0x26ea, 0x26ea], [0x26f2, 0x26f3], [0x26f5, 0x26f5], [0x26fa, 0x26fa], [0x26fd, 0x26fd],
+  [0x2705, 0x2705], [0x270a, 0x270b], [0x2728, 0x2728], [0x274c, 0x274c], [0x274e, 0x274e],
+  [0x2753, 0x2755], [0x2757, 0x2757], [0x2795, 0x2797], [0x27b0, 0x27b0], [0x27bf, 0x27bf],
+  [0x2b1b, 0x2b1c], [0x2b50, 0x2b50], [0x2b55, 0x2b55],
+  // supplementary-plane emoji are already wide under Unicode-11; listed anyway for completeness
+  [0x1f004, 0x1f004], [0x1f0cf, 0x1f0cf], [0x1f18e, 0x1f18e], [0x1f191, 0x1f19a],
+  [0x1f201, 0x1f201], [0x1f21a, 0x1f21a], [0x1f22f, 0x1f22f], [0x1f232, 0x1f236],
+  [0x1f238, 0x1f23b], [0x1f250, 0x1f251], [0x1f300, 0x1f320], [0x1f32d, 0x1f335],
+  [0x1f337, 0x1f37c], [0x1f37e, 0x1f393], [0x1f3a0, 0x1f3ca], [0x1f3cf, 0x1f3d3],
+  [0x1f3e0, 0x1f3f0], [0x1f3f4, 0x1f3f4], [0x1f3f8, 0x1f43e], [0x1f440, 0x1f440],
+  [0x1f442, 0x1f4fc], [0x1f4ff, 0x1f53d], [0x1f54b, 0x1f54e], [0x1f550, 0x1f567],
+  [0x1f57a, 0x1f57a], [0x1f595, 0x1f596], [0x1f5a4, 0x1f5a4], [0x1f5fb, 0x1f64f],
+  [0x1f680, 0x1f6c5], [0x1f6cc, 0x1f6cc], [0x1f6d0, 0x1f6d2], [0x1f6d5, 0x1f6d7],
+  [0x1f6dc, 0x1f6df], [0x1f6eb, 0x1f6ec], [0x1f6f4, 0x1f6fc], [0x1f7e0, 0x1f7eb],
+  [0x1f7f0, 0x1f7f0], [0x1f90c, 0x1f93a], [0x1f93c, 0x1f945], [0x1f947, 0x1f9ff],
+  [0x1fa70, 0x1fa7c], [0x1fa80, 0x1fa88], [0x1fa90, 0x1fabd], [0x1fabf, 0x1fac5],
+  [0x1face, 0x1fadb], [0x1fae0, 0x1fae8], [0x1faf0, 0x1faf8],
+]
+
+/** True for Unicode Emoji_Presentation=Yes codepoints (rendered as 2-cell emoji by Windows Terminal). */
+export function isEmojiPresentationWide(cp: number): boolean {
+  for (const [lo, hi] of EMOJI_PRESENTATION_RANGES) {
+    if (cp >= lo && cp <= hi) return true
+  }
+  return false
 }
 
 /**

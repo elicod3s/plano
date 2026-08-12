@@ -8,9 +8,11 @@ import { terminalEngine } from './engine'
  *   • `getOrCreate`s the session on mount (idempotent → StrictMode-safe, never respawns), and
  *   • `attach`es the DOM (re-parents the existing `term.element` into the freshly-mounted render box).
  * On unmount it `detach`es the DOM only — the session, its PTY and its scrollback stay alive in the
- * registry, so returning from another space / switching back to this tab is a pure DOM re-parent with
- * NO buffered replay (no flicker, no scroll jump). The session is destroyed only by an explicit
- * teardown (`terminalEngine.dispose`, driven from app/terminalSessions when a tab/panel is closed).
+ * registry, so switching TABS within a panel is a pure DOM re-parent with NO buffered replay. Switching
+ * WORKSPACES may hibernate the session (see app/terminalHibernation.ts) — on return, `getOrCreate`
+ * finds the kept runtime entry and reattaches via main's replay buffer. The session is destroyed only
+ * by an explicit teardown (`terminalEngine.dispose`, driven from app/terminalSessions when a tab/
+ * panel is closed).
  *
  * `containerRef` is the padded/clipped outer box (owns paste + context-menu + wheel); `renderBoxRef`
  * is the counter-scaled box xterm is opened into.

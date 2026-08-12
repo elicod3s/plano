@@ -14,5 +14,5 @@ export function MarkdownPanel({ panel }: { panel: Panel }) {
     onChange: (value) => updateProps<'markdown'>(panel.id, { content: value }),
   })
 
-  return <div ref={ref} className="h-full w-full overflow-hidden bg-surface-1" />
+  return <div ref={ref} className="h-full w-full overflow-hidden bg-transparent" />
 }

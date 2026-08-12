@@ -51,10 +51,14 @@ export function killAllTerminalSessions(): void {
  * entries would leak forever, unreachable by every other teardown path. Safe to call
  * unconditionally: when every panel still exists it's a no-op, and it never touches a terminal
  * that legitimately lives in another (currently-backgrounded) space.
+ * `protectedTerminalIds` = terminals whose PANEL will be materialized shortly (phone-created,
+ * pending) but isn't in the workspace store yet — they must not be killed here.
  */
-export function reconcileTerminalSessions(): void {
+export function reconcileTerminalSessions(protectedTerminalIds?: Iterable<string>): void {
   const live = new Set(useSpacesStore.getState().spaces.flatMap((s) => s.panels.map((p) => p.id)))
+  const protectedSet = new Set(protectedTerminalIds ?? [])
   for (const [termId, rt] of Object.entries(useTerminalStore.getState().byPanel)) {
+    if (protectedSet.has(termId)) continue
     if (!live.has(rt.panelId)) killTerminalTab(termId)
   }
 }

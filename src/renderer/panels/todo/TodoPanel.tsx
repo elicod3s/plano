@@ -3,6 +3,7 @@ import type { Panel, TodoItem, TodoPriority, TodoProps } from '@shared/domain/pa
 import { usePanelStore } from '@/stores/usePanelStore'
 import { IconButton } from '@/design-system/IconButton'
 import { Icon } from '@/design-system/Icon'
+import { LinkedText } from '@/design-system/LinkedText'
 import { newId } from '@/lib/id'
 import { cn } from '@/lib/cn'
 import { TodoContextMenu } from './TodoContextMenu'
@@ -99,10 +100,10 @@ export function TodoPanel({ panel }: { panel: Panel }) {
   }
 
   return (
-    <div className="flex h-full w-full flex-col bg-surface-1">
+    <div className="flex h-full w-full flex-col bg-transparent">
       {/* add row */}
-      <div className="flex shrink-0 items-center gap-1.5 border-b border-subtle px-2.5 py-2">
-        <Icon name="Plus" size={15} className="shrink-0 text-text-tertiary" />
+      <div className="mx-3 mt-3 flex h-[34px] shrink-0 items-center gap-2 rounded-[11px] border border-glass px-3 transition-colors focus-within:border-glass-hover" style={{ background: 'var(--inset-soft)' }}>
+        <Icon name="Plus" size={15} className="shrink-0 text-text-3" />
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
@@ -125,8 +126,8 @@ export function TodoPanel({ panel }: { panel: Panel }) {
       </div>
 
       {/* toolbar: filter + actions */}
-      <div className="flex shrink-0 items-center gap-1 px-2.5 py-1.5">
-        <div className="flex items-center rounded-pill bg-surface-3 p-0.5">
+      <div className="mx-3 mt-1 flex h-[34px] shrink-0 items-center gap-1">
+        <div className="flex items-center rounded-pill border border-glass p-0.5" style={{ background: 'var(--glass)' }}>
           {FILTERS.map((f) => (
             <button
               key={f.key}
@@ -134,14 +135,14 @@ export function TodoPanel({ panel }: { panel: Panel }) {
               onClick={() => setFilter(f.key)}
               className={cn(
                 'app-no-drag h-6 rounded-pill px-2.5 text-[11px] font-medium transition-colors',
-                filter === f.key ? 'bg-accent-soft-strong text-text-primary' : 'text-text-tertiary hover:text-text-secondary',
+                filter === f.key ? 'bg-accent text-text-onsolid' : 'text-text-3 hover:text-text-2',
               )}
             >
               {f.label}
             </button>
           ))}
         </div>
-        <span className="ml-auto font-mono text-[11px] text-text-tertiary">
+        <span className="ml-auto font-mono text-[11px] text-text-3">
           {remaining} left
         </span>
         <IconButton icon="ArrowDownWideNarrow" label="Sort by priority" size={26} onClick={sortByPriority} />
@@ -149,11 +150,11 @@ export function TodoPanel({ panel }: { panel: Panel }) {
       </div>
 
       {/* list */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-2">
         {visible.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
-            <Icon name="ListChecks" size={22} className="text-text-quaternary" />
-            <p className="text-[12px] text-text-tertiary">
+            <Icon name="ListChecks" size={22} className="text-text-4" />
+            <p className="text-[12px] text-text-3">
               {todos.length === 0 ? 'No tasks yet. Add one above.' : 'Nothing here.'}
             </p>
           </div>
@@ -165,21 +166,22 @@ export function TodoPanel({ panel }: { panel: Panel }) {
                 onContextMenu={openMenu(item)}
                 // items-start (not center) so a task that wraps to several lines keeps its checkbox /
                 // flag aligned to the FIRST line instead of floating to the vertical middle.
-                className="group/row flex items-start gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent-soft"
+                className="group/row flex min-h-[38px] items-center gap-2.5 rounded-[11px] px-2.5 transition-colors hover:bg-glass"
               >
-                {/* checkbox */}
+                {/* checkbox — the design's 20px accent circle */}
                 <button
                   type="button"
                   onClick={() => toggle(item.id)}
                   aria-label={item.done ? 'Mark as active' : 'Mark as complete'}
                   className={cn(
-                    'app-no-drag flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-pill border transition-colors',
+                    'app-no-drag flex h-5 w-5 shrink-0 items-center justify-center rounded-pill transition-colors',
                     item.done
-                      ? 'border-text-primary bg-text-primary text-text-onsolid'
-                      : 'border-[var(--border-strong)] hover:border-text-secondary',
+                      ? 'bg-accent text-text-onsolid'
+                      : 'border hover:border-text-2',
                   )}
+                  style={item.done ? undefined : { borderColor: 'var(--border-glass-hover)' }}
                 >
-                  {item.done && <Icon name="Check" size={11} strokeWidth={3} />}
+                  {item.done && <Icon name="Check" size={12} strokeWidth={3} />}
                 </button>
 
                 {/* priority flag — click to cycle, right-click row for the full picker */}
@@ -234,7 +236,7 @@ export function TodoPanel({ panel }: { panel: Panel }) {
                       item.done ? 'text-text-quaternary line-through' : 'text-text-primary',
                     )}
                   >
-                    {item.text}
+                    <LinkedText text={item.text} />
                   </span>
                 )}
 

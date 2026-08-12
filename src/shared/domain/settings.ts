@@ -7,21 +7,37 @@
  * Grouped by the Settings UI sections so a section maps to exactly one key here.
  */
 
-export const SETTINGS_VERSION = 7
+import type { UsageProviderId } from './usage'
+
+export const SETTINGS_VERSION = 12
 
 // ── enums (kept as string unions so they round-trip through JSON untouched) ──
 export type ThemeId =
-  | 'monolith' // default — warm-neutral monochrome (the locked Monolith palette)
-  | 'slate' //   cool-neutral monochrome
-  | 'carbon' //  true black / OLED
-  | 'dark-warm' // richer warm browns
-  | 'indigo' //  colored — deep violet (dracula-leaning)
-  | 'cyber' //   colored — teal/cyan neon dark
-  | 'light' //   light surfaces, dark ink
+  | 'monolith' //   default — the original PLANO charcoal (dark, neutral, no warm cast)
+  | 'indigo' //     deep indigo glass, periwinkle accent
+  | 'orange' //     warm ember glass, soft-orange accent
+  | 'tokyo' //      night-neon glass, pink accent
+  | 'sakura' //     plum glass, soft pink accent
+  | 'pearl' //      warm light glass, ink accent
+  | 'mist' //       cool light glass, slate ink
+  | 'paper' //      pure-white glass, neutral ink
 
-export type AccentId = string // hex, e.g. "#FFFFFF" (white = monochrome default)
+export type AccentId = string // hex, e.g. "#FFFFFF" (white = default — defers to the theme accent)
 
 export type GridStyle = 'dots' | 'lines' | 'none'
+
+/** Grid cell spacing preset — scales the minor/major drafting grid. */
+export type GridSize = 'fine' | 'standard' | 'coarse'
+
+/** What the canvas substrate paints behind everything. */
+export type CanvasBackgroundKind = 'theme' | 'solid' | 'linear' | 'radial'
+export interface CanvasBackground {
+  kind: CanvasBackgroundKind
+  /** solid → colors[0]; gradients → colors[0] → colors[1]. Ignored for 'theme'. */
+  colors: [string, string]
+  /** linear-gradient angle in degrees (0–360). Ignored unless kind === 'linear'. */
+  angle: number
+}
 
 export type SearchEngineId = 'google' | 'bing' | 'duckduckgo' | 'brave'
 
@@ -33,7 +49,7 @@ export type ShellChoice = 'auto' | 'powershell' | 'pwsh' | 'cmd' | 'bash' | 'zsh
 
 export type CursorStyle = 'bar' | 'block' | 'underline'
 
-export type TerminalThemeId = 'monolith' | 'midnight' | 'amber' | 'matrix' | 'paper'
+export type TerminalThemeId = 'monolith' | 'midnight' | 'amber' | 'matrix' | 'paper' | 'campbell'
 
 // ── per-section shapes ──
 export interface GeneralSettings {
@@ -48,19 +64,27 @@ export interface GeneralSettings {
   warnBeforeQuit: boolean
   /** Confirm before closing a terminal panel whose process is still alive. */
   confirmClosePanelWithProcess: boolean
+  /** Play a soft chime when a detected agent (any model) finishes its turn. */
+  agentDoneSound: boolean
+  /** v4 awareness: in-app toast when a backgrounded agent finishes or is awaiting input. */
+  agentDoneNotify: boolean
 }
 
 export interface AppearanceSettings {
   theme: ThemeId
-  /** Accent hex. "#FFFFFF" = the monochrome default (auto-flips to ink on light themes). */
+  /** Accent hex. "#FFFFFF" = default (auto-flips to the theme accent / ink on light). */
   accent: AccentId
   gridStyle: GridStyle
   /** Canvas grid strength, 0..1. */
   gridOpacity: number
-  /** Monochrome film grain over the canvas substrate. */
-  grain: boolean
   /** Force reduced motion regardless of the OS setting. */
   reduceMotion: boolean
+  /** The canvas substrate: theme color, a solid, or a gradient. */
+  canvasBackground: CanvasBackground
+  /** Ambient accent halo over the canvas, 0–40 (% alpha of --accent-primary). */
+  canvasGlow: number
+  /** Canvas drafting-grid spacing. */
+  gridSize: GridSize
 }
 
 export interface EditorSettings {
@@ -97,6 +121,12 @@ export interface TerminalSettings {
   smartActions: boolean
   /** Pause silent, offscreen terminals to reclaim memory (planned). */
   autoSuspendIdle: boolean
+  /**
+   * Keep every terminal (and the agents running inside it) alive in the background Agent Host when
+   * PLANO closes, so reopening lands exactly where you left it. Turning this off restores the old
+   * behavior: quitting kills all sessions.
+   */
+  keepAgentsOnQuit: boolean
 }
 
 export interface CanvasSettings {
@@ -126,8 +156,43 @@ export interface AdvancedSettings {
   hardwareAcceleration: boolean
 }
 
+/** Agent Mesh — cross-workspace agent context + control (main-owned). */
+export interface AgentMeshSettings {
+  /**
+   * Persist redacted agent context (tails + prompts) to <workspace>/.plano/context/ so a
+   * restart can re-search it. Opt-in by design; redaction runs before anything touches disk.
+   */
+  contextPersistence: boolean
+  /** Cap for the persisted context index (rotation keeps the newest slice). */
+  maxPersistBytes: number
+  /**
+   * Let agents message and spawn each other without asking first. ON by default: the mesh is
+   * loopback-only, every write is attributed to a token-identified agent and lands visibly in a
+   * terminal the user can see, so a prompt before each new workspace was friction without a
+   * decision behind it. Turn it OFF to get the per-workspace confirmation back.
+   */
+  allowAgentWrites: boolean
+}
+
 /** Optional language hint for the (multilingual) voice model. 'auto' lets it detect es/en/… itself. */
 export type VoiceLanguage = 'auto' | 'es' | 'en'
+
+/** Status bar (plan PLAN_STATUS_BAR_LIVE_USAGE): show/hide + per-chip visibility + the
+ *  OpenCode Go cookie. The cookie is stored here (masked in the UI, never logged) and read by
+ *  the Agent Host's opencode-go adapter; it is only ever sent to https://opencode.ai. */
+export interface UsageSettings {
+  /** Master switch for the bottom status bar. */
+  showStatusBar: boolean
+  /** Per-chip visibility. Providers additionally self-gate: no credentials → no chip. */
+  chips: {
+    ports: boolean
+    resources: boolean
+    agents: boolean
+    providers: Record<UsageProviderId, boolean>
+  }
+  /** The user's opencode.ai `auth` cookie (bare `Fe26.2**…` token or full cookie header). */
+  opencodeCookie: string
+}
 
 export interface VoiceSettings {
   /** Master switch for the global voice orchestrator "Odla" (overlay aura + push-to-talk key). */
@@ -183,7 +248,9 @@ export interface PlanoSettings {
   browser: BrowserSettings
   privacy: PrivacySettings
   advanced: AdvancedSettings
+  agentMesh: AgentMeshSettings
   voice: VoiceSettings
+  usage: UsageSettings
 }
 
 export const DEFAULT_SETTINGS: PlanoSettings = {
@@ -194,14 +261,21 @@ export const DEFAULT_SETTINGS: PlanoSettings = {
     showFilesOnLaunch: false,
     warnBeforeQuit: false,
     confirmClosePanelWithProcess: true,
+    agentDoneSound: true,
+    agentDoneNotify: true,
   },
   appearance: {
     theme: 'monolith',
     accent: '#FFFFFF',
-    gridStyle: 'dots',
+    // A clean theme-colored field by default. The optional drafting grid remains available in
+    // Appearance, but new workspaces no longer show rectangles/lines around terminal panels.
+    gridStyle: 'none',
     gridOpacity: 1,
-    grain: true,
     reduceMotion: false,
+    // Theme-colored substrate by default; colors only matter once the user picks solid/gradient.
+    canvasBackground: { kind: 'theme', colors: ['#141414', '#1d1d2b'], angle: 135 },
+    canvasGlow: 0,
+    gridSize: 'standard',
   },
   editor: {
     fontSize: 13,
@@ -214,19 +288,30 @@ export const DEFAULT_SETTINGS: PlanoSettings = {
     shellPath: '',
     fontFamily: '',
     fontSize: 0,
-    // 1.4 = Deska's airier terminal rhythm (the reference look). Paired with customGlyphs:false in the
-    // terminal engine so box-drawing / CLI block-art (Claude Code's mascot) is drawn FROM THE FONT —
-    // which carries its own metrics — instead of cell-clipped vectors, so the extra leading only adds
-    // air and never tears the art (that tearing was the reason this used to sit at 1.0).
+    // 1.4 = the shipped pre-glass default (mirrors "Deska's airier rhythm") — the build the user
+    // verified as pixel-perfect. The v9 experiment at 1.0 packed rows so tight that CLI output
+    // looked clipped/joined and the terminal read as "cut off" on the right; 1.4 restores the
+    // comfortable row rhythm of the original. The Settings slider still caps manual values at 1.2
+    // for users who prefer tighter rows.
     lineHeight: 1.4,
     cursorStyle: 'bar',
     cursorBlink: true,
     scrollback: 5000,
-    theme: 'monolith',
+    // Default terminal palette = the classic Windows Terminal "Campbell" scheme, so CLI output
+    // (git, npm, PSReadLine, …) renders with the same colors the user sees in their OS terminal.
+    theme: 'campbell',
     copyOnSelect: false,
     predictiveHistory: true,
     smartActions: true,
-    autoSuspendIdle: false,
+    // Hibernate the renderer-side terminals of a workspace you switch away from (freeing their
+    // WebGL contexts + continuous IPC/parsing) while the PTYs keep running in main; returning
+    // re-attaches and replays main's bounded buffer. The fix for many-open-workspaces memory
+    // pressure. A safety valve — turn off to restore the original "every visited terminal stays
+    // live forever" behaviour if a workspace ever feels wrong on return.
+    autoSuspendIdle: true,
+    // The herdr-style guarantee: terminals live in a detached Agent Host, so closing PLANO never
+    // closes the agents you left open. Off = quitting kills everything (old behaviour).
+    keepAgentsOnQuit: true,
   },
   canvas: {
     snapToGrid: true,
@@ -248,6 +333,13 @@ export const DEFAULT_SETTINGS: PlanoSettings = {
   advanced: {
     hardwareAcceleration: true,
   },
+  agentMesh: {
+    // Context never leaves the app by default. Turning this on writes REDACTED context to the
+    // workspace's .plano folder (see AgentMeshSettings.contextPersistence) for restart-safe search.
+    contextPersistence: false,
+    maxPersistBytes: 512 * 1024,
+    allowAgentWrites: true,
+  },
   voice: {
     enabled: true,
     pushToTalkKey: 'Ctrl+Shift+Space',
@@ -268,6 +360,23 @@ export const DEFAULT_SETTINGS: PlanoSettings = {
       baseUrl: 'http://localhost:11434/v1',
       model: 'llama3.1',
     },
+  },
+  usage: {
+    showStatusBar: true,
+    chips: {
+      ports: true,
+      resources: true,
+      agents: true,
+      providers: {
+        claude: true,
+        codex: true,
+        gemini: true,
+        'opencode-go': true,
+        grok: true,
+        omp: true,
+      },
+    },
+    opencodeCookie: '',
   },
 }
 
@@ -294,24 +403,62 @@ export function mergeSettings(stored: unknown): PlanoSettings {
     browser: group('browser'),
     privacy: group('privacy'),
     advanced: group('advanced'),
+    agentMesh: group('agentMesh'),
     voice: group('voice'),
+    usage: group('usage'),
   }
-  // v2→v3: PLANO now ships Deska's airier terminal rhythm (lineHeight 1.4), made safe by turning
-  // customGlyphs OFF in the engine so box-drawing/block-art tiles from the font instead of tearing.
-  // Move anyone still on the previous tight default (1.0) up to the new default; a value the user
-  // deliberately set to something else is left untouched (only the exact old default is migrated).
-  if (storedVersion < 3 && merged.terminal.lineHeight === 1.0) {
-    merged.terminal.lineHeight = DEFAULT_SETTINGS.terminal.lineHeight
+  // v12: the status-bar group is nested (chips.providers is a per-provider record) — a half-written
+  // stored value must not leak partial fields. Rebuild `chips` over the defaults, one level deep.
+  const usageDefaults = DEFAULT_SETTINGS.usage
+  const storedUsage = (s.usage ?? {}) as Partial<UsageSettings>
+  merged.usage = {
+    ...usageDefaults,
+    ...storedUsage,
+    chips: {
+      ...usageDefaults.chips,
+      ...(storedUsage.chips ?? {}),
+      providers: {
+        ...usageDefaults.chips.providers,
+        ...((storedUsage.chips?.providers as Partial<Record<UsageProviderId, boolean>> | undefined) ?? {}),
+      },
+    },
   }
-  // Keep terminal lineHeight in a sane band. With customGlyphs off the glyphs carry their own metrics,
-  // so values up to ~2 only add leading without tearing; clamp out-of-range stored/edited values on load.
-  merged.terminal.lineHeight = Math.min(2.0, Math.max(1.0, merged.terminal.lineHeight || 1.4))
+  if (typeof merged.usage.showStatusBar !== 'boolean') merged.usage.showStatusBar = true
+  if (typeof merged.usage.opencodeCookie !== 'string') merged.usage.opencodeCookie = ''
+  // v9 once migrated lineHeight 1.4 → 1.0, but the pre-glass default was 1.4 and users reported
+  // the 1.0 packing made CLI output look clipped ("cut off" on the right). The shipped default is
+  // 1.4 again; a value the user deliberately set is always left untouched. (Old installs already
+  // migrated to 1.0 keep it only if they explicitly want the tighter look.)
+  // Keep terminal lineHeight in a sane band (1.0 = connected glyphs; the Settings slider caps at 1.2
+  // because higher values reopen the sub-cell gap that tears CLI block-art). Clamp bad stored/edited
+  // values on load.
+  merged.terminal.lineHeight = Math.min(2.0, Math.max(1.0, merged.terminal.lineHeight || 1.0))
   // Browser media-device aliases are not real microphones. They can point at virtual routers like
   // SteelSeries Sonar and break Auto by pinning capture to a silent default. Empty string is Auto.
   if (merged.voice.inputDeviceId === 'default' || merged.voice.inputDeviceId === 'communications') {
     merged.voice.inputDeviceId = ''
   }
-
+  // v10: the terminal palette default moves from the custom "Monolith" ramp to the classic Windows
+  // Terminal "Campbell" scheme — the colors the user's OS terminal actually shows. Move anyone still
+  // on the old DEFAULT (monolith) over; a palette the user deliberately chose is left untouched.
+  if (storedVersion < 10 && merged.terminal.theme === 'monolith') {
+    merged.terminal.theme = DEFAULT_SETTINGS.terminal.theme
+  }
+  // v11: canvas background is a nested object — a half-written stored value must not leak partial
+  // fields. Rebuild it over the defaults (one level deep), then validate the shape.
+  merged.appearance.canvasBackground = {
+    ...DEFAULT_SETTINGS.appearance.canvasBackground,
+    ...(merged.appearance.canvasBackground as Partial<CanvasBackground> | undefined),
+  }
+  const bg = merged.appearance.canvasBackground
+  if (!['theme', 'solid', 'linear', 'radial'].includes(bg.kind)) bg.kind = 'theme'
+  if (!Array.isArray(bg.colors) || bg.colors.length !== 2 || typeof bg.colors[0] !== 'string' || typeof bg.colors[1] !== 'string') {
+    bg.colors = [...DEFAULT_SETTINGS.appearance.canvasBackground.colors]
+  }
+  if (typeof bg.angle !== 'number' || !Number.isFinite(bg.angle)) bg.angle = 135
+  if (typeof merged.appearance.canvasGlow !== 'number' || !Number.isFinite(merged.appearance.canvasGlow)) merged.appearance.canvasGlow = 0
+  merged.appearance.canvasGlow = Math.min(40, Math.max(0, merged.appearance.canvasGlow))
+  if (!['fine', 'standard', 'coarse'].includes(merged.appearance.gridSize)) merged.appearance.gridSize = 'standard'
   return merged
 }
 

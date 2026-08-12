@@ -1,10 +1,11 @@
-import { useRef } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useViewportStore } from '@/stores/useViewportStore'
 import { useUiStore } from '@/stores/useUiStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { boundingBox } from '@shared/domain/geometry'
 import { Icon } from '@/design-system/Icon'
+import { viewportController } from './ViewportController'
 
 const W = 200
 const H = 140
@@ -14,25 +15,46 @@ const PAD = 12
  * Spatial overview: panels as filled rects + the current viewport rectangle. Hidden by default;
  * shown/hidden from the bottom-right ViewControls map toggle (it sits just left of that cluster).
  * Click or drag anywhere on it to fly the camera there.
+ *
+ * The viewport rect subscribes to the camera's LIVE channel (not the React store), so a
+ * pan/zoom gesture never re-renders the world via this overlay — the world transform keeps
+ * exactly one writer (the controller during motion, the store at rest).
  */
 export function Minimap() {
   const visible = useUiStore((s) => s.minimapVisible)
   const panels = usePanelStore((s) => s.panels)
-  const x = useViewportStore((s) => s.x)
-  const y = useViewportStore((s) => s.y)
-  const zoom = useViewportStore((s) => s.zoom)
   const setTransform = useViewportStore((s) => s.setTransform)
+  const [cam, setCam] = useState(() => {
+    const s = useViewportStore.getState()
+    return { x: s.x, y: s.y, zoom: s.zoom }
+  })
   // Mapping snapshot taken on press so click-drag panning doesn't rubber-band as the box
   // rescales when the viewport travels past the panels' bounds.
   const drag = useRef<{ left: number; top: number; boxX: number; boxY: number; scale: number } | null>(null)
 
-  if (!visible) return null
+  useEffect(() => {
+    const unLive = viewportController.subscribeLive((v) => setCam(v))
+    const unSettled = viewportController.subscribeSettled((v) => setCam(v))
+    return () => {
+      unLive()
+      unSettled()
+    }
+  }, [])
 
-  // Docked panels have a stale rect (their group holds the real one) — skip them.
-  const rects = Object.values(panels)
-    .filter((p) => !p.dockedIn)
-    .map((p) => p.rect)
+  // Docked panels have a stale rect (their group holds the real one) — skip them. Memoized on
+  // the registry reference (plan D3): a drag elsewhere changes the registry but bails out here.
+  // MUST stay above the `visible` early return — hooks cannot be conditional (React #300).
+  const rects = useMemo(
+    () =>
+      Object.values(panels)
+        .filter((p) => !p.dockedIn)
+        .map((p) => p.rect),
+    [panels],
+  )
+
+  if (!visible) return null
   // Viewport rectangle in world space.
+  const { x, y, zoom } = cam
   const view = {
     x: -x / zoom,
     y: -y / zoom,
@@ -69,8 +91,9 @@ export function Minimap() {
 
   return (
     <div
-      className="absolute bottom-6 right-16 z-30 overflow-hidden rounded-md border border-default shadow-popover"
-      style={{ width: W, background: 'color-mix(in srgb, var(--surface-2) 85%, transparent)', backdropFilter: 'blur(12px)' }}
+      data-surface-layer="popover"
+      className="surface-layer surface-layer--chrome absolute bottom-6 right-20 z-[var(--z-chrome)] overflow-hidden rounded-[26px]"
+      style={{ width: W }}
     >
       <div className="flex h-6 items-center justify-between px-2">
         <span className="label-caps">Map</span>

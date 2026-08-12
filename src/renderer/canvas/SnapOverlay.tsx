@@ -15,7 +15,7 @@ const SIDE_ICON = { left: 'PanelLeft', right: 'PanelRight', top: 'PanelTop', bot
  *   - the Windows-style zone preview (a soft accent fill where the panel will tile on drop).
  * Everything is accent/white + token-driven, so it follows the user's theme and reduced-motion.
  */
-const PANEL_RADIUS = 16 // matches PanelFrame's rounded-lg, scaled by zoom so corners line up
+const PANEL_RADIUS = 26 // matches PanelFrame's rounded-[26px] (surface-layer--panel), scaled by zoom so corners line up
 const GUIDE_PAD = 6 // px the hairline overshoots the shared edge, for a measured look (kept small so it never spills)
 
 export function SnapOverlay() {
@@ -34,7 +34,7 @@ export function SnapOverlay() {
 
   return (
     <div className="pointer-events-none absolute inset-0 z-[15] overflow-hidden">
-      {/* dock-merge preview — the region a dragged panel will merge into, with our own side cue */}
+      {/* dock-merge preview — where the dragged panel will land (its real size), with a compact side cue */}
       {dock && (
         <div
           className="animate-menu-in absolute flex items-center justify-center"
@@ -44,20 +44,22 @@ export function SnapOverlay() {
             width: dock.rect.width,
             height: dock.rect.height,
             borderRadius: PANEL_RADIUS,
-            border: `1.5px solid color-mix(in srgb, ${accent} 60%, transparent)`,
-            background: `color-mix(in srgb, ${accent} 14%, transparent)`,
-            boxShadow: `inset 0 0 30px -8px color-mix(in srgb, ${accent} 35%, transparent)`,
+            border: `1.5px solid color-mix(in srgb, ${accent} 55%, transparent)`,
+            background: `color-mix(in srgb, ${accent} 10%, transparent)`,
+            boxShadow: `inset 0 0 40px -12px color-mix(in srgb, ${accent} 30%, transparent)`,
           }}
         >
+          {/* side cue: a small chip pinned to the edge the panel joins — reads as "docking here",
+              not a technical "Merge left" label */}
           <span
-            className="flex items-center gap-1.5 rounded-pill px-2.5 py-1"
+            className="flex items-center gap-1.5 rounded-pill px-2 py-1"
             style={{
-              background: 'color-mix(in srgb, var(--bg-base) 72%, transparent)',
-              border: `1px solid color-mix(in srgb, ${accent} 30%, transparent)`,
+              background: 'color-mix(in srgb, var(--bg-base) 82%, transparent)',
+              border: `1px solid color-mix(in srgb, ${accent} 35%, transparent)`,
+              boxShadow: '0 4px 12px -4px rgba(0,0,0,0.5)',
             }}
           >
             <Icon name={SIDE_ICON[dock.side]} size={13} className="text-text-primary" />
-            <span className="label-caps text-text-secondary">Merge {dock.side}</span>
           </span>
         </div>
       )}

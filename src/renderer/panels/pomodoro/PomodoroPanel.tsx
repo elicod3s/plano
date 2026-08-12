@@ -128,10 +128,33 @@ export function PomodoroPanel({ panel }: { panel: Panel }) {
   const ringColor = phase === 'focus' ? 'var(--text-primary)' : 'var(--text-secondary)'
 
   return (
-    <div className="flex h-full w-full flex-col bg-surface-1">
-      {/* top row: phase + sound/settings */}
-      <div className="flex shrink-0 items-center gap-2 px-3 pt-3">
-        <span className="label-caps text-text-secondary">{PHASE_LABEL[phase]}</span>
+    <div className="flex h-full w-full flex-col bg-transparent">
+      {/* phase segmented + sound/settings */}
+      <div className="mx-3 mt-3 flex shrink-0 items-center gap-2">
+        <div
+          className="flex h-7 min-w-0 flex-1 items-stretch gap-0.5 rounded-pill border border-glass p-0.5"
+          style={{ background: 'var(--glass)' }}
+        >
+          {(Object.keys(PHASE_LABEL) as Phase[]).map((p) => (
+            <button
+              key={p}
+              type="button"
+              onClick={() => {
+                setRunning(false)
+                setPhase(p)
+                setRemaining(durations[p])
+              }}
+              className={cn(
+                'app-no-drag min-w-0 flex-1 overflow-hidden whitespace-nowrap rounded-pill px-1.5 text-center text-[11.5px] transition-colors',
+                phase === p
+                  ? 'bg-accent font-medium text-text-onsolid'
+                  : 'text-text-2 hover:bg-glass-hover hover:text-text-1',
+              )}
+            >
+              {PHASE_LABEL[p]}
+            </button>
+          ))}
+        </div>
         {running && <span className="h-1.5 w-1.5 animate-status-pulse rounded-pill bg-text-primary" />}
         <div className="ml-auto flex items-center gap-0.5">
           <IconButton
@@ -198,7 +221,7 @@ export function PomodoroPanel({ panel }: { panel: Panel }) {
       </div>
 
       {/* controls */}
-      <div className="flex shrink-0 items-center justify-center gap-2 px-4 pb-3 pt-1">
+      <div className="flex shrink-0 items-center justify-center gap-2 px-4 pb-4 pt-1">
         <IconButton icon="RotateCcw" label="Reset" size={36} onClick={reset} />
         <button
           type="button"
@@ -217,7 +240,7 @@ export function PomodoroPanel({ panel }: { panel: Panel }) {
 
       {/* settings */}
       {showSettings && (
-        <div className="shrink-0 space-y-1 border-t border-subtle bg-surface-2 px-3 py-2">
+        <div className="mx-3 mb-2 shrink-0 space-y-1 rounded-[14px] border border-glass bg-glass px-3 py-2">
           <Stepper
             label="Focus"
             unit="min"

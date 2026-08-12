@@ -8,10 +8,12 @@ import { TerminalControls } from './TerminalControls'
 /**
  * ONE live terminal (the active tab of a terminal panel). Owns the padded/clipped container
  * (wheel + paste + context-menu) and the counter-scaled render box xterm is opened into; `useXterm`
- * attaches the `terminalEngine` session keyed by `termId`. On unmount (tab/space switch) the hook
+ * attaches the `terminalEngine` session keyed by `termId`. On unmount (a TAB switch) the hook
  * DETACHES the DOM only — the xterm instance, its PTY and its scrollback stay alive in the registry,
- * so returning is a pure DOM re-parent (no buffered replay). The session is destroyed only when the
- * terminal is truly closed (via app/terminalSessions → terminalEngine.dispose).
+ * so switching back to the tab is a pure DOM re-parent (no buffered replay). Switching WORKSPACE may
+ * hibernate and fully dispose this session; on return, `getOrCreate` reattaches via main's replay
+ * buffer. The session is destroyed only when the terminal is truly closed
+ * (via app/terminalSessions → terminalEngine.dispose).
  */
 export function TerminalView({
   termId,
@@ -31,10 +33,14 @@ export function TerminalView({
 
   return (
     <div className="relative min-h-0 flex-1">
-      {/* Outer wrapper owns the padding (the natural margin) + theme background. The inner
-          container is the positioned, clipped box the absolute render box fills — so the render box
-          sits INSIDE the padding instead of covering it. */}
-      <div className="flex h-full min-h-0 overflow-hidden" style={{ background: bg, padding: 8 }}>
+      {/* Outer wrapper: 8px inset ring around the terminal (restored to match the pre-glass
+          build the user verified as correct — `PLANO Setup (1).exe`, 07-07). Full-bleed with
+          no padding let the xterm's last column butt against the panel's clipped edge, which
+          read as a gray square cutting the right side of CLI output. */}
+      <div
+        className="flex h-full min-h-0 overflow-hidden"
+        style={{ background: bg, padding: 8 }}
+      >
         <div
           ref={containerRef}
           // data-wheel-own: xterm owns the wheel here so scrolling the buffer never pans the canvas.

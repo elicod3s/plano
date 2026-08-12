@@ -89,7 +89,8 @@ export function TodoContextMenu({
         }}
       />
       <div
-        className="animate-menu-in fixed z-[71] origin-top-left rounded-md border bg-surface-3 p-1.5 shadow-popover"
+        data-surface-layer="popover"
+        className="animate-menu-in surface-layer surface-layer--popover fixed z-[71] origin-top-left rounded-[18px] p-1.5"
         style={{ left, top: Math.max(8, top), width: MENU_WIDTH }}
         onContextMenu={(e) => e.preventDefault()}
       >

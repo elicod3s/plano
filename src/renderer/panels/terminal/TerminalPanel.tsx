@@ -11,6 +11,7 @@ import { newId } from '@/lib/id'
 import { getTerminalTheme } from './terminalThemes'
 import { TerminalTabBar } from './TerminalTabBar'
 import { TerminalView } from './TerminalView'
+import { useTerminalFocus } from './useTerminalFocus'
 
 /**
  * A terminal panel hosts one or more terminals (tabs), each with its own PTY/xterm. A slim tab
@@ -96,6 +97,12 @@ export function TerminalPanel({ panel }: { panel: Panel }) {
     (props.activeTabId && tabs.some((t) => t.id === props.activeTabId) ? props.activeTabId : undefined) ??
     tabs[0].id
 
+  // Deska-parity focus: narrow store subscription that runs the engine's safe xterm focus when this
+  // panel becomes the focused canvas member, when the epoch bumps while focused (refocus after an
+  // overlay stole DOM focus), or when the active tab changes while focused. No React state involved,
+  // so focusing this terminal never re-renders other terminal bodies.
+  useTerminalFocus(panel.id, activeTermId)
+
   // Match the panel body (incl. its padding gutter) to the xterm theme's background so a colored
   // terminal theme has no color seam / "bars" around the content.
   const themeDefault = useSettingsStore((s) => s.settings.terminal.theme)
@@ -142,7 +149,12 @@ export function TerminalPanel({ panel }: { panel: Panel }) {
       {/* Only the active tab is mounted. key={activeTermId} unmounts the old TerminalView — which
           DETACHES its terminal's DOM (the engine keeps the xterm instance + PTY alive) — and mounts
           the selected tab's view, re-attaching its existing instance (pure DOM re-parent, no replay). */}
-      <TerminalView key={activeTermId} termId={activeTermId} panelId={panel.id} bg={bg} />
+      <TerminalView
+        key={activeTermId}
+        termId={activeTermId}
+        panelId={panel.id}
+        bg={bg}
+      />
     </div>
   )
 }

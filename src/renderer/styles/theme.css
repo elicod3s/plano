@@ -1,93 +1,168 @@
 /**
- * PLANO — "Monolith Draft" tokens (canonical source of truth).
- * Strictly monochrome (white + WARM-neutral grays) + one functional red.
- * The ramp is warm-neutral (Red >= Blue) on purpose — it keeps PLANO off the cool/zinc
- * "blue-tinted dark SaaS" path and away from the reference's blue identity.
+ * PLANO — design tokens (canonical source of truth).
+ *
+ * Monolith is the default theme — the original PLANO charcoal (dark, neutral, pure-white
+ * glass): deep charcoal canvas with translucent white "glass" surfaces, soft borders,
+ * rounded chrome everywhere (panels 26px, overlays 20–28px, pills for toggles/search),
+ * Instrument Sans UI + Geist Mono for data, and a sparing accent (white by default).
+ *
+ * Every token here is a CSS custom property so a runtime theme swap (Settings →
+ * Appearance) re-tints every utility class for free (see theme/themes.ts). Variable
+ * names that predate the redesign are kept intact so components keep working; the
+ * glass-specific tokens (--glass-*, --border-glass*, --text-1..4, --glass-panel,
+ * --glass-bar, --inset-*) are the design's vocabulary.
  */
 
 :root {
-  /* ── Surfaces (warm-neutral, R >= B) ── */
-  --bg-canvas: #0e0e0d;
-  --bg-base: #141414;
-  --surface-1: #1a1a19;
-  --surface-2: #201f1e;
-  --surface-3: #272625;
-  --surface-4: #2e2d2b;
-  --surface-inset: #0b0b0a;
+  /* ── Canvas / base (Monolith: the original PLANO charcoal — dark, neutral) ── */
+  --bg-canvas: #141414;
+  --bg-base: #191918;
+  --canvas-deep: #0f0f0e;
+  --canvas-mid: #141414;
 
-  /* ── Borders (neutral white-alpha) ── */
-  --border-subtle: rgba(255, 255, 255, 0.06);
-  --border-default: rgba(255, 255, 255, 0.1);
-  --border-strong: rgba(255, 255, 255, 0.16);
-  --border-grid-minor: rgba(255, 255, 255, 0.05);
-  --border-grid-major: rgba(255, 255, 255, 0.07);
+  /* ── Glass chroma (per-theme): Monolith's glass is PURE WHITE — the original look.
+     A tinted glass (warm cream, cool blue) can be set per theme via `--glass-white`.
+     Chroma must stay neutral here so Monolith reads as charcoal, never brown. ── */
+  --glass-white: 255, 255, 255;
 
-  /* ── Text (primary locked to pure #FFFFFF; tertiary warmed for AA) ── */
-  --text-primary: #ffffff;
-  --text-secondary: #a1a1aa;
-  --text-tertiary: #8c8b86;
-  --text-quaternary: #6b6a65;
-  --text-on-solid: #0e0e0d;
+  /* ── Glass surfaces (white-alpha over the canvas) ── */
+  --surface-1: rgba(var(--glass-white), 0.05); /* glass-panel  */
+  --surface-2: rgba(var(--glass-white), 0.08); /* glass-bar    */
+  --surface-3: rgba(var(--glass-white), 0.13); /* glass-hover  */
+  --surface-4: rgba(var(--glass-white), 0.16); /* glass-active */
+  --surface-inset: rgba(0, 0, 0, 0.18); /* inset-soft    */
+  --glass: rgba(var(--glass-white), 0.06);
+  --glass-strong: rgba(var(--glass-white), 0.09);
+  --glass-hover: rgba(var(--glass-white), 0.13);
+  --glass-active: rgba(var(--glass-white), 0.16);
+  --glass-sheen: rgba(var(--glass-white), 0.12);
+  --glass-input: rgba(0, 0, 0, 0.28);
+  --glass-input-hover: rgba(0, 0, 0, 0.34);
+  --glass-panel: rgba(var(--glass-white), 0.05);
+  --glass-bar: rgba(var(--glass-white), 0.08);
+  --inset-deep: rgba(5, 6, 11, 0.8);
+  --inset-soft: rgba(0, 0, 0, 0.18);
 
-  /* ── Accent = white (monochrome) ── */
+  /* ── Borders ── */
+  --border-subtle: rgba(var(--glass-white), 0.06);
+  --border-default: rgba(var(--glass-white), 0.08);
+  --border-strong: rgba(var(--glass-white), 0.18);
+  --border-glass: rgba(var(--glass-white), 0.08);
+  --border-glass-strong: rgba(var(--glass-white), 0.18);
+  --border-glass-hover: rgba(var(--glass-white), 0.24);
+  --border-grid-minor: rgba(var(--glass-white), 0.035);
+  --border-grid-major: rgba(var(--glass-white), 0.055);
+
+  /* ── Text (warm monochrome ramp) ── */
+  --text-primary: #f5f5f4;
+  --text-secondary: rgba(201, 201, 196, 0.72);
+  --text-tertiary: rgba(201, 201, 196, 0.5);
+  --text-quaternary: rgba(201, 201, 196, 0.34);
+  --text-muted: rgba(201, 201, 196, 0.4);
+  --text-on-solid: #211f1b;
+  --text-1: #f5f5f4;
+  --text-2: rgba(201, 201, 196, 0.72);
+  --text-3: rgba(201, 201, 196, 0.5);
+  --text-4: rgba(201, 201, 196, 0.34);
+
+  /* ── Accent (Monolith = white) ── */
   --accent-primary: #ffffff;
-  --accent-primary-hover: #ededec;
-  --accent-soft: rgba(255, 255, 255, 0.08);
-  --accent-soft-strong: rgba(255, 255, 255, 0.14);
+  --accent-primary-hover: #ececea;
+  --accent-soft: rgba(var(--glass-white), 0.12);
+  --accent-soft-strong: rgba(var(--glass-white), 0.16);
+  --text-on-accent: #211f1b;
 
-  /* ── Primary dock action (Library / command palette) ──
-     Marks the main "add panels" entry point with a white-accent chip (brighter icon + soft
-     fill + edge) — monochrome by default, and it follows the user's chosen accent since it
-     points at the standard accent tokens. Kept as its own vars so the emphasis can be tuned
-     in one place without touching every other accent use. */
+  /* Per-theme panel tint (Indigo/Orange/Tokyo/Sakura tint their panels subtly). */
+  --panel-tint: transparent;
+  --panel-border: var(--border-glass-strong);
+
+  /* ── Primary dock action (Library / command palette) ── */
   --dock-accent: var(--accent-primary);
-  --dock-accent-border: var(--border-strong);
+  --dock-accent-border: var(--border-glass-strong);
   --dock-accent-soft: var(--accent-soft);
   --dock-accent-soft-strong: var(--accent-soft-strong);
 
-  /* ── The only hue: functional red ── */
-  --destructive: #ef4444;
-  --destructive-hover: #f87171;
-  --destructive-soft: rgba(239, 68, 68, 0.12);
+  /* ── Functional red (destructive/armed states only) ── */
+  --destructive: #f87171;
+  --destructive-hover: #fca5a5;
+  --destructive-soft: rgba(248, 113, 113, 0.14);
   --destructive-border: rgba(248, 113, 113, 0.4);
 
-  /* ── To-do priority flags ──
-     Scoped color exception (like terminal ANSI / syntax): these tint USER TASK DATA only —
-     the small priority flag glyph inside the To-do panel body — never the chrome. The chrome
-     (borders, header, buttons, checkboxes) stays strictly monochrome. Urgent reuses the system
-     red; the rest descend warm→cool so the ladder reads at a glance. Centralized here so hex
-     stays out of the renderer per the design-system rule. */
-  --priority-urgent: #ef4444;
-  --priority-high: #f97316;
-  --priority-medium: #eab308;
-  --priority-low: #3b82f6;
+  /* ── Scoped color exceptions (user DATA, never chrome) ── */
+  --priority-urgent: #f87171;
+  --priority-high: #fb923c;
+  --priority-medium: #fbbf24;
+  --priority-low: #93c5fd;
   --priority-none: var(--text-quaternary);
-
-  /* ── Git diff stats (scoped color exception, like ANSI / priority flags) ──
-     Tints DATA only — the +added / −removed line counts in the running-processes view —
-     never the chrome. Additions read green, deletions reuse the system red, matching the
-     universal diff convention the user expects. Kept here so hex stays out of the renderer. */
-  --diff-added: #3fb950;
+  --diff-added: #34d399;
   --diff-removed: var(--destructive);
 
+  /* ── Agent brand colors ── */
+  --claude: #d97757;
+  --codex: #10a37f;
+  --success: #34d399;
+  --amber: #fbbf24;
+  --info: #93c5fd;
+
   /* ── Focus / selection ── */
-  --focus-ring: rgba(255, 255, 255, 0.9);
-  --selection-bg: rgba(255, 255, 255, 0.18);
+  --focus-ring: rgba(var(--glass-white), 0.85);
+  --selection-bg: rgba(var(--glass-white), 0.18);
   --selection-fg: #ffffff;
 
   /* ── Status ── */
-  --status-ready: #a1a1aa;
-  --status-active: #ffffff;
-  --status-error: #ef4444;
+  --status-ready: rgba(226, 232, 255, 0.5);
+  --status-active: #f2f4ff;
+  --status-error: #f87171;
 
-  /* ── Regions (grouping zones — brighter than panel borders so they read as ground) ── */
-  --region-border: rgba(255, 255, 255, 0.26);
-  --region-border-hover: rgba(255, 255, 255, 0.5);
-  --region-fill: rgba(255, 255, 255, 0.025);
-  --region-fill-hover: rgba(255, 255, 255, 0.045);
+  /* ── Regions ── */
+  --region-border: rgba(var(--glass-white), 0.18);
+  --region-border-hover: rgba(var(--glass-white), 0.34);
+  --region-fill: rgba(var(--glass-white), 0.02);
+  --region-fill-hover: rgba(var(--glass-white), 0.04);
 
-  /* ── Overlays / texture ── */
-  --scrim: rgba(8, 8, 8, 0.64);
+  /* ── Layer surface hierarchy (PLAN_UNIFIED_MOTION_AND_OCCLUSION_HIERARCHY) ──
+     Opaque backgrounds (alpha = 1) derived ONLY from opaque tokens (--bg-base + solid
+     white/black), so the final color is always fully opaque in every theme. Gradients of
+     lighting ride in background-image on top of these. Perceptual order (dark):
+     canvas < inset < panel < header < chrome < popover < modal. */
+  --layer-canvas-bg: var(--bg-canvas);
+  --layer-inset-bg: color-mix(in srgb, var(--bg-base) 93%, #000000);
+  --layer-panel-bg: color-mix(in srgb, var(--bg-base) 92%, rgb(var(--glass-white)));
+  --layer-panel-header-bg: color-mix(in srgb, var(--bg-base) 90%, rgb(var(--glass-white)));
+  --layer-chrome-bg: color-mix(in srgb, var(--bg-base) 89%, rgb(var(--glass-white)));
+  --layer-popover-bg: color-mix(in srgb, var(--bg-base) 87%, rgb(var(--glass-white)));
+  --layer-modal-bg: color-mix(in srgb, var(--bg-base) 85%, rgb(var(--glass-white)));
+  /* Internal states — alpha allowed ONLY over an opaque parent. */
+  --layer-control-hover: rgba(var(--glass-white), 0.07);
+  --layer-control-active: rgba(var(--glass-white), 0.12);
+  --layer-edge: rgba(var(--glass-white), 0.08);
+  --layer-edge-strong: rgba(var(--glass-white), 0.18);
+  --layer-highlight: rgba(var(--glass-white), 0.06);
+  --layer-shadow-contact: 0 2px 6px -2px rgba(0, 0, 0, 0.5);
+  /* Resting panel elevation — compact blur so N panels never saturate the compositor.
+     This is the pre-redesign profile: every panel carries a tight 24px shadow and only the
+     FRONT panel gets the deep 48px one. A 48px blur on every panel re-rasterizes a huge
+     area per repaint, which is what made "many panels" stutter. */
+  --layer-shadow-panel: 0 2px 6px -2px rgba(0, 0, 0, 0.45),
+    0 8px 24px -8px rgba(0, 0, 0, 0.55);
+  --layer-shadow-panel-front: 0 2px 6px -2px rgba(0, 0, 0, 0.5),
+    0 16px 48px -12px rgba(0, 0, 0, 0.6);
+  --layer-shadow-ambient: 0 16px 48px -12px rgba(0, 0, 0, 0.6);
+  --layer-shadow-modal: 0 24px 64px -16px rgba(0, 0, 0, 0.72), 0 8px 24px -8px rgba(0, 0, 0, 0.55);
+
+  /* ── Overlays ── */
+  /* Neutral black scrim — NO hue of its own, so dimming never re-tints the canvas into a
+     different-looking theme. */
+  --scrim: rgba(0, 0, 0, 0.62);
+
+  /* ── Semantic z-scale (centralized stacking) ── */
+  --z-canvas: 0;
+  --z-world: 10;
+  --z-snap: 20;
+  --z-chrome: 100;
+  --z-popover: 200;
+  --z-modal: 300;
+  --z-toast: 400;
 
   /* ── Radii ── */
   --radius-xs: 6px;
@@ -96,23 +171,51 @@
   --radius-lg: 16px;
   --radius-xl: 20px;
   --radius-2xl: 24px;
+  --radius-3xl: 26px;
+  --radius-4xl: 28px;
   --radius-pill: 9999px;
 
   /* ── Elevation ── */
-  --shadow-panel: 0 1px 0 0 rgba(255, 255, 255, 0.04) inset, 0 8px 24px -8px rgba(0, 0, 0, 0.55),
-    0 2px 6px -2px rgba(0, 0, 0, 0.45);
-  --shadow-panel-focus: 0 1px 0 0 rgba(255, 255, 255, 0.06) inset,
-    0 16px 48px -12px rgba(0, 0, 0, 0.65), 0 4px 12px -4px rgba(0, 0, 0, 0.5);
-  --shadow-overlay: 0 24px 64px -16px rgba(0, 0, 0, 0.72), 0 8px 24px -8px rgba(0, 0, 0, 0.55);
-  --shadow-popover: 0 12px 32px -8px rgba(0, 0, 0, 0.6), 0 2px 8px -2px rgba(0, 0, 0, 0.5);
-  --shadow-dock: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 16px 40px -12px rgba(0, 0, 0, 0.7);
+  /* Panels carry NO visible side/bottom border — the top "liquid glass" edge (inset 1px
+     white highlight) plus the drop shadow define them, like the pre-redesign look. */
+  --shadow-panel:
+    0 1px 0 0 rgba(var(--glass-white), 0.09) inset,
+    0 4px 14px -4px rgba(0, 0, 0, 0.45),
+    0 10px 16px -8px rgba(0, 0, 0, 0.33),
+    0 24px 56px -24px rgba(0, 0, 0, 0.73);
+  --shadow-panel-focus:
+    0 1px 0 0 rgba(var(--glass-white), 0.13) inset,
+    0 6px 20px -6px rgba(0, 0, 0, 0.5),
+    0 14px 24px -10px rgba(0, 0, 0, 0.4),
+    0 32px 72px -28px rgba(0, 0, 0, 0.8);
+  --shadow-overlay:
+    0 10px 16px -8px rgba(0, 0, 0, 0.33),
+    0 28px 64px rgba(0, 0, 0, 0.6);
+  --shadow-popover:
+    0 10px 16px -8px rgba(0, 0, 0, 0.33),
+    0 24px 48px -8px rgba(0, 0, 0, 0.5);
+  --shadow-dock:
+    0 1px 0 0 rgba(var(--glass-white), 0.05) inset,
+    0 8px 14px -6px rgba(0, 0, 0, 0.33),
+    0 10px 28px rgba(0, 0, 0, 0.35);
 
   /* ── Type ── */
-  --font-display: 'Space Grotesk Variable', 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  /*
+   * Primary face: Instrument Sans — a contemporary neo-grotesque with slightly narrow forms and
+   * closed apertures, in the Helvetica Now / SF family of feeling without being either. Chosen
+   * over Space Grotesk, whose wide quirky forms have become the default look of AI-made UI, and
+   * over Inter, which is the other one everybody reaches for. It holds up at 11-13 px, which is
+   * where nearly all of PLANO's chrome lives.
+   */
+  --font-display: 'Instrument Sans Variable', 'Instrument Sans', ui-sans-serif, system-ui, sans-serif;
   --font-body: var(--font-display);
-  /* JetBrains Mono + two BUNDLED symbol layers (see styles/terminal-symbols.css): "PLANO Term Symbols"
-     (Braille/Powerline) and "PLANO Term Dingbats" (the ✻✳ star marks). Trailing entries are last-resort
-     OS monospace — never a proportional fallback, which mangles box-drawing/Braille glyphs. */
+  /*
+   * Secondary face: Geist Mono for FACTS in the chrome — paths, counts, percentages, durations.
+   * Real tabular figures, a colder and more precise voice than the grotesque, so numbers read as
+   * data instead of prose. The terminal keeps its own stack below (JetBrains Mono + the symbol
+   * fallbacks): that one is chosen for glyph coverage, not for taste, and must not change.
+   */
+  --font-data: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-mono: 'JetBrains Mono', 'PLANO Term Symbols', 'PLANO Term Dingbats', 'Cascadia Mono',
     'Cascadia Code', Consolas, 'Courier New', ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono',
     monospace;
@@ -143,21 +246,13 @@
   color: var(--selection-fg);
 }
 
-/* Monochrome film grain — applied to the canvas substrate only, never to panels. */
-.plano-grain::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0.025;
-  mix-blend-mode: overlay;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
 
+/* The OS media query only dampens while the app has NOT explicitly opted into full motion.
+   PLANO's own setting (Settings → Appearance → Reduce motion) is the source of truth. */
 @media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
+  :root:not([data-motion='full']) *,
+  :root:not([data-motion='full']) *::before,
+  :root:not([data-motion='full']) *::after {
     animation: none !important;
     transition-duration: 80ms !important;
   }

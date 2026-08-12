@@ -1,17 +1,20 @@
 /**
  * The Settings sections. Each is a small component bound to useSettingsStore; the SECTIONS
- * list drives the sidebar and SETTINGS_INDEX powers search. Copy is ours (blueprint voice),
- * not lifted from any reference — only the underlying capabilities overlap.
+ * list drives the sidebar (8 sections, matching the new UI design rail) and SETTINGS_INDEX
+ * powers search. Every capability from previous builds is preserved — merged groups just
+ * share a rail entry (e.g. Canvas & Workspace / Mobile & Remote live under General).
  */
-import { useEffect, useState, type ReactElement } from 'react'
+import { useEffect, useRef, useState, type ReactElement } from 'react'
 import { useSettingsStore, type SettingsSection } from '@/stores/useSettingsStore'
-import { SEARCH_ENGINES, type SearchEngineId, type ShellChoice, type TerminalUrlAction, type VoiceLanguage } from '@shared/domain/settings'
+import { cn } from '@/lib/cn'
+import { SEARCH_ENGINES, type SearchEngineId, type ShellChoice, type TerminalUrlAction, type VoiceLanguage, type GridSize } from '@shared/domain/settings'
 import type { AppInfo, VoiceStatus } from '@shared/ipc/contracts'
 import { Toggle } from '@/design-system/Toggle'
 import { Button } from '@/design-system/Button'
 import { Icon } from '@/design-system/Icon'
 import {
   SectionTitle,
+  GroupLabel,
   SettingRow,
   SettingBlock,
   Segmented,
@@ -22,12 +25,13 @@ import {
   PlaceholderCard,
   type Opt,
 } from './controls'
-import { ThemeGallery, AccentSwatches, TerminalThemeGallery, GridStylePicker } from './galleries'
+import { ThemeGallery, AccentSwatches, TerminalThemeGallery, GridStylePicker, BackgroundPicker } from './galleries'
 import { listInputDevices, releaseMic } from '@/voice/audio/mic'
+import { playAgentDoneChime } from '@/lib/agentChime'
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`
 
-// ── General ───────────────────────────────────────────────────────────────
+// ── General (incl. Canvas & Workspace, Mobile & Remote, Account placeholder) ──
 function GeneralSection() {
   const s = useSettingsStore((st) => st.settings.general)
   const patch = useSettingsStore((st) => st.patch)
@@ -50,53 +54,317 @@ function GeneralSection() {
       <SettingRow title="Confirm closing agent terminals" description="Ask before closing a terminal that has an AI agent (Claude Code, Codex, …) running. Plain terminals always close directly.">
         <Toggle checked={s.confirmClosePanelWithProcess} onChange={(v) => set({ confirmClosePanelWithProcess: v })} />
       </SettingRow>
+      <SettingRow title="Agent finished sound" description="Play one quiet cue when an agent finishes a turn. Simultaneous completions are grouped.">
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={() => playAgentDoneChime()} title="Play a preview">
+            <Icon name="Volume2" size={14} />
+            Preview
+          </Button>
+          <Toggle checked={s.agentDoneSound} label="Agent finished sound" onChange={(v) => set({ agentDoneSound: v })} />
+        </div>
+      </SettingRow>
+      <SettingRow title="Agent finished notifications" description="Show an in-app notification when an agent in another workspace finishes, or any agent is blocked awaiting input. Clicking it jumps to that agent. The sound follows its own setting.">
+        <Toggle checked={s.agentDoneNotify} onChange={(v) => set({ agentDoneNotify: v })} />
+      </SettingRow>
+      <CanvasBlock />
+      <AccountBlock />
     </>
   )
 }
 
-// ── Account (placeholder — no auth backend yet) ─────────────────────────────
-function AccountSection() {
+function CanvasBlock() {
+  const s = useSettingsStore((st) => st.settings.canvas)
+  const patch = useSettingsStore((st) => st.patch)
+  const set = (p: Partial<typeof s>): void => patch('canvas', p)
   return (
     <>
-      <SectionTitle>Account</SectionTitle>
-      <div className="py-2">
-        <PlaceholderCard
-          icon="UserRound"
-          title="Sign-in is coming"
-          body="PLANO runs fully local today. Cloud sign-in — synced settings, workspaces and agent history across machines — lands in a future build."
-        />
-      </div>
+      <div className="label-caps mb-2 mt-6 px-1">Canvas &amp; Workspace</div>
+      <SettingRow title="Snap to grid" description="Align panels to the 8px grid while moving and resizing.">
+        <Toggle checked={s.snapToGrid} onChange={(snapToGrid) => set({ snapToGrid })} />
+      </SettingRow>
+      <SettingRow title="Zoom sensitivity" description="How fast Alt + wheel zooms the canvas.">
+        <Slider value={s.zoomSensitivity} min={0.4} max={2.5} step={0.1} onChange={(zoomSensitivity) => set({ zoomSensitivity })} format={(v) => `${v.toFixed(1)}×`} />
+      </SettingRow>
+      <SettingRow title="Autosave" description="Continuously persist the workspace as you work.">
+        <Toggle checked={s.autosave} onChange={(autosave) => set({ autosave })} />
+      </SettingRow>
     </>
+  )
+}
+
+function AccountBlock() {
+  return (
+    <div className="mt-6">
+      <div className="label-caps mb-2 px-1">Account</div>
+      <PlaceholderCard
+        icon="UserRound"
+        title="Sign-in is coming"
+        body="PLANO runs fully local today. Cloud sign-in — synced settings, workspaces and agent history across machines — lands in a future build."
+      />
+    </div>
+  )
+}
+
+// ── Mobile & Remote ───────────────────────────────────────────────────────────────
+function MobileSection() {
+  const keepAgents = useSettingsStore((st) => st.settings.terminal.keepAgentsOnQuit)
+  const patch = useSettingsStore((st) => st.patch)
+  const [info, setInfo] = useState<{
+    lanIps: string[]
+    webPort: number
+    token: string
+    pairingCode: string
+    url: string
+    phoneConnected: boolean
+  } | null>(null)
+  const [qrs, setQrs] = useState<Array<{ ip: string; label: string; dataUrl: string }>>([])
+
+  useEffect(() => {
+    let alive = true
+    const load = async (): Promise<void> => {
+      try {
+        const r = await window.plano.app.getRemoteInfo()
+        if (!alive) return
+        setInfo(r)
+        if (r.token) {
+          const QRCode = (await import('qrcode')).default
+          const ips = r.lanIps.length > 0 ? r.lanIps : [r.url.replace(/^https?:\/\//, '').split(':')[0]]
+          const list: Array<{ ip: string; label: string; dataUrl: string }> = []
+          for (const ip of ips) {
+            const url = `http://${ip}:${r.webPort}/?token=${r.token}`
+            const dataUrl = await QRCode.toDataURL(url, {
+              margin: 1,
+              width: 220,
+              color: { dark: '#1a1a1a', light: '#f5f4f1' },
+            })
+            list.push({ ip, label: ip === r.lanIps[0] ? ip + ' · recommended' : ip, dataUrl })
+          }
+          if (alive) setQrs(list)
+        }
+      } catch {
+        /* host may not be up yet */
+      }
+    }
+    void load()
+    const t = setInterval(load, 4000)
+    return () => {
+      alive = false
+      clearInterval(t)
+    }
+  }, [])
+
+  return (
+    <div className="mt-6">
+      <div className="label-caps mb-2 px-1">Mobile &amp; Remote</div>
+      <SettingBlock
+        title="PLANO on your phone"
+        description="Scan the code with your phone camera — or open the URL in its browser — to view your agents and terminals, talk to them and launch new ones from anywhere on your Wi-Fi. Works even while PLANO is closed."
+      >
+        <div className="flex flex-col items-center gap-3 py-2">
+          {qrs.length > 0 ? (
+            qrs.map((q) => (
+              <div key={q.ip} className="flex flex-col items-center gap-1">
+                <img src={q.dataUrl} alt={`PLANO mobile web QR — ${q.ip}`} className="h-48 w-48 rounded-2xl bg-[var(--surface-raised)] p-2" />
+                <div className="rounded-full bg-[var(--surface-raised)] px-3 py-1 font-mono text-[11px] text-[var(--text-secondary)]">
+                  {q.label}
+                </div>
+              </div>
+            ))
+          ) : info?.webPort ? (
+            <div className="flex h-48 w-48 items-center justify-center rounded-2xl bg-[var(--surface-raised)]">
+              <span className="text-sm text-[var(--text-muted)]">Waiting for host…</span>
+            </div>
+          ) : null}
+          {info?.url ? (
+            <div className="w-full rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 font-mono text-xs">
+              {info.url}
+            </div>
+          ) : null}
+          {info?.token ? (
+            <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2">
+              <span className="min-w-0 truncate font-mono text-xs text-[var(--text-muted)]">
+                Token: {info.pairingCode}…
+              </span>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => void window.plano.clipboard.writeText(info.token)}
+              >
+                Copy
+              </Button>
+            </div>
+          ) : null}
+          {info && info.lanIps && info.lanIps.length > 1 ? (
+            <p className="text-xs text-[var(--text-muted)]">
+              Several network adapters found — if the first QR doesn't connect, scan the next one.
+            </p>
+          ) : null}
+        </div>
+      </SettingBlock>
+      <SettingRow
+        title="Keep agents when closing"
+        description="Terminals and agents keep running in the background Agent Host when PLANO closes — the phone keeps seeing them live."
+      >
+        <Toggle checked={keepAgents} onChange={(v) => patch('terminal', { keepAgentsOnQuit: v })} />
+      </SettingRow>
+    </div>
   )
 }
 
 // ── Appearance ──────────────────────────────────────────────────────────────
 function AppearanceSection() {
   const s = useSettingsStore((st) => st.settings.appearance)
+  const canvas = useSettingsStore((st) => st.settings.canvas)
   const patch = useSettingsStore((st) => st.patch)
   const set = (p: Partial<typeof s>): void => patch('appearance', p)
   return (
     <>
       <SectionTitle>Appearance</SectionTitle>
-      <SettingBlock title="Theme" description="Monolith is the default monochrome look. Colored and light themes are opt-in.">
+
+      {/* theme — 8 cards */}
+      <div className="label-caps mb-2 mt-6 px-1">Theme</div>
+      <div className="grid grid-cols-4 gap-3">
         <ThemeGallery value={s.theme} onChange={(theme) => set({ theme })} />
-      </SettingBlock>
-      <SettingBlock title="Accent" description={`Used sparingly for active states and focus · ${s.accent}`}>
+      </div>
+
+      {/* accent — full-width palette so the description never collapses into a narrow column */}
+      <SettingBlock title="Accent" description="Used sparingly for active states and focus.">
         <AccentSwatches value={s.accent} onChange={(accent) => set({ accent })} />
       </SettingBlock>
-      <SettingBlock title="Grid style" description="The blueprint pattern drawn on the canvas substrate.">
+
+      {/* canvas — substrate, glow and drafting grid */}
+      <div className="label-caps mb-2 mt-6 px-1">Canvas</div>
+      <SettingBlock title="Background">
+        <BackgroundPicker value={s.canvasBackground} onChange={(canvasBackground) => set({ canvasBackground })} theme={s.theme} />
+      </SettingBlock>
+      <SettingRow title="Ambient glow" description="A soft halo of the accent color over the canvas substrate.">
+        <Slider value={s.canvasGlow} min={0} max={40} step={1} onChange={(canvasGlow) => set({ canvasGlow })} format={(v) => `${Math.round(v)}%`} />
+      </SettingRow>
+      <SettingBlock title="Grid style" description="The pattern drawn on the canvas substrate.">
         <GridStylePicker value={s.gridStyle} onChange={(gridStyle) => set({ gridStyle })} />
       </SettingBlock>
+      <SettingRow title="Grid size" description="Spacing of the drafting grid.">
+        <GridSizePill value={s.gridSize} onChange={(gridSize) => set({ gridSize })} />
+      </SettingRow>
       <SettingRow title="Grid strength" description="How prominent the canvas grid reads.">
         <Slider value={s.gridOpacity} min={0} max={1} step={0.05} onChange={(gridOpacity) => set({ gridOpacity })} format={pct} />
       </SettingRow>
-      <SettingRow title="Film grain" description="A faint monochrome grain over the canvas for depth.">
-        <Toggle checked={s.grain} onChange={(grain) => set({ grain })} />
+      <SettingRow title="Show minimap" description="The overview map in the corner of the canvas.">
+        <Toggle checked={canvas.showMinimap} onChange={(showMinimap) => patch('canvas', { showMinimap })} />
       </SettingRow>
+
+      {/* reduce motion — last */}
       <SettingRow title="Reduce motion" description="Damp animations and transitions regardless of the OS setting.">
         <Toggle checked={s.reduceMotion} onChange={(reduceMotion) => set({ reduceMotion })} />
       </SettingRow>
     </>
+  )
+}
+
+// ── Usage (the status bar + its providers) ─────────────────────────────────
+function UsageSection() {
+  const usage = useSettingsStore((st) => st.settings.usage)
+  const patch = useSettingsStore((st) => st.patch)
+  const patchUsage = (p: Partial<typeof usage>): void => patch('usage', p)
+  const setChip = (key: 'ports' | 'resources' | 'agents', value: boolean): void =>
+    patch('usage', { chips: { ...usage.chips, [key]: value } })
+  const setProvider = (provider: string, value: boolean): void =>
+    patch('usage', { chips: { ...usage.chips, providers: { ...usage.chips.providers, [provider]: value } } })
+  // Only the providers the collector can actually read. Listing chips for quotas PLANO cannot
+  // fetch (gemini, opencode, omp) gave the user switches that changed nothing.
+  const PROVIDER_LABELS: Array<[string, string]> = [
+    ['claude', 'Claude'],
+    ['codex', 'Codex'],
+    ['grok', 'Grok'],
+  ]
+  return (
+    <>
+      <SectionTitle>Usage</SectionTitle>
+      {/* One switch decides the island exists; everything below only picks what it carries, so
+          the rows are grouped by WHAT they show instead of listed flat. No helper copy: each
+          label already says what it is (CLAUDE.md). */}
+      <SettingRow title="Usage island">
+        <Toggle checked={usage.showStatusBar} onChange={(showStatusBar) => patchUsage({ showStatusBar })} />
+      </SettingRow>
+
+      <GroupLabel>Providers</GroupLabel>
+      {PROVIDER_LABELS.map(([id, label]) => (
+        <SettingRow key={id} title={label}>
+          <Toggle
+            checked={usage.chips.providers[id as keyof typeof usage.chips.providers] !== false}
+            onChange={(v) => setProvider(id, v)}
+          />
+        </SettingRow>
+      ))}
+
+      <GroupLabel>Machine</GroupLabel>
+      <SettingRow title="Ports">
+        <Toggle checked={usage.chips.ports} onChange={(v) => setChip('ports', v)} />
+      </SettingRow>
+      <SettingRow title="Memory">
+        <Toggle checked={usage.chips.resources} onChange={(v) => setChip('resources', v)} />
+      </SettingRow>
+      <SettingRow title="Agents">
+        <Toggle checked={usage.chips.agents} onChange={(v) => setChip('agents', v)} />
+      </SettingRow>
+    </>
+  )
+}
+
+/** Grid-spacing pill — opens a small dropdown (Fine / Standard / Coarse). */
+const GRID_SIZE_OPTS: { value: GridSize; label: string }[] = [
+  { value: 'fine', label: 'Fine' },
+  { value: 'standard', label: 'Standard' },
+  { value: 'coarse', label: 'Coarse' },
+]
+function GridSizePill({ value, onChange }: { value: GridSize; onChange: (v: GridSize) => void }) {
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+  const current = GRID_SIZE_OPTS.find((o) => o.value === value)?.label ?? 'Standard'
+  useEffect(() => {
+    if (!open) return
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', onDown)
+    return () => window.removeEventListener('mousedown', onDown)
+  }, [open])
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="app-no-drag flex h-[34px] items-center gap-2 rounded-pill border border-glass px-[13px] text-[13px] text-text-1 transition-colors hover:border-glass-hover hover:bg-glass"
+        style={{ background: 'var(--glass)' }}
+      >
+        {current}
+        <Icon name="ChevronDown" size={13} className={open ? 'rotate-180 text-text-3' : 'text-text-3'} />
+      </button>
+      {open && (
+        <div
+          className="absolute right-0 top-[38px] z-20 min-w-[148px] overflow-hidden rounded-[13px] border border-glass bg-surface-2 p-1 shadow-xl"
+          style={{ boxShadow: '0 16px 40px -12px rgba(0,0,0,0.55)' }}
+        >
+          {GRID_SIZE_OPTS.map((o) => (
+            <button
+              key={o.value}
+              type="button"
+              onClick={() => {
+                onChange(o.value)
+                setOpen(false)
+              }}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-[9px] px-2.5 py-1.5 text-left text-[12.5px] transition-colors',
+                o.value === value ? 'bg-accent-soft text-text-primary' : 'text-text-secondary hover:bg-accent-soft hover:text-text-primary',
+              )}
+            >
+              <span className="truncate">{o.label}</span>
+              {o.value === value && <Icon name="Check" size={12} className="ml-auto shrink-0" />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -152,10 +420,21 @@ function TerminalSection() {
       <SettingRow title="Font family" description="Override the terminal typeface. Blank uses the bundled JetBrains Mono.">
         <TextField value={s.fontFamily} placeholder="e.g. Cascadia Code" onChange={(fontFamily) => set({ fontFamily })} width={210} />
       </SettingRow>
-      <SettingRow title="Font size" description="0 keeps the default (13)." >
-        <NumberField value={s.fontSize} min={0} max={32} onChange={(fontSize) => set({ fontSize })} suffix="px" />
+      <SettingRow
+        title="Font size"
+        description="Global terminal typeface size (10–24 px). Per-terminal Ctrl +/− overrides keep winning over this."
+      >
+        <Slider
+          value={s.fontSize === 0 ? 13 : s.fontSize}
+          min={10}
+          max={24}
+          step={1}
+          width={150}
+          onChange={(fontSize) => set({ fontSize })}
+          format={(v) => `${v}px`}
+        />
       </SettingRow>
-      <SettingRow title="Line height" description="Vertical spacing between terminal rows. Capped at 1.2 — higher values reopen gaps that tear CLI block-art.">
+      <SettingRow title="Line height" description="Vertical spacing between terminal rows. 1.0 (default) keeps box-drawing connected — higher values reopen a sub-cell gap that tears CLI block-art, so the slider caps at 1.2.">
         <Slider value={s.lineHeight} min={1} max={1.2} step={0.05} width={150} onChange={(lineHeight) => set({ lineHeight })} format={(v) => v.toFixed(2)} />
       </SettingRow>
       <SettingRow title="Cursor" description="Caret shape and blink for the terminal.">
@@ -184,36 +463,15 @@ function TerminalSection() {
       <SettingRow title="Smart actions" description="Detect links, device codes and paths in output and offer one-click actions. (Planned)">
         <Toggle checked={s.smartActions} onChange={(smartActions) => set({ smartActions })} />
       </SettingRow>
-      <SettingRow title="Auto-suspend idle terminals" description="Pause silent, offscreen terminals to reclaim memory. (Planned)">
+      <SettingRow title="Suspend background terminals" description="Hibernate the terminals of a workspace you switch away from (free their GPU contexts and stop their output streaming) while the shells keep running. Returning replays the buffered output. Reclaim memory with many workspaces open.">
         <Toggle checked={s.autoSuspendIdle} onChange={(autoSuspendIdle) => set({ autoSuspendIdle })} />
+      </SettingRow>
+      <SettingRow title="Keep agents when closing" description="Keep every terminal — and the agents running inside it — alive in the background when PLANO closes, so reopening lands exactly where you left it and work continues while the app is closed.">
+        <Toggle checked={s.keepAgentsOnQuit} onChange={(keepAgentsOnQuit) => set({ keepAgentsOnQuit })} />
       </SettingRow>
       <SettingBlock title="Terminal theme" description="Default palette for new terminals. Each terminal can override it from its panel.">
         <TerminalThemeGallery value={s.theme} onChange={(theme) => set({ theme })} />
       </SettingBlock>
-    </>
-  )
-}
-
-// ── Canvas & Workspace ──────────────────────────────────────────────────────
-function CanvasSection() {
-  const s = useSettingsStore((st) => st.settings.canvas)
-  const patch = useSettingsStore((st) => st.patch)
-  const set = (p: Partial<typeof s>): void => patch('canvas', p)
-  return (
-    <>
-      <SectionTitle>Canvas &amp; Workspace</SectionTitle>
-      <SettingRow title="Snap to grid" description="Align panels to the 8px grid while moving and resizing.">
-        <Toggle checked={s.snapToGrid} onChange={(snapToGrid) => set({ snapToGrid })} />
-      </SettingRow>
-      <SettingRow title="Show minimap" description="The overview map in the corner of the canvas.">
-        <Toggle checked={s.showMinimap} onChange={(showMinimap) => set({ showMinimap })} />
-      </SettingRow>
-      <SettingRow title="Zoom sensitivity" description="How fast Alt + wheel zooms the canvas.">
-        <Slider value={s.zoomSensitivity} min={0.4} max={2.5} step={0.1} onChange={(zoomSensitivity) => set({ zoomSensitivity })} format={(v) => `${v.toFixed(1)}×`} />
-      </SettingRow>
-      <SettingRow title="Autosave" description="Continuously persist the workspace as you work.">
-        <Toggle checked={s.autosave} onChange={(autosave) => set({ autosave })} />
-      </SettingRow>
     </>
   )
 }
@@ -245,6 +503,39 @@ function BrowserSection() {
       </SettingRow>
       <SettingRow title="URLs from terminal" description="When a local dev-server URL (localhost:PORT) appears in terminal output: open it in a PLANO browser panel, in your system browser, or ignore it.">
         <Select value={s.terminalUrlAction} options={URL_ACTION_OPTS} onChange={(terminalUrlAction) => set({ terminalUrlAction })} width={170} />
+      </SettingRow>
+    </>
+  )
+}
+
+// ── Agents (Agent Mesh) ─────────────────────────────────────────────────────
+function AgentsSection() {
+  const s = useSettingsStore((st) => st.settings.agentMesh)
+  const patch = useSettingsStore((st) => st.patch)
+  const set = (p: Partial<typeof s>): void => patch('agentMesh', p)
+
+  return (
+    <>
+      <SectionTitle>Agents</SectionTitle>
+      <SettingRow
+        title="Context persistence"
+        description="Write REDACTED agent context (tails + prompts) to the workspace's .plano/context/ so a restart can re-search it. Opt-in — nothing touches disk until you enable it."
+      >
+        <Toggle checked={s.contextPersistence} onChange={(contextPersistence) => set({ contextPersistence })} />
+      </SettingRow>
+
+      <SettingRow
+        title="Mesh interconnect"
+        description="Agents in your terminals (Claude Code, Codex, Gemini…) connect to each other through the built-in mesh automatically — no configuration."
+      >
+        <span className="font-mono text-[10px] uppercase tracking-label text-text-4">auto</span>
+      </SettingRow>
+
+      <SettingRow
+        title="Let agents write to each other"
+        description="Off asks for confirmation once per workspace before an agent can message or spawn another."
+      >
+        <Toggle checked={s.allowAgentWrites} onChange={(allowAgentWrites) => set({ allowAgentWrites })} />
       </SettingRow>
     </>
   )
@@ -290,7 +581,7 @@ function VoiceEngineRow() {
   }
   const ok = status?.state === 'ready' || status?.state === 'idle' || status?.state === 'loading'
   return (
-    <div className="mt-2 rounded-md border border-subtle bg-surface-inset p-3 font-mono text-[11px] text-text-tertiary">
+    <div className="mt-2 rounded-[12px] border border-glass bg-surface-inset p-3 font-mono text-[11px] text-text-tertiary">
       <div className="flex items-center justify-between">
         <span>Speech engine</span>
         <span className={ok ? 'text-text-secondary' : 'text-destructive-hover'}>
@@ -353,7 +644,7 @@ function VoiceSection() {
   const setLlm = (p: Partial<typeof s.llmFallback>): void => patch('voice', { llmFallback: { ...s.llmFallback, ...p } })
   return (
     <>
-      <SectionTitle>Odla — Voice</SectionTitle>
+      <SectionTitle>Voice</SectionTitle>
       <SettingRow title="Odla voice assistant" description="A hands-free orchestrator that opens, closes and arranges panels from your voice — fully on-device.">
         <Toggle checked={s.enabled} onChange={(enabled) => set({ enabled })} />
       </SettingRow>
@@ -399,25 +690,24 @@ function VoiceSection() {
   )
 }
 
-// ── Privacy ─────────────────────────────────────────────────────────────────
-function PrivacySection() {
+// ── Advanced (incl. Privacy) ────────────────────────────────────────────────
+function PrivacyBlock() {
   const s = useSettingsStore((st) => st.settings.privacy)
   const patch = useSettingsStore((st) => st.patch)
   const set = (p: Partial<typeof s>): void => patch('privacy', p)
   return (
-    <>
-      <SectionTitle>Privacy</SectionTitle>
+    <div className="mt-6">
+      <div className="label-caps mb-2 px-1">Privacy</div>
       <SettingRow title="Telemetry" description="PLANO ships with no analytics or tracking. This switch stays here so the stance is explicit.">
         <Toggle checked={s.telemetry} onChange={(telemetry) => set({ telemetry })} />
       </SettingRow>
       <SettingRow title="Save terminal history" description="Persist terminal scrollback across reopen. (Planned)">
         <Toggle checked={s.saveTerminalHistory} onChange={(saveTerminalHistory) => set({ saveTerminalHistory })} />
       </SettingRow>
-    </>
+    </div>
   )
 }
 
-// ── Advanced ────────────────────────────────────────────────────────────────
 function AboutRow() {
   const [info, setInfo] = useState<AppInfo | null>(null)
   useEffect(() => {
@@ -426,7 +716,7 @@ function AboutRow() {
   if (!info) return null
   const v = info.versions
   return (
-    <div className="mt-2 rounded-md border border-subtle bg-surface-inset p-3 font-mono text-[11px] text-text-tertiary">
+    <div className="mt-2 rounded-[12px] border border-glass bg-surface-inset p-3 font-mono text-[11px] text-text-tertiary">
       <div className="flex justify-between"><span>PLANO</span><span className="text-text-secondary">Personal build</span></div>
       <div className="flex justify-between"><span>Electron</span><span className="text-text-secondary">{v.electron}</span></div>
       <div className="flex justify-between"><span>Chromium</span><span className="text-text-secondary">{v.chrome}</span></div>
@@ -456,7 +746,7 @@ function AdvancedSection() {
                 reset()
                 setConfirming(false)
               }}
-              className="app-no-drag h-8 rounded-sm border border-destructive-border bg-destructive-soft px-3 text-[12px] font-medium text-destructive-hover transition-colors hover:bg-destructive hover:text-white focus-caliper-danger"
+              className="app-no-drag h-8 rounded-[12px] border border-destructive-border bg-destructive-soft px-3 text-[12px] font-medium text-destructive-hover transition-colors hover:bg-destructive hover:text-white focus-caliper-danger"
             >
               Confirm reset
             </button>
@@ -469,6 +759,7 @@ function AdvancedSection() {
           </Button>
         )}
       </SettingRow>
+      <PrivacyBlock />
       <div className="pt-4">
         <div className="label-caps mb-1 px-1">About</div>
         <AboutRow />
@@ -479,28 +770,28 @@ function AdvancedSection() {
 
 // ── registry + search index ─────────────────────────────────────────────────
 export const SECTIONS: { id: SettingsSection; label: string; icon: string }[] = [
-  { id: 'general', label: 'General', icon: 'Settings2' },
+  { id: 'general', label: 'General', icon: 'SlidersHorizontal' },
   { id: 'appearance', label: 'Appearance', icon: 'Palette' },
-  { id: 'editor', label: 'Editor', icon: 'Code2' },
+  { id: 'usage', label: 'Usage', icon: 'Gauge' },
   { id: 'terminal', label: 'Terminal', icon: 'SquareTerminal' },
-  { id: 'canvas', label: 'Canvas', icon: 'LayoutGrid' },
+  { id: 'editor', label: 'Editor', icon: 'FileCode' },
   { id: 'browser', label: 'Browser', icon: 'Globe' },
-  { id: 'voice', label: 'Odla', icon: 'Mic' },
-  { id: 'privacy', label: 'Privacy', icon: 'ShieldCheck' },
-  { id: 'account', label: 'Account', icon: 'UserRound' },
+  { id: 'agents', label: 'Agents', icon: 'Sparkles' },
+  { id: 'voice', label: 'Voice', icon: 'Mic' },
+  { id: 'mobile', label: 'Mobile & Remote', icon: 'Smartphone' },
   { id: 'advanced', label: 'Advanced', icon: 'Wrench' },
 ]
 
 export const SECTION_COMPONENTS: Record<SettingsSection, () => ReactElement> = {
   general: GeneralSection,
-  account: AccountSection,
   appearance: AppearanceSection,
-  editor: EditorSection,
+  usage: UsageSection,
   terminal: TerminalSection,
-  canvas: CanvasSection,
+  editor: EditorSection,
   browser: BrowserSection,
+  agents: AgentsSection,
   voice: VoiceSection,
-  privacy: PrivacySection,
+  mobile: MobileSection,
   advanced: AdvancedSection,
 }
 
@@ -511,17 +802,29 @@ export const SETTINGS_INDEX: { section: SettingsSection; title: string; keywords
   { section: 'general', title: 'Show files on launch', keywords: 'explorer panel startup' },
   { section: 'general', title: 'Warn before quitting', keywords: 'confirm close exit' },
   { section: 'general', title: 'Confirm closing agent terminals', keywords: 'agent process running close claude codex' },
-  { section: 'account', title: 'Account', keywords: 'sign in login profile sync cloud' },
-  { section: 'appearance', title: 'Theme', keywords: 'dark light color monolith indigo cyber carbon slate' },
-  { section: 'appearance', title: 'Accent color', keywords: 'highlight tint' },
-  { section: 'appearance', title: 'Grid style', keywords: 'dots lines background canvas blueprint' },
-  { section: 'appearance', title: 'Grid strength', keywords: 'opacity grid' },
-  { section: 'appearance', title: 'Film grain', keywords: 'texture noise' },
+  { section: 'general', title: 'Agent finished sound', keywords: 'chime sound audio bell notification ready done complete agent alert' },
+  { section: 'general', title: 'Agent finished notifications', keywords: 'toast in-app notify waiting input blocked background workspace awareness' },
+  { section: 'general', title: 'Snap to grid', keywords: 'canvas align panels' },
+  { section: 'general', title: 'Zoom sensitivity', keywords: 'canvas wheel speed' },
+  { section: 'general', title: 'Autosave', keywords: 'save workspace persist' },
+  { section: 'mobile', title: 'Mobile web app', keywords: 'phone remote lan wifi qr scan connect web app mobile android ios tablet' },
+  { section: 'mobile', title: 'Remote access', keywords: 'token pairing security same network' },
+  { section: 'general', title: 'Account', keywords: 'sign in login profile sync cloud' },
+  { section: 'appearance', title: 'Theme', keywords: 'dark light color monolith indigo orange tokyo sakura pearl mist paper white' },
+  { section: 'appearance', title: 'Accent color', keywords: 'highlight tint cyan purple magenta rose lime teal swatch' },
   { section: 'appearance', title: 'Reduce motion', keywords: 'animation accessibility' },
-  { section: 'editor', title: 'Font size', keywords: 'editor code text' },
-  { section: 'editor', title: 'Tab size', keywords: 'indent spaces' },
-  { section: 'editor', title: 'Word wrap', keywords: 'editor wrap lines' },
-  { section: 'editor', title: 'Line numbers', keywords: 'gutter editor' },
+  { section: 'appearance', title: 'Show minimap', keywords: 'overview map canvas' },
+  { section: 'usage', title: 'Show status bar', keywords: 'usage quota subscription chip bottom bar ports resources agents live' },
+  { section: 'usage', title: 'Provider chips', keywords: 'claude codex opencode gemini grok omp quota visibility' },
+  { section: 'usage', title: 'Ports chip', keywords: 'dev server listening port terminal' },
+  { section: 'usage', title: 'Resources chip', keywords: 'memory rss ram agents' },
+  { section: 'usage', title: 'Agents chip', keywords: 'live agent count running terminals' },
+  { section: 'usage', title: 'OpenCode Go cookie', keywords: 'opencode auth token cookie quota monthly usage' },
+  { section: 'appearance', title: 'Canvas background', keywords: 'gradient solid radial linear wallpaper substrate color' },
+  { section: 'appearance', title: 'Ambient glow', keywords: 'accent halo aura light' },
+  { section: 'appearance', title: 'Grid style', keywords: 'dots lines background canvas blueprint' },
+  { section: 'appearance', title: 'Grid size', keywords: 'spacing fine coarse drafting' },
+  { section: 'appearance', title: 'Grid strength', keywords: 'opacity grid' },
   { section: 'terminal', title: 'Shell', keywords: 'powershell cmd bash zsh pwsh' },
   { section: 'terminal', title: 'Shell path', keywords: 'executable terminal' },
   { section: 'terminal', title: 'Font family', keywords: 'terminal typeface mono' },
@@ -532,23 +835,26 @@ export const SETTINGS_INDEX: { section: SettingsSection; title: string; keywords
   { section: 'terminal', title: 'Copy on select', keywords: 'clipboard terminal' },
   { section: 'terminal', title: 'Predictive history', keywords: 'autocomplete autosuggest warp ghost inline tab history psreadline recall suggestions previous commands' },
   { section: 'terminal', title: 'Smart actions', keywords: 'links device codes paths' },
-  { section: 'terminal', title: 'Auto-suspend idle terminals', keywords: 'memory pause' },
-  { section: 'terminal', title: 'Terminal theme', keywords: 'color palette midnight amber matrix paper' },
-  { section: 'canvas', title: 'Snap to grid', keywords: 'align panels' },
-  { section: 'canvas', title: 'Show minimap', keywords: 'overview map' },
-  { section: 'canvas', title: 'Zoom sensitivity', keywords: 'wheel speed' },
-  { section: 'canvas', title: 'Autosave', keywords: 'save workspace persist' },
+  { section: 'terminal', title: 'Suspend background terminals', keywords: 'hibernate memory pause workspace background idle suspend gpu' },
+  { section: 'terminal', title: 'Keep agents when closing', keywords: 'agent host background daemon quit close' },
+  { section: 'terminal', title: 'Terminal theme', keywords: 'color palette midnight amber matrix paper campbell windows terminal' },
+  { section: 'editor', title: 'Font size', keywords: 'editor code text' },
+  { section: 'editor', title: 'Tab size', keywords: 'indent spaces' },
+  { section: 'editor', title: 'Word wrap', keywords: 'editor wrap lines' },
+  { section: 'editor', title: 'Line numbers', keywords: 'gutter editor' },
   { section: 'browser', title: 'Homepage', keywords: 'browser url start' },
   { section: 'browser', title: 'Search engine', keywords: 'google bing duckduckgo brave' },
   { section: 'browser', title: 'URLs from terminal', keywords: 'links open localhost dev server preview port npm run auto' },
+  { section: 'agents', title: 'Agent Mesh', keywords: 'mesh control center compose dispatch multi agent cross workspace roster' },
+  { section: 'agents', title: 'Context persistence', keywords: 'search index redacted tail prompts restartable persist plano context folder' },
   { section: 'voice', title: 'Odla voice assistant', keywords: 'odla voice speech microphone parakeet hands-free orchestrator control panels dictation' },
   { section: 'voice', title: 'Push-to-talk', keywords: 'shortcut hold key mic talk listen' },
   { section: 'voice', title: 'Language', keywords: 'spanish english multilingual espanol ingles' },
   { section: 'voice', title: 'Speak responses', keywords: 'tts text to speech voice reply' },
   { section: 'voice', title: 'LLM fallback', keywords: 'ollama openai free form natural language endpoint model' },
-  { section: 'privacy', title: 'Telemetry', keywords: 'analytics tracking' },
-  { section: 'privacy', title: 'Save terminal history', keywords: 'scrollback persist' },
   { section: 'advanced', title: 'Hardware acceleration', keywords: 'gpu performance' },
   { section: 'advanced', title: 'Reset settings', keywords: 'defaults restore' },
+  { section: 'advanced', title: 'Telemetry', keywords: 'analytics tracking privacy' },
+  { section: 'advanced', title: 'Save terminal history', keywords: 'scrollback persist privacy' },
   { section: 'advanced', title: 'About', keywords: 'version electron node chromium' },
 ]

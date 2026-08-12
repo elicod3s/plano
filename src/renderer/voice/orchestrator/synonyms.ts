@@ -96,6 +96,20 @@ export const AGENTS_SPOKEN: AgentSpoken[] = [
   },
   { kind: 'opencode', command: 'opencode', display: 'opencode', phrases: ['open code', 'opencode', 'open coded', 'opncode'] },
   { kind: 'aider', command: 'aider', display: 'Aider', phrases: ['aider', 'eider', 'aiden', 'eder', 'aidr'] },
+  {
+    kind: 'pi',
+    command: 'pi',
+    display: 'Pi',
+    phrases: ['pi code', 'pi', 'pai', 'pii', 'pie'],
+  },
+  // Oh My Pi. Listed AFTER pi but matched on its own multi-word phrases, so "pi" alone still
+  // means Pi and "oh my pi" is never swallowed by it.
+  {
+    kind: 'omp',
+    command: 'omp',
+    display: 'Oh My Pi',
+    phrases: ['oh my pi', 'oh my pie', 'ohmypi', 'omp', 'o m p', 'oh mai pi'],
+  },
 ]
 
 /** Well-known sites for "open a browser with X". Anything else falls back to a domain or web search. */

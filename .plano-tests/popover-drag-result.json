@@ -1,0 +1,14 @@
+{
+  "pass": true,
+  "opened": true,
+  "stayedAfterLeave": true,
+  "stayedAfterInsidePress": true,
+  "closedOutside": true,
+  "toggledClosed": true,
+  "anchorBefore": "translate3d(100px, 100px, 0px)",
+  "anchorDuring": "translate3d(220px, 145px, 0px)",
+  "liftInline": "translate3d(0px, -2px, 0px) scale(1.006)",
+  "liftComputed": "matrix(1.006, 0, 0, 1.006, 0, -2)",
+  "releasedInline": "",
+  "releasedComputed": "none"
+}

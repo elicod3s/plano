@@ -1,13 +1,9 @@
 /**
- * PLANO — "Monolith Draft" design tokens (Tailwind layer).
+ * PLANO — "Frost Glass" design tokens (Tailwind layer).
  *
  * Canonical source of truth for raw values is src/renderer/styles/theme.css (CSS variables).
  * These utilities reference those variables directly (`var(--…)`) rather than mirroring the
  * hex, so a runtime theme swap (Settings → Appearance) re-tints every utility class for free.
- *
- * The DEFAULT palette is the locked MONOCHROME warm-neutral ramp + one functional red.
- * User-selected themes (incl. opt-in colored ones) override the :root variables at runtime;
- * see src/renderer/theme/themes.ts and CLAUDE.md → Hard design rules.
  *
  * NOTE: because these are `var()` colors, the `/opacity` modifier (e.g. `bg-accent/40`)
  * cannot inject an alpha channel — use a `color-mix(...)` inline style for translucency.
@@ -28,12 +24,31 @@ module.exports = {
           4: 'var(--surface-4)',
           inset: 'var(--surface-inset)',
         },
+        glass: {
+          DEFAULT: 'var(--glass)',
+          strong: 'var(--glass-strong)',
+          hover: 'var(--glass-hover)',
+          active: 'var(--glass-active)',
+          sheen: 'var(--glass-sheen)',
+          panel: 'var(--glass-panel)',
+          bar: 'var(--glass-bar)',
+        },
+        inset: {
+          DEFAULT: 'var(--inset-soft)',
+          deep: 'var(--inset-deep)',
+        },
         text: {
           primary: 'var(--text-primary)',
           secondary: 'var(--text-secondary)',
           tertiary: 'var(--text-tertiary)',
           quaternary: 'var(--text-quaternary)',
+          muted: 'var(--text-muted)',
           onsolid: 'var(--text-on-solid)',
+          'on-accent': 'var(--text-on-accent)',
+          1: 'var(--text-1)',
+          2: 'var(--text-2)',
+          3: 'var(--text-3)',
+          4: 'var(--text-4)',
         },
         accent: {
           DEFAULT: 'var(--accent-primary)',
@@ -52,16 +67,29 @@ module.exports = {
           active: 'var(--status-active)',
           error: 'var(--status-error)',
         },
+        brand: {
+          claude: 'var(--claude)',
+          codex: 'var(--codex)',
+          success: 'var(--success)',
+          amber: 'var(--amber)',
+          info: 'var(--info)',
+        },
       },
       borderColor: {
         subtle: 'var(--border-subtle)',
         DEFAULT: 'var(--border-default)',
         strong: 'var(--border-strong)',
+        glass: 'var(--border-glass)',
+        'glass-strong': 'var(--border-glass-strong)',
+        'glass-hover': 'var(--border-glass-hover)',
       },
       fontFamily: {
-        display: ['"Space Grotesk Variable"', '"Space Grotesk"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        sans: ['"Space Grotesk Variable"', '"Space Grotesk"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
-        mono: ['"JetBrains Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        display: ['"Instrument Sans Variable"', '"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        sans: ['"Instrument Sans Variable"', '"Instrument Sans"', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+        // `font-mono` in the CHROME means data: counts, paths, percentages, durations.
+        mono: ['"Geist Mono Variable"', '"Geist Mono"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        // The terminal/editor stack stays JetBrains Mono — picked for glyph coverage, not taste.
+        term: ['"JetBrains Mono"', '"PLANO Term Symbols"', '"PLANO Term Dingbats"', '"Cascadia Mono"', 'ui-monospace', 'monospace'],
       },
       borderRadius: {
         xs: '6px',
@@ -70,16 +98,18 @@ module.exports = {
         lg: '16px',
         xl: '20px',
         '2xl': '24px',
+        '3xl': '26px',
+        '4xl': '28px',
         pill: '9999px',
       },
       boxShadow: {
         panel:
-          '0 1px 0 0 rgba(255,255,255,0.04) inset, 0 8px 24px -8px rgba(0,0,0,0.55), 0 2px 6px -2px rgba(0,0,0,0.45)',
+          '0 1px 0 0 rgba(255,255,255,0.05) inset, 0 4px 14px -4px rgba(0,0,0,0.45), 0 10px 16px -8px rgba(0,0,0,0.33), 0 24px 56px -24px rgba(0,0,0,0.73)',
         'panel-focus':
-          '0 1px 0 0 rgba(255,255,255,0.06) inset, 0 16px 48px -12px rgba(0,0,0,0.65), 0 4px 12px -4px rgba(0,0,0,0.5)',
-        overlay: '0 24px 64px -16px rgba(0,0,0,0.72), 0 8px 24px -8px rgba(0,0,0,0.55)',
-        popover: '0 12px 32px -8px rgba(0,0,0,0.6), 0 2px 8px -2px rgba(0,0,0,0.5)',
-        dock: '0 1px 0 0 rgba(255,255,255,0.05) inset, 0 16px 40px -12px rgba(0,0,0,0.7)',
+          '0 1px 0 0 rgba(255,255,255,0.07) inset, 0 6px 20px -6px rgba(0,0,0,0.5), 0 14px 24px -10px rgba(0,0,0,0.4), 0 32px 72px -28px rgba(0,0,0,0.8)',
+        overlay: '0 10px 16px -8px rgba(0,0,0,0.33), 0 28px 64px rgba(0,0,0,0.6)',
+        popover: '0 10px 16px -8px rgba(0,0,0,0.33), 0 24px 48px -8px rgba(0,0,0,0.5)',
+        dock: '0 1px 0 0 rgba(255,255,255,0.05) inset, 0 8px 14px -6px rgba(0,0,0,0.33), 0 10px 28px rgba(0,0,0,0.35)',
         'agent-ring': '0 0 0 1px rgba(255,255,255,0.16), 0 0 28px -4px rgba(255,255,255,0.10)',
       },
       letterSpacing: { tightui: '-0.01em', label: '0.08em' },
@@ -88,37 +118,33 @@ module.exports = {
         exit: 'cubic-bezier(0.4,0,1,1)',
       },
       keyframes: {
-        // agent-scan: a hairline absolutely positioned in the panel; we animate `top`
-        // 0% -> 100% so it sweeps the FULL panel height (critique fix — no fixed % of 1px).
         'agent-scan': {
           '0%': { top: '0%', opacity: '0' },
           '12%': { opacity: '1' },
           '100%': { top: '100%', opacity: '0' },
         },
-        // Inset (inside the panel) so the agent glow is clipped by overflow-hidden and can
-        // never paint outside the panel — kills the white ghost line left when dragging.
-        // Keeps the panel's drop shadow for depth.
-        // Inset glow tinted with the detected agent's brand color (--agent-accent,
-        // falls back to white). color-mix applies the alpha so any accent works.
         'agent-breathe': {
-          '0%,100%': {
-            boxShadow:
-              'var(--shadow-panel-focus), inset 0 0 0 1px color-mix(in srgb, var(--agent-accent, #fff) 40%, transparent)',
-          },
-          '50%': {
-            boxShadow:
-              'var(--shadow-panel-focus), inset 0 0 0 1.5px color-mix(in srgb, var(--agent-accent, #fff) 75%, transparent)',
-          },
+          '0%,100%': { opacity: '0.35' },
+          '50%': { opacity: '0.9' },
         },
         'status-pulse': { '0%,100%': { opacity: '1' }, '50%': { opacity: '0.4' } },
-        // Indeterminate progress sweep for the browser panel's loading hairline — a short
-        // segment slides across the full toolbar width while a page loads.
+        // The Music-style activity meter: three bars breathing out of phase. Apple's own answer
+        // to "something is running here" — motion carries the meaning, so no badge is needed.
+        'eq-bar': {
+          '0%,100%': { transform: 'scaleY(0.35)' },
+          '50%': { transform: 'scaleY(1)' },
+        },
         'progress-slide': {
           '0%': { transform: 'translateX(-100%)' },
           '100%': { transform: 'translateX(400%)' },
         },
+        // panel-in / panel-out: the WHOLE visual shell (material + content together) enters
+        // and exits with a soft fade + gentle scale — no squash, no per-child motion, no
+        // blur. Sits on the shell so border, shadow and content share the animation.
+        // Deliberately the pre-glass values (scale(0.985) entry, NO overshoot): any scale > 1
+        // on a shell containing CodeMirror re-rasterizes the editor text during the entry.
         'panel-in': {
-          '0%': { transform: 'scale(0.96)', opacity: '0' },
+          '0%': { transform: 'scale(0.985)', opacity: '0' },
           '100%': { transform: 'scale(1)', opacity: '1' },
         },
         'palette-in': {
@@ -134,42 +160,31 @@ module.exports = {
           '40%': { opacity: '1' },
           '100%': { transform: 'scale(1)', opacity: '0' },
         },
-        // Canvas panels only. Driven from PanelFrame's inner (visual) wrapper, never the
-        // outer positioning box — so these transforms compose around the panel's own center
-        // instead of fighting the world-space translate3d. Chrome overlays never use these.
-        //
-        // panel-wiggle: a subtle "alive" oscillation while the panel is being dragged. Tiny
-        // amplitude on purpose (~0.5deg) so stopping mid-tilt reads as imperceptible.
-        'panel-wiggle': {
-          '0%': { transform: 'rotate(-0.55deg)' },
-          '50%': { transform: 'rotate(0.55deg)' },
-          '100%': { transform: 'rotate(-0.55deg)' },
-        },
-        // panel-out: our own take on the genie/magic-lamp collapse — the panel squashes
-        // toward a thin line, sinks a touch, blurs and fades as it is "sucked" away.
         'panel-out': {
-          '0%': { transform: 'scale(1) translateY(0)', opacity: '1', filter: 'blur(0px)' },
-          '45%': { transform: 'scale(0.94, 0.9) translateY(-1%)', opacity: '0.8', filter: 'blur(0px)' },
-          '100%': { transform: 'scale(0.46, 0.04) translateY(28%)', opacity: '0', filter: 'blur(3px)' },
+          '0%': { transform: 'scale(1) translateY(0)', opacity: '1' },
+          '100%': { transform: 'scale(0.985) translateY(2px)', opacity: '0' },
         },
-        // region-out: regions are big "ground" zones, so they leave with a plain fade+blur
-        // (no collapse). Only opacity/filter animate, never transform, so the region's
-        // world-space positioning translate3d is left untouched.
         'region-out': {
-          '0%': { opacity: '1', filter: 'blur(0px)' },
-          '100%': { opacity: '0', filter: 'blur(2px)' },
+          '0%': { opacity: '1' },
+          '100%': { opacity: '0' },
         },
       },
       animation: {
-        'agent-scan': 'agent-scan 700ms cubic-bezier(0.32,0.72,0,1) 1',
-        'agent-breathe': 'agent-breathe 3.2s ease-in-out infinite',
+        'eq-bar': 'eq-bar 900ms ease-in-out infinite',
+        'agent-scan': 'agent-scan 700ms cubic-bezier(0.32,0.72,0,1) 1 forwards',
+        // Finite, NOT infinite: an unending opacity loop on a full-panel inset-0 layer forces
+        // constant recomposition under the cursor, and Windows downgrades the mouse cursor to
+        // software rendering while the page keeps repainting — a blurry cursor in motion. A
+        // short pulse at detection keeps the effect; afterwards the ring rests static (the
+        // shell border already carries the agent accent).
+        'agent-breathe': 'agent-breathe 3.2s ease-in-out 3',
         'status-pulse': 'status-pulse 1.6s ease-in-out infinite',
         'progress-slide': 'progress-slide 1.1s cubic-bezier(0.4,0,0.6,1) infinite',
+        // Pre-glass durations/curves: the entry that the user verified as instant and crisp.
         'panel-in': 'panel-in 200ms cubic-bezier(0.32,0.72,0,1) 1',
         'palette-in': 'palette-in 220ms cubic-bezier(0.32,0.72,0,1) 1',
         'menu-in': 'menu-in 140ms cubic-bezier(0.32,0.72,0,1) 1',
         'snap-flash': 'snap-flash 320ms ease-out 1',
-        'panel-wiggle': 'panel-wiggle 340ms ease-in-out infinite',
         'panel-out': 'panel-out 260ms cubic-bezier(0.4,0,1,1) forwards',
         'region-out': 'region-out 220ms ease-out forwards',
       },

@@ -38,8 +38,10 @@ const SIGS: Signature[] = [
   {
     id: 'codex',
     displayName: 'OpenAI Codex',
-    names: /^(codex(\.exe)?|node(\.exe)?)$/i,
-    cmd: /(^|[\\/\s])codex(\.exe)?\b|node_modules[\\/].*codex.*[\\/].*\.js/i,
+    // codex ≥ 0.147 runs its own renamed Node runtime (node_repl.exe) under
+    // <…>\OpenAI\Codex\runtimes\ — without it, a live codex session stays undetected.
+    names: /^(codex(\.exe)?|node(\.exe)?|node_repl(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])codex(\.exe)?\b|node_modules[\\/].*codex.*[\\/].*\.js|[\\/](OpenAI[\\/])?[Cc]odex[\\/]/i,
     banner: /OpenAI Codex|Codex CLI/i,
   },
   {
@@ -79,6 +81,50 @@ const SIGS: Signature[] = [
     cmd: /(^|[\\/\s])kiro-cli(\.exe)?\b|[\\/]Kiro-Cli[\\/]|[\\/]tui\.js\b/i,
     banner: /Kiro CLI|kiro\.dev|\bKiro\b/i,
   },
+  {
+    // Grok Build (x.ai) — a native Rust TUI installed at ~/.grok/bin/grok.exe (bundled
+    // resources in ~/.grok/bundled). The image name alone is the load-bearing signal; the
+    // cmd matcher also trusts a bare `grok` word so a PATH-less spawn still detects.
+    id: 'grok',
+    displayName: 'Grok',
+    names: /^(grok(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])grok(\.exe)?(\s|$)|[\\/]\.grok[\\/]bin[\\/]/i,
+    banner: /Grok (Build|CLI)|x\.ai\b|SuperGrok/i,
+  },
+  {
+    // Oh My Pi — a fork of Pi (`omp` → @oh-my-pi/pi-coding-agent/dist/cli.js, installed via
+    // bun: `bun install -g @oh-my-pi/pi-coding-agent`). MUST sit BEFORE pi: both packages
+    // share the `pi-coding-agent` path segment, and the @oh-my-pi scope is the disambiguator.
+    id: 'omp',
+    displayName: 'Oh My Pi',
+    names: /^(omp(\.exe)?|node(\.exe)?|bun(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])omp(\.exe)?(\s|$)|@oh-my-pi[\\/]|[\\/]oh-my-pi[\\/]/i,
+    banner: /oh-my-pi|Oh My Pi/i,
+  },
+  {
+    // Pi is a node CLI (`pi` → @earendil-works/pi-coding-agent/dist/cli.js). On Windows the
+    // npm shim spawns node.exe whose command line carries the package path — the load-bearing
+    // marker. A bare `pi` word (native binary or typed command) is trusted only via the cmd
+    // matcher, never a bare node host.
+    id: 'pi',
+    displayName: 'Pi',
+    names: /^(pi(\.exe)?|node(\.exe)?|bun(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])pi(\.exe)?(\s|$)|@earendil-works[\\/]pi-coding-agent|[\\/]pi-coding-agent[\\/]/i,
+    banner: /pi-coding-agent|earendil-works/i,
+  },
+  {
+    // Hermes Agent is a Python CLI (`hermes` shim → python/uv running the hermes package).
+    // On Windows the launcher script is `hermes.exe`/`hermes.cmd`; the real process may be
+    // `python`/`uv` whose command line carries the hermes package path — the load-bearing
+    // marker. A bare `hermes` word is trusted via the cmd matcher, never a bare python host.
+    // `hermes-agent` only matches as a PATH SEGMENT (the install dir is …\hermes-agent\venv…)
+    // — never as an arbitrary substring of some other tool's name.
+    id: 'hermes',
+    displayName: 'Hermes Agent',
+    names: /^(hermes(\.exe|\.cmd)?|python(3|w)?(\.exe)?|uv(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])hermes(\.exe|\.cmd)?(\s|$)|hermes_cli|(?:^|[\\/])hermes-agent[\\/]|python(?:3|w)?(?:[\\/]|\s+)-m\s+hermes_cli/i,
+    banner: /Hermes Agent|Nous Research|hermes-agent/i,
+  },
 ]
 
 const SHELLS = /^(pwsh|powershell|cmd|conhost|bash|zsh|sh|fish|wsl|winpty-agent|node-pty)(\.exe)?$/i
@@ -100,6 +146,9 @@ class TerminalDetector {
   private timer: NodeJS.Timeout | null = null
   private running = false
   private disposed = false
+  /** Last authoritative process-tree hit. Kept while the verdict is active so the synchronous
+   *  window-close path can recover an exact resume id without starting another OS enumeration. */
+  private currentProcess: { sig: Signature; pid: number; depth: number; cmd: string; start?: number } | null = null
 
   constructor(
     private readonly rootPid: number,
@@ -142,12 +191,24 @@ class TerminalDetector {
     return SIGS.find((s) => s.banner.test(this.tail)) ?? null
   }
 
-  private async processHit(): Promise<{ sig: Signature; pid: number; depth: number } | null> {
+  private async processHit(): Promise<{
+    sig: Signature
+    pid: number
+    depth: number
+    cmd: string
+    start?: number
+  } | null> {
     const map = await this.tree.ensureFresh()
     const descendants = ProcessTreeService.descendants(this.rootPid, map)
     if (descendants.length === 0) return null
 
-    let best: { sig: Signature; pid: number; depth: number } | null = null
+    let best: {
+      sig: Signature
+      pid: number
+      depth: number
+      cmd: string
+      start?: number
+    } | null = null
     for (const proc of descendants) {
       const name = baseName(proc.name)
       if (SHELLS.test(name)) continue
@@ -160,7 +221,9 @@ class TerminalDetector {
         const hit = cmdOk || (nameOk && !hostOnly)
         if (!hit) continue
         const depth = ProcessTreeService.depth(proc.pid, this.rootPid, map)
-        if (!best || depth < best.depth) best = { sig, pid: proc.pid, depth }
+        if (!best || depth < best.depth) {
+          best = { sig, pid: proc.pid, depth, cmd: proc.cmd, start: proc.start }
+        }
       }
     }
     return best
@@ -192,9 +255,22 @@ class TerminalDetector {
 
   /** The matched agent CLI process running under this shell (kind + pid), via the SAME
    *  signature rules as detection — so the session resolver reuses one table, never a copy. */
-  async matchedAgent(): Promise<{ kind: AgentKind; pid: number } | null> {
+  async matchedAgent(): Promise<{
+    kind: AgentKind
+    pid: number
+    cmd: string
+    start?: number
+  } | null> {
     const hit = await this.processHit()
-    return hit ? { kind: hit.sig.id, pid: hit.pid } : null
+    return hit ? { kind: hit.sig.id, pid: hit.pid, cmd: hit.cmd, start: hit.start } : null
+  }
+
+  /** Non-blocking snapshot used only during the renderer's synchronous final save. */
+  currentMatchedAgent(): { kind: AgentKind; pid: number; cmd: string; start?: number } | null {
+    const hit = this.currentProcess
+    return this.state.active && hit && hit.sig.id === this.state.kind
+      ? { kind: hit.sig.id, pid: hit.pid, cmd: hit.cmd, start: hit.start }
+      : null
   }
 
   private async evaluate(): Promise<void> {
@@ -202,6 +278,7 @@ class TerminalDetector {
     this.running = true
     try {
       const proc = await this.processHit()
+      if (proc) this.currentProcess = proc
       const banner = this.bannerHit()
 
       let score = 0
@@ -243,6 +320,7 @@ class TerminalDetector {
           this.setState({ active: true, kind, displayName, confidence: score, source, phase: this.phase(now) })
         } else if (now - this.lastSeen > EXIT_GRACE_MS) {
           this.streak = 0
+          this.currentProcess = null
           this.setState({ ...NO_AGENT })
         } else {
           // Same agent still running — just refresh the working/idle phase (emits only on flip).
@@ -310,8 +388,23 @@ export class AgentDetectionService {
 
   /** The single matched agent CLI (kind + pid) under this terminal — used by the session
    *  resolver to find the agent process whose conversation should be restored. */
-  matchedAgentPid(ptyId: string): Promise<{ kind: AgentKind; pid: number } | null> {
+  matchedAgentPid(ptyId: string): Promise<{
+    kind: AgentKind
+    pid: number
+    cmd: string
+    start?: number
+  } | null> {
     return this.detectors.get(ptyId)?.matchedAgent() ?? Promise.resolve(null)
+  }
+
+  /** Last process-tree match, without I/O. Used by the synchronous close/save reconciliation. */
+  currentMatchedAgent(ptyId: string): {
+    kind: AgentKind
+    pid: number
+    cmd: string
+    start?: number
+  } | null {
+    return this.detectors.get(ptyId)?.currentMatchedAgent() ?? null
   }
 
   unregister(ptyId: string): void {

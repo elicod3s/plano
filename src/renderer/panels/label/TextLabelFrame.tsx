@@ -3,7 +3,8 @@ import type { Panel, LabelProps } from '@shared/domain/panel'
 import { snap, type Rect } from '@shared/domain/geometry'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useUiStore } from '@/stores/useUiStore'
-import { useViewportStore } from '@/stores/useViewportStore'
+
+import { viewportController } from '@/canvas/ViewportController'
 import { IconButton } from '@/design-system/IconButton'
 import { cn } from '@/lib/cn'
 
@@ -62,7 +63,7 @@ function TextLabelFrameInner({ panel, zIndex }: { panel: Panel; zIndex: number }
     const g = gesture.current
     if (!g) return
     // Lazily read zoom during the drag instead of taking it as a render prop (see PanelFrame).
-    const zoom = useViewportStore.getState().zoom
+    const zoom = viewportController.getLive().zoom
     const dx = (e.clientX - g.sx) / zoom
     const dy = (e.clientY - g.sy) / zoom
 
@@ -109,6 +110,8 @@ function TextLabelFrameInner({ panel, zIndex }: { panel: Panel; zIndex: number }
         width: panel.rect.width,
         height: panel.rect.height,
         transform: `translate3d(${panel.rect.x}px, ${panel.rect.y}px, 0)`,
+        transformOrigin: '0 0',
+        willChange: undefined,
         zIndex,
         pointerEvents: 'none',
       }}

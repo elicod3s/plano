@@ -35,8 +35,8 @@ export function WorkspaceGitChip() {
   const repo = status.remote
   return (
     <div
-      className="app-no-drag flex shrink-0 items-center gap-1.5 rounded-pill border border-subtle px-2 py-1 font-mono text-[11px] leading-none text-text-secondary"
-      style={{ background: 'var(--accent-soft)' }}
+      className="app-no-drag flex h-7 shrink-0 items-center gap-1.5 rounded-pill border border-glass px-2.5 font-mono text-[11.5px] leading-none text-text-2"
+      style={{ background: 'var(--glass)' }}
       title={`${repo ? `${repo.owner}/${repo.repo} · ` : ''}${status.branch ?? 'HEAD'}`}
     >
       <Icon name="GitBranch" size={13} className="text-text-primary" />

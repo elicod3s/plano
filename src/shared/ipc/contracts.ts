@@ -4,6 +4,17 @@
  */
 
 import type { AgentVerdict, AgentSessionRef } from '../domain/agent'
+import type { UsageSnapshot, StatusbarAux } from '../domain/usage'
+import type {
+  AgentMeshSnapshot,
+  AgentPromptEvent,
+  AgentRuntimeMetaPatch,
+  ContextTimelineEvent,
+  MeshDispatchRequest,
+  MeshDispatchResult,
+  MeshUiEvent,
+  WorktreeInfo,
+} from '../domain/agentMesh'
 import type { WorkspaceDoc, RecentWorkspace, WorkspaceStateDoc, Space } from '../domain/workspace'
 import type { PlanoSettings } from '../domain/settings'
 
@@ -13,6 +24,10 @@ export type Unsubscribe = () => void
 // ── terminal ──
 export interface TerminalCreateRequest {
   panelId: string
+  /** Stable terminal (tab) id inside the panel — survives respawns, keys runtime metadata. */
+  terminalId: string
+  /** The workspace (space) that owns this terminal at spawn time. */
+  spaceId: string
   cwd?: string
   shell?: string
   cols: number
@@ -57,6 +72,54 @@ export interface TerminalExitEvent {
   ptyId: string
   exitCode: number
   signal?: number
+}
+/** A session rediscovered on the detached Agent Host at launch — the terminal reattaches to it. */
+export interface RestoredTerminalSession {
+  ptyId: string
+  /** Stable owner (panel/tab/space) recorded at spawn. */
+  panelId: string
+  terminalId: string
+  spaceId: string
+  /** Shell PID as seen by the host (re-roots agent detection). */
+  pid: number
+  shellName: string
+  /** Directory the shell actually started in. */
+  cwd: string
+  /** True when the shell already exited while the app was closed (scrollback still replays). */
+  exited: boolean
+}
+export interface TerminalRestoreResult {
+  sessions: RestoredTerminalSession[]
+}
+/** A terminal/agent created from the MOBILE web app, handed to the renderer to materialize. */
+export interface ExternalTerminalEvent {
+  ptyId: string
+  panelId: string
+  terminalId: string
+  spaceId: string
+  cwd: string
+  shellName: string
+  pid: number
+  folderPath?: string | null
+  name?: string
+  bootCommand?: string
+  autoApprove?: boolean
+  cols?: number
+  rows?: number
+  /** Mesh spawn: panel of the agent that requested this one (placement anchor + size source). */
+  originPanelId?: string
+  /** Index/size of the spawn batch, so `count: 2` lays out as a tidy row next to the origin. */
+  groupIndex?: number
+  groupCount?: number
+}
+export interface PendingPanelsResult {
+  panels: ExternalTerminalEvent[]
+}
+/** A terminal was closed (e.g. from the phone) — the renderer drops its canvas panel. */
+export interface SessionRemovedEvent {
+  ptyId: string
+  panelId: string
+  terminalId: string
 }
 /** A local dev-server URL (localhost:PORT, …) printed in this terminal's output. */
 export interface DevUrlDetectedEvent {
@@ -165,12 +228,18 @@ export interface FsNode {
   type: 'file' | 'directory'
   children?: FsNode[]
 }
-export interface FsReadTreeRequest {
-  dir: string
-  depth?: number
+export interface FsDirEntry {
+  name: string
+  path: string
+  type: 'file' | 'directory'
 }
-export interface FsReadTreeResult {
-  root: FsNode
+export interface FsReadDirectoryRequest {
+  dir: string
+}
+export interface FsReadDirectoryResult {
+  /** False when the dir is inaccessible or gone — the caller keeps its cached rows. */
+  ok: boolean
+  entries: FsDirEntry[]
 }
 export interface FsReadFileRequest {
   path: string
@@ -199,12 +268,20 @@ export interface FsReadBinaryFileResult {
   /** Guessed MIME type from the file extension, e.g. "image/png". */
   mime: string
 }
+export interface FsDropPathRequest {
+  /** Absolute path of a file/folder the user dropped onto the canvas. */
+  path: string
+}
+export interface FsDropPathResult {
+  /** What the path is on disk, or null when it doesn't exist / can't be read. */
+  kind: 'file' | 'directory' | null
+}
 export interface FsWatchRequest {
   /** Directory to watch (recursively). Must be an allowed workspace root. */
   dir: string
 }
 export interface FsWatchResult {
-  /** False when the dir isn't allowed or recursive watching is unsupported here. */
+  /** False when the dir isn't allowed or a watcher couldn't be created. */
   ok: boolean
 }
 export interface FsUnwatchRequest {
@@ -214,11 +291,47 @@ export interface FsUnwatchResult {
   ok: boolean
 }
 /** Emitted (debounced) when a watched folder's contents change on disk. */
+/** Whether a filesystem change only touched file CONTENT or changed the tree STRUCTURE.
+ *  Content edits must never rebuild the file tree; structural ones (add/delete/rename/dir)
+ *  may. 'unknown' (the OS didn't name the path) is treated conservatively as structural. */
+export type FsChangeKind = 'content' | 'structural' | 'unknown'
+export interface FsPathChange {
+  path: string
+  kind: FsChangeKind
+}
 export interface FsChangedEvent {
   /** The watched root directory (matches a Files panel's folderPath). */
   dir: string
-  /** Absolute paths changed since the last flush (may be empty if the OS didn't name them). */
-  paths: string[]
+  /** Typed changes since the last flush (may be empty if the OS didn't name anything). */
+  changes: FsPathChange[]
+}
+export interface FsCreateEntryRequest {
+  /** Parent directory (must lie inside an allowed root). */
+  dir: string
+  /** New entry name — a single path segment; main validates and rejects separators/reserved chars. */
+  name: string
+  type: 'file' | 'directory'
+}
+export interface FsCreateEntryResult {
+  ok: boolean
+  /** Absolute path of the created entry. */
+  path: string
+}
+export interface FsRenameEntryRequest {
+  path: string
+  /** New name (single path segment) — the entry stays in its parent directory. */
+  newName: string
+}
+export interface FsRenameEntryResult {
+  ok: boolean
+  /** Absolute path after the rename. */
+  path: string
+}
+export interface FsDeleteEntryRequest {
+  path: string
+}
+export interface FsDeleteEntryResult {
+  ok: boolean
 }
 
 // ── time tracking ──
@@ -235,10 +348,24 @@ export interface TimeStats {
   week: number
   /** The current week's seven days, Monday → Sunday, for the breakdown chart. */
   weekDays: TimeDayStat[]
+  /** Active seconds attributed to each detected agent today (e.g. [{ kind: 'pi', seconds: 42 }]). */
+  agentsToday: AgentTimeStat[]
+  /** Active seconds attributed to each detected agent across the current local week. */
+  agentsWeek: AgentTimeStat[]
 }
+
+/** One agent's tracked time (kind = AgentKind id, e.g. 'pi' | 'claude-code' | 'codex'). */
+export interface AgentTimeStat {
+  kind: string
+  seconds: number
+}
+
 export interface TimeAddActiveRequest {
   /** Active seconds to add to the current local day. */
   seconds: number
+  /** Optional per-agent attribution for the same span — each entry adds `seconds` to that
+   *  agent's today bucket (e.g. the tracker attributes a tick to the front-most active agent). */
+  agents?: AgentTimeStat[]
 }
 
 // ── app ──
@@ -251,6 +378,58 @@ export interface AppInfo {
 /** The folder this instance was launched with (e.g. Explorer's "Open in PLANO"), or null. */
 export interface AppLaunchFolderResult {
   folderPath: string | null
+}
+/** Connection info for the PLANO mobile web app (LAN). */
+export interface RemoteInfoResult {
+  /** All plausible LAN IPv4 addresses of this machine (the user's phone must be on one of these). */
+  lanIps: string[]
+  /** Web server port on the Agent Host (0 = not up yet). */
+  webPort: number
+  /** Auth token (matches <userData>/agent-host.json). */
+  token: string
+  /** Short, human-friendly pairing code (first 6 chars of the token). */
+  pairingCode: string
+  /** Base URL of the mobile web app on this LAN, e.g. http://192.168.1.5:34821/. */
+  url: string
+  /** True when at least one phone is connected to the mobile web app right now. */
+  phoneConnected: boolean
+}
+
+// ── auto-update (GitHub releases) ──
+/** Lifecycle of the auto-updater as seen by the renderer. */
+export type UpdatePhase =
+  /** Not checked yet (startup delay not elapsed). */
+  | 'idle'
+  | 'checking'
+  /** A newer version exists and its installer is being downloaded (auto). */
+  | 'downloading'
+  /** The new installer is on disk — restart to install. */
+  | 'downloaded'
+  /** Running the latest published version. */
+  | 'up-to-date'
+  /** The last check failed (offline, repo unreachable, …). Logged; auto-retried next cycle. */
+  | 'error'
+
+/** Snapshot of the updater state, pushed main → renderer and readable on demand. */
+export interface UpdateState {
+  phase: UpdatePhase
+  /** Version of the update being downloaded / ready to install (when known). */
+  version?: string
+  /** Download progress 0–100 (phase 'downloading'). */
+  percent?: number
+  bytesPerSecond?: number
+  transferred?: number
+  total?: number
+  /** Human-readable failure reason (phase 'error'). */
+  message?: string
+  /** False in dev runs — the app can't auto-update when not packaged. */
+  canCheck: boolean
+  /** Unix ms of the last completed check, or undefined before the first one. */
+  checkedAt?: number
+}
+export interface UpdateCheckResult {
+  ok: boolean
+  state: UpdateState
 }
 
 // ── session (live "open project" pointer, separate from the recents history) ──
@@ -351,6 +530,20 @@ export interface PlanoApi {
     detach(ptyId: string): void
     /** Real descendant processes running under this terminal's shell. */
     listProcesses(ptyId: string): Promise<TerminalListProcessesResult>
+    /**
+     * Re-discover the detached Agent Host's live sessions (terminals that survived the app closing).
+     * `keptTerminalIds` = every terminal-tab id across all persisted workspaces; host sessions whose
+     * terminalId isn't in it are orphaned and get killed. Seed the terminal store from the result
+     * BEFORE workspace panels mount, so they reattach (replaying buffered output) instead of respawning.
+     */
+    restore(keptTerminalIds?: string[]): Promise<TerminalRestoreResult>
+    /** Phone-created terminals recorded while the app was CLOSED (materialize before restore). */
+    pendingPanels(): Promise<PendingPanelsResult>
+    clearPendingPanels(): Promise<void>
+    /** A terminal/agent was created from the mobile web app while running → materialize live. */
+    onExternalCreated(cb: (e: ExternalTerminalEvent) => void): Unsubscribe
+    /** A terminal was closed (e.g. from the phone) → drop its canvas panel. */
+    onSessionRemoved(cb: (e: SessionRemovedEvent) => void): Unsubscribe
     onData(cb: (e: TerminalDataEvent) => void): Unsubscribe
     onExit(cb: (e: TerminalExitEvent) => void): Unsubscribe
     /** A local dev-server URL appeared in this terminal's output (for auto-open in PLANO). */
@@ -362,11 +555,82 @@ export interface PlanoApi {
     /** Resolve the resumable conversation ref for the agent currently running under this
      *  terminal (null when none / not resumable). `cwd` is the terminal's live cwd. */
     resolveSession(ptyId: string, cwd: string): Promise<AgentSessionRef | null>
+    /** Blocking, non-enumerating final reconciliation used immediately before the window closes. */
+    resolveSessionSync(ptyId: string, cwd: string): AgentSessionRef | null
     /** Whether the conversation behind `ref` still exists on disk for a resume run from `cwd`.
      *  `null` = unverifiable store (caller should proceed). */
     validateSession(ref: AgentSessionRef, cwd: string): Promise<boolean | null>
     /** Re-seed the sidecar so a just-resumed conversation keeps its id across the next restart. */
     reportSession(ptyId: string, ref: AgentSessionRef): void
+  }
+  /** Agent Mesh — canonical cross-workspace agent context + control (main-owned). */
+  agentMesh: {
+    /** Full mesh snapshot (every agent across every workspace) with workspace names. */
+    getSnapshot(): Promise<AgentMeshSnapshot>
+    /** Bounded, redacted clean tail for one PTY. */
+    getTranscript(ptyId: string): Promise<{ text: string; truncated: boolean; redactions: number }>
+    /** Recent timeline events (newest first). */
+    getTimeline(limit?: number): Promise<{ events: ContextTimelineEvent[] }>
+    /** In-memory context search (case-insensitive, redacted snippets). */
+    search(q: string, opts?: {
+      workspace?: string
+      agent?: string
+      terminal?: string
+      limit?: number
+    }): Promise<{
+      ptyId: string
+      terminalId: string
+      panelId: string
+      spaceId: string
+      title: string
+      cwd: string
+      kind: string | null
+      snippet: string
+      matches: number
+    }[]>
+    /** Send a message to N agents (main writes each PTY; per-target results). */
+    dispatch(req: MeshDispatchRequest): Promise<MeshDispatchResult>
+    /** Send Ctrl-C (\x03) to one agent terminal. */
+    interrupt(ptyId: string): Promise<{ ok: boolean }>
+    /** Drop one PTY's clean context (tail + prompts). */
+    clearContext(ptyId: string): Promise<{ ok: boolean }>
+    /** Read the workspace scratchpad (redacted). */
+    readScratchpad(): Promise<{ text: string; path: string; bytes: number }>
+    /** Append (with timestamp + actor) to the workspace scratchpad. */
+    writeScratchpad(entry: string): Promise<{ ok: boolean; bytes: number }>
+    /** A mesh runtime/verdict/prompt changed in main → refresh the UI. */
+    onChanged(cb: () => void): Unsubscribe
+    /** A prompt was captured (keyboard/mesh/voice) in a terminal. */
+    reportPrompt(e: AgentPromptEvent): void
+    /** Live runtime metadata patch (OSC-7 cwd, title, number, workspace name). */
+    reportRuntimeMeta(patch: AgentRuntimeMetaPatch): void
+    /** Plan F7: mesh timeline events (agent-up/down, msg-*, spawn) → link layer + audit. */
+    onMeshEvent(cb: (event: MeshUiEvent) => void): Unsubscribe
+    /** Plan F8: a workspace asks the user once whether agents may write to each other. */
+    onConsentRequest(cb: (e: { spaceId: string }) => void): Unsubscribe
+    /** Plan F8: the user answered the consent toast. */
+    respondConsent(ok: boolean): Promise<{ ok: boolean }>
+    /** v4 B3: a chained task hit onFailure 'ask-user' — Fire / Cancel toast. */
+    onChainAskRequest(cb: (e: { chainId: string; from: string; to: string }) => void): Unsubscribe
+    /** v4 B3: the user answered the chain Fire / Cancel toast. */
+    respondChainAsk(ok: boolean): Promise<{ ok: boolean }>
+    /** v4 A5: cancel a chained task from the Mesh view (arming agent's behalf). */
+    cancelChain(chainId: string): Promise<{ ok: boolean; error?: string | null }>
+    /** v4 A5: list every chain for the Mesh view. */
+    getChains(): Promise<{ ok: boolean; chains: unknown[]; error?: string }>
+  }
+  /** Mesh worktree fan-out — isolate parallel writing agents with git worktrees. */
+  worktree: {
+    /** Is the given folder a git repo? */
+    isRepo(folder: string): Promise<{ ok: boolean }>
+    /** Create N worktrees (own branch each) for a mission; returns paths+branches. */
+    create(repo: string, mission: string, count: number): Promise<{ ok: boolean; worktrees?: WorktreeInfo[]; error?: string }>
+    /** Dirty/ahead/behind for one worktree. */
+    status(path: string): Promise<{ ok: boolean; info?: WorktreeInfo; error?: string }>
+    /** Remove a worktree (refuses dirty unless force). */
+    remove(path: string, force?: boolean): Promise<{ ok: boolean; error?: string }>
+    /** Worktrees created this session. */
+    list(): Promise<{ worktrees: WorktreeInfo[] }>
   }
   git: {
     /** Read-only branch + diff summary for a folder (e.g. a terminal's cwd). */
@@ -392,25 +656,57 @@ export interface PlanoApi {
     saveSync(req: WorkspaceStateSaveRequest): WorkspaceSaveResult
   }
   fs: {
-    readTree(req: FsReadTreeRequest): Promise<FsReadTreeResult>
+    /** One shallow directory listing (immediate children only) — the Files panel reads one
+     *  directory at a time and expands lazily. Never a recursive walk. */
+    readDirectory(req: FsReadDirectoryRequest): Promise<FsReadDirectoryResult>
     readFile(req: FsReadFileRequest): Promise<FsReadFileResult>
     writeFile(req: FsWriteFileRequest): Promise<FsWriteFileResult>
     /** Open a native folder picker; the chosen folder is granted read access. */
     pickFolder(): Promise<FsPickFolderResult>
     /** Read a file as base64 bytes (used to preview images inline). */
     readBinaryFile(req: FsReadBinaryFileRequest): Promise<FsReadBinaryFileResult>
+    /** Absolute OS path of a DOM File from a drag-and-drop (resolved synchronously in the
+     *  preload via webUtils; '' for non-OS drags like an image dragged off a web page). */
+    pathForFile(file: unknown): string
+    /** Stat a path dropped onto the canvas; existing paths are granted read access
+     *  (the drop is the user gesture, same trust as the native folder picker). */
+    dropPath(req: FsDropPathRequest): Promise<FsDropPathResult>
     /** Start watching a folder (recursively) so the Files panel refreshes on disk changes. */
     watch(req: FsWatchRequest): Promise<FsWatchResult>
     /** Stop watching a folder (ref-counted — the OS watcher closes when the last panel leaves). */
     unwatch(req: FsUnwatchRequest): Promise<FsUnwatchResult>
     /** A watched folder changed on disk (added/removed/modified files). */
     onChanged(cb: (e: FsChangedEvent) => void): Unsubscribe
+    /** Create an empty file / folder (Files panel "New File / New Folder"). Fails if the name exists. */
+    createEntry(req: FsCreateEntryRequest): Promise<FsCreateEntryResult>
+    /** Rename a file/folder in place (same parent directory). Fails if the target name exists. */
+    renameEntry(req: FsRenameEntryRequest): Promise<FsRenameEntryResult>
+    /** Move a file/folder to the OS trash (recoverable — never a hard delete). */
+    deleteEntry(req: FsDeleteEntryRequest): Promise<FsDeleteEntryResult>
   }
   time: {
     /** Read the persisted today / week / weekly-breakdown snapshot. */
     getStats(): Promise<TimeStats>
     /** Add active seconds to today's bucket; returns the updated snapshot. */
     addActive(req: TimeAddActiveRequest): Promise<TimeStats>
+  }
+  /** Live subscription usage (status bar provider chips) — collected by the Agent Host. */
+  usage: {
+    /** Current snapshot (cached by the host; populated instantly from <userData>/usage.json). */
+    get(): Promise<UsageSnapshot>
+    /** Force an immediate host refresh (file/network providers re-read now). */
+    refresh(): Promise<{ ok: boolean }>
+    /** The host pushed a fresh snapshot (hook POSTs, poll ticks, refreshes). */
+    onChanged(cb: (snapshot: UsageSnapshot) => void): Unsubscribe
+  }
+  /** Status bar non-provider chips: listening ports + process RSS (Agent Host computed). */
+  statusbar: {
+    /** Ports owned by this workspace's terminals + agent/app RSS snapshot. */
+    getAux(): Promise<StatusbarAux>
+    /** The host re-scanned ports/resources. */
+    onAuxChanged(cb: (aux: StatusbarAux) => void): Unsubscribe
+    /** Kill a process by pid (user-confirmed; the popover's destructive action). */
+    killPortPid(pid: number): Promise<{ ok: boolean }>
   }
   clipboard: {
     /** Copy plain text to the system clipboard. */
@@ -428,10 +724,25 @@ export interface PlanoApi {
     getInfo(): Promise<AppInfo>
     /** The folder this instance was launched with (Explorer "Open in PLANO"); cleared after read. */
     getLaunchFolder(): Promise<AppLaunchFolderResult>
+    /** LAN connection info for the PLANO mobile web app. */
+    getRemoteInfo(): Promise<RemoteInfoResult>
+  }
+  update: {
+    /** Current updater state (phase, progress, last error). */
+    getState(): Promise<UpdateState>
+    /** Force an immediate update check (button / app menu). */
+    check(): Promise<UpdateCheckResult>
+    /** Quit and install the downloaded update. No-op unless phase === 'downloaded'. */
+    install(): Promise<{ ok: boolean }>
+    /** Every updater state change (checking → downloading → downloaded → …). */
+    onStatus(cb: (state: UpdateState) => void): () => void
   }
   settings: {
     /** Read the full settings document (always complete — defaults fill any gaps). */
     get(): Promise<PlanoSettings>
+    /** Synchronous read for the first paint (preload → main via sendSync) — the saved theme
+     *  is applied before the renderer shows anything, so launch never flashes a wrong theme. */
+    getSync(): PlanoSettings
     /** Persist the full settings document; returns the merged/normalized result. */
     save(settings: PlanoSettings): Promise<{ ok: true; settings: PlanoSettings }>
   }

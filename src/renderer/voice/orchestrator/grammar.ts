@@ -92,6 +92,8 @@ function agentKindFromWord(w: string): AgentKind | null {
   if (x.startsWith('kiro')) return 'kiro-cli'
   if (x.startsWith('opencode') || x.startsWith('open code')) return 'opencode'
   if (x.startsWith('aider')) return 'aider'
+  if (x === 'omp' || x.startsWith('ohmypi')) return 'omp'
+  if (x === 'pi' || x === 'pai' || x === 'pii') return 'pi'
   return null
 }
 
@@ -118,7 +120,7 @@ function detectPrompt(raw: string): Intent | null {
   }
   // "dile/escribe/manda/pregunta/tell/ask … a <agent> [que] <prompt>"
   const am = raw.match(
-    /\b(?:d[ií]le|d[ií]gale|escr[ií]be(?:le)?|m[aá]nda(?:le)?|env[ií]a(?:le)?|preg[uú]nta(?:le)?|tell|ask)\b[^]*?\b(claude(?:\s+code)?|codex|gemini|kiro|opencode|aider)\b[\s,:]*(?:que\s+|to\s+)?(.+)$/i,
+    /\b(?:d[ií]le|d[ií]gale|escr[ií]be(?:le)?|m[aá]nda(?:le)?|env[ií]a(?:le)?|preg[uú]nta(?:le)?|tell|ask)\b[^]*?\b(claude(?:\s+code)?|codex|gemini|kiro|opencode|aider|pi)\b[\s,:]*(?:que\s+|to\s+)?(.+)$/i,
   )
   if (am) {
     const kind = agentKindFromWord(am[1])

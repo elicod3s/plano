@@ -149,17 +149,22 @@ export function sideForPoint(p: Point, rect: Rect): DockSide {
   return side
 }
 
-/** The screen/world rect the dropped pane would occupy within `rect`, for the drop preview. */
-export function previewRect(rect: Rect, side: DockSide): Rect {
-  const half = 0.5
+/** The screen/world rect the dropped pane would occupy within `rect`, for the drop preview.
+ *  Uses the DRAG panel's own size (like dockPanel does when it builds the group) instead of a
+ *  naive 50/50 split — the preview must match the drop result exactly, or it reads as a lie. */
+export function previewRect(rect: Rect, side: DockSide, dragSize?: { width: number; height: number }): Rect {
+  // Row split: the dragged pane keeps its own width; the group width = target + drag.
+  // Col split: the dragged pane keeps its own height; the group height = target + drag.
+  const dw = dragSize?.width ?? rect.width * 0.5
+  const dh = dragSize?.height ?? rect.height * 0.5
   switch (side) {
     case 'left':
-      return { x: rect.x, y: rect.y, width: rect.width * half, height: rect.height }
+      return { x: rect.x - dw, y: rect.y, width: dw, height: Math.max(rect.height, dh) }
     case 'right':
-      return { x: rect.x + rect.width * half, y: rect.y, width: rect.width * half, height: rect.height }
+      return { x: rect.x + rect.width, y: rect.y, width: dw, height: Math.max(rect.height, dh) }
     case 'top':
-      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height * half }
+      return { x: rect.x, y: rect.y - dh, width: Math.max(rect.width, dw), height: dh }
     case 'bottom':
-      return { x: rect.x, y: rect.y + rect.height * half, width: rect.width, height: rect.height * half }
+      return { x: rect.x, y: rect.y + rect.height, width: Math.max(rect.width, dw), height: dh }
   }
 }

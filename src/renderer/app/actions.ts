@@ -52,6 +52,38 @@ export function openFilesPanel(folderPath: string): string {
   return id
 }
 
+/** Size a Files panel spawns at when a dropped file opens straight into the editor / image
+ *  preview (matches the editor panel's default size — file opens never resize the panel). */
+const DROP_OPEN_SIZE = { width: 880, height: 600 }
+
+/** OS-agnostic parent directory of an absolute path (undefined at a filesystem root). */
+function parentDir(p: string): string | undefined {
+  const norm = p.replace(/[\\/]+$/, '')
+  const idx = Math.max(norm.lastIndexOf('/'), norm.lastIndexOf('\\'))
+  if (idx < 0) return undefined
+  if (idx === 0) return norm.slice(0, 1) // "/file" → "/"
+  const parent = norm.slice(0, idx)
+  return /^[A-Za-z]:$/.test(parent) ? `${parent}\\` : parent // "C:" → "C:\"
+}
+
+/**
+ * Open a file/folder dragged from the OS onto the canvas, at the drop point. A folder opens as
+ * a compact Files explorer rooted there; a file opens a Files panel already grown into the
+ * editor / image preview, with its parent folder in the sidebar tree — a normal IDE view.
+ */
+export function openDroppedPath(path: string, kind: 'file' | 'directory', world: Point): string {
+  const store = usePanelStore.getState()
+  const id = store.addPanel('editor', world)
+  if (kind === 'directory') {
+    store.updateProps<'editor'>(id, { folderPath: path, sidebarOpen: true })
+    return id
+  }
+  store.updateProps<'editor'>(id, { folderPath: parentDir(path), filePath: path, sidebarOpen: true })
+  const { width, height } = DROP_OPEN_SIZE
+  store.resizePanel(id, { x: world.x - width / 2, y: world.y - height / 2, width, height })
+  return id
+}
+
 /**
  * Center the viewport on one panel and raise it to the front — the "jump to" used by the agent
  * manager. A docked panel has a stale rect (its group owns the real one), so frame and raise the

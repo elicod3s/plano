@@ -1,8 +1,8 @@
 {
   "name": "plano",
-  "version": "0.0.1",
+  "version": "0.2.14",
   "private": true,
-  "description": "PLANO — the infinite canvas workspace for builders. One spatial screen per project: terminals, editors, browsers and AI agents, together.",
+  "description": "PLANO \u2014 the infinite canvas workspace for builders. One spatial screen per project: terminals, editors, browsers and AI agents, together.",
   "author": "PLANO",
   "license": "MIT",
   "main": "out/main/index.js",
@@ -17,10 +17,13 @@
     "rebuild": "electron-rebuild -f -w node-pty",
     "icons": "node scripts/make-icons.mjs",
     "model": "node scripts/fetch-model.mjs",
-    "dist": "npm run model && npm run icons && electron-vite build && electron-builder",
-    "dist:win": "npm run model && npm run icons && electron-vite build && electron-builder --win",
-    "dist:mac": "npm run model && npm run icons && electron-vite build && electron-builder --mac",
-    "dist:linux": "npm run model && npm run icons && electron-vite build && electron-builder --linux"
+    "build:web": "npm --prefix web run build",
+    "dist": "npm run model && npm run icons && npm run build:web && electron-vite build && electron-builder --publish never",
+    "dist:win": "npm run model && npm run icons && npm run build:web && electron-vite build && electron-builder --win --publish never",
+    "dist:mac": "npm run model && npm run icons && electron-vite build && electron-builder --mac --publish never",
+    "dist:linux": "npm run model && npm run icons && electron-vite build && electron-builder --linux --publish never",
+    "release": "node scripts/publish-release.mjs",
+    "release:win": "npm run dist:win && node scripts/publish-release.mjs"
   },
   "build": {
     "appId": "app.plano.desktop",
@@ -30,6 +33,11 @@
       "output": "release"
     },
     "afterPack": "build/afterPack.js",
+    "publish": {
+      "provider": "github",
+      "owner": "zqkra",
+      "repo": "plano-releases"
+    },
     "files": [
       "out/**/*",
       "package.json"
@@ -43,6 +51,13 @@
       {
         "from": "resources/models",
         "to": "models",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "web-dist",
+        "to": "web",
         "filter": [
           "**/*"
         ]
@@ -60,7 +75,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "${productName} Setup.${ext}"
+      "artifactName": "${productName}-Setup.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -70,13 +85,16 @@
       "createStartMenuShortcut": true,
       "shortcutName": "PLANO",
       "include": "build/installer.nsh",
-      "artifactName": "${productName} Setup.${ext}",
+      "artifactName": "${productName}-Setup.${ext}",
       "deleteAppDataOnUninstall": false
     },
     "mac": {
       "target": [
         {
           "target": "dmg"
+        },
+        {
+          "target": "zip"
         }
       ],
       "category": "public.app-category.developer-tools",
@@ -108,31 +126,42 @@
     "@codemirror/view": "^6.34.1",
     "@electron-toolkit/preload": "^3.0.1",
     "@electron-toolkit/utils": "^3.0.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/instrument-sans": "^5.3.0",
     "@fontsource-variable/space-grotesk": "^5.1.0",
     "@fontsource/jetbrains-mono": "^5.1.1",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "@xterm/addon-fit": "^0.10.0",
     "@xterm/addon-search": "^0.15.0",
     "@xterm/addon-unicode11": "^0.8.0",
     "@xterm/addon-web-links": "^0.11.0",
     "@xterm/addon-webgl": "^0.18.0",
     "@xterm/xterm": "^5.5.0",
+    "bonjour-service": "^1.4.4",
+    "electron-updater": "^6.8.9",
+    "express": "^5.2.1",
     "immer": "^10.1.1",
     "lucide-react": "^0.453.0",
     "nanoid": "^5.0.7",
     "node-pty": "^1.0.0",
     "ps-list": "^8.1.1",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-icons": "^5.6.0",
     "sherpa-onnx-node": "^1.13.3",
+    "ws": "^8.21.2",
     "zod": "^3.23.8",
     "zustand": "^4.5.5"
   },
   "devDependencies": {
     "@electron/rebuild": "^3.7.0",
+    "@types/express": "^5.0.6",
     "@types/node": "^22.7.5",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^18.3.11",
     "@types/react-dom": "^18.3.1",
+    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.3",
     "autoprefixer": "^10.4.20",
     "electron": "^33.0.2",

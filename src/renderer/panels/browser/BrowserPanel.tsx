@@ -3,6 +3,7 @@ import type { Panel, BrowserProps } from '@shared/domain/panel'
 import { SEARCH_ENGINES } from '@shared/domain/settings'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
+import { Icon } from '@/design-system/Icon'
 import { IconButton } from '@/design-system/IconButton'
 import type { WebviewElement } from '@/types/webview'
 
@@ -218,7 +219,7 @@ export function BrowserPanel({ panel }: { panel: Panel }) {
 
   return (
     <div
-      className="flex h-full flex-col bg-surface-1"
+      className="flex h-full flex-col bg-transparent"
       onKeyDown={(e) => {
         // Ctrl/Cmd+L focuses the address bar (standard browser shortcut).
         if (e.key.toLowerCase() === 'l' && (e.ctrlKey || e.metaKey)) {
@@ -227,22 +228,24 @@ export function BrowserPanel({ panel }: { panel: Panel }) {
         }
       }}
     >
-      <div className="relative flex h-10 shrink-0 items-center gap-1 border-b border-subtle bg-surface-2 px-2">
-        <IconButton icon="ArrowLeft" label="Back" size={26} disabled={!canBack} onClick={back} />
-        <IconButton icon="ArrowRight" label="Forward" size={26} disabled={!canFwd} onClick={forward} />
+      <div className="relative flex h-9 shrink-0 items-center gap-1.5 border-b border-glass px-3">
+        <IconButton icon="ArrowLeft" label="Back" size={32} disabled={!canBack} onClick={back} />
+        <IconButton icon="ArrowRight" label="Forward" size={32} disabled={!canFwd} onClick={forward} />
         <IconButton
           icon={loading ? 'X' : 'RotateCw'}
           label={loading ? 'Stop' : 'Reload'}
-          size={26}
+          size={32}
           onClick={reloadOrStop}
         />
         <form
-          className="flex-1"
+          className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-pill border border-glass px-3 transition-colors focus-within:border-glass-hover"
+          style={{ background: 'var(--inset-soft)', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}
           onSubmit={(e) => {
             e.preventDefault()
             go(address)
           }}
         >
+          <Icon name="Lock" size={11} className="shrink-0" style={{ color: 'var(--success)' }} />
           <input
             ref={inputRef}
             value={address}
@@ -270,7 +273,7 @@ export function BrowserPanel({ panel }: { panel: Panel }) {
             }}
             spellCheck={false}
             placeholder="Search or enter address"
-            className="app-no-drag h-7 w-full rounded-pill bg-surface-4 px-3 font-mono text-[12px] text-text-primary placeholder:text-text-tertiary focus-caliper"
+            className="app-no-drag h-full min-w-0 flex-1 bg-transparent font-mono text-[12px] text-text-1 placeholder:text-text-3 focus:outline-none"
           />
         </form>
         {/* Indeterminate loading hairline along the bottom edge of the toolbar. */}
@@ -283,7 +286,8 @@ export function BrowserPanel({ panel }: { panel: Panel }) {
           </div>
         )}
       </div>
-      <div className="relative min-h-0 flex-1">
+      {/* the page — fills the panel below the URL row, clipped by the panel's rounding */}
+      <div className="relative min-h-0 flex-1 overflow-hidden" style={{ background: 'var(--inset-deep)' }}>
         <webview
           ref={webviewRef as unknown as React.Ref<HTMLElement>}
           src={initialUrl}

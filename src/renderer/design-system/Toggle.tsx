@@ -9,7 +9,7 @@ interface ToggleProps {
   disabled?: boolean
 }
 
-/** Pill toggle. The thumb does a small settle on change; armed state crossfades to red. */
+/** Pill toggle (40×22) with a circular knob — glass track, white/ink knob. */
 export function Toggle({ checked, onChange, label, tone = 'default', disabled }: ToggleProps) {
   const armed = tone === 'arm' && checked
   return (
@@ -21,20 +21,21 @@ export function Toggle({ checked, onChange, label, tone = 'default', disabled }:
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={cn(
-        'app-no-drag relative inline-flex h-6 w-11 shrink-0 items-center rounded-[7px] border',
+        'app-no-drag relative inline-flex h-[22px] w-10 shrink-0 items-center rounded-pill border',
         'transition-colors duration-150 ease-settle focus-caliper disabled:opacity-40',
         armed
           ? 'border-transparent bg-destructive'
           : checked
-            ? 'border-transparent bg-accent-soft-strong'
-            : 'border-default bg-surface-4',
+            ? 'border-glass-hover bg-glass-active'
+            : 'border-glass-strong bg-glass',
       )}
     >
       <span
         className={cn(
-          'pointer-events-none absolute h-[18px] w-[18px] rounded-[5px] bg-accent shadow-sm',
-          'transition-transform duration-150 ease-settle',
-          checked ? 'translate-x-[22px]' : 'translate-x-[3px]',
+          'pointer-events-none absolute h-4 w-4 rounded-full shadow-sm',
+          'transition-[transform,background] duration-150 ease-settle',
+          armed ? 'bg-[#14090a]' : checked ? 'bg-accent' : 'bg-[color-mix(in_srgb,var(--text-primary)_65%,transparent)]',
+          checked ? 'translate-x-[21px]' : 'translate-x-[3px]',
         )}
       />
     </button>

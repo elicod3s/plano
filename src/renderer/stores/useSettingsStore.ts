@@ -1,19 +1,19 @@
 import { create } from 'zustand'
-import { DEFAULT_SETTINGS, type PlanoSettings } from '@shared/domain/settings'
+import { DEFAULT_SETTINGS, mergeSettings, type PlanoSettings } from '@shared/domain/settings'
 import { applyAppearance } from '@/theme/themes'
 import { useUiStore } from './useUiStore'
 
-/** The Settings sidebar sections, in display order. */
+/** The Settings sidebar sections, in display order (matching the new UI design rail). */
 export type SettingsSection =
   | 'general'
-  | 'account'
   | 'appearance'
-  | 'editor'
+  | 'usage'
   | 'terminal'
-  | 'canvas'
+  | 'editor'
   | 'browser'
+  | 'agents'
   | 'voice'
-  | 'privacy'
+  | 'mobile'
   | 'advanced'
 
 interface SettingsStore {
@@ -59,7 +59,12 @@ export const useSettingsStore = create<SettingsStore>((set, get) => ({
   hydrate: async () => {
     let next = DEFAULT_SETTINGS
     try {
-      next = await window.plano.settings.get()
+      // Merge over the defaults instead of trusting the payload: main can be a step behind the
+      // renderer (electron-vite hot-reloads the renderer instantly but restarts main), and a
+      // settings object missing a whole group — one the renderer already reads — crashed the
+      // first render with "Cannot read properties of undefined". mergeSettings is the same
+      // tolerant merge main uses, so every group is guaranteed present and typed.
+      next = mergeSettings(await window.plano.settings.get())
     } catch {
       /* fall back to defaults */
     }

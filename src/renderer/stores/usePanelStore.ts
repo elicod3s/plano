@@ -11,7 +11,7 @@ import type { FilesProps, GroupProps, TerminalProps, TerminalTab } from '@shared
 import type { Point, Rect } from '@shared/domain/geometry'
 import type { DockNode } from '@shared/domain/dock'
 import { newId } from '@/lib/id'
-import { loadSize } from '@/lib/panelSizes'
+import { clearSize, loadSize } from '@/lib/panelSizes'
 
 /**
  * Migrate a persisted panel forward. The legacy 'files' (File Explorer) type was merged
@@ -38,12 +38,18 @@ interface PanelState {
   /** monotonically increasing z to bring panels to front */
   zCounter: number
 
-  addPanel: (type: PanelType, worldCenter?: Point) => string
+  addPanel: <T extends PanelType>(
+    type: T,
+    worldCenter?: Point,
+    initialProps?: Partial<PanelPropsMap[T]>,
+  ) => string
   removePanel: (id: string) => void
   movePanel: (id: string, x: number, y: number) => void
   /** Move several panels to absolute positions in one commit (used by region drag-together). */
   moveMany: (moves: { id: string; x: number; y: number }[]) => void
   resizePanel: (id: string, rect: Rect) => void
+  /** Restore this panel and future panels of its type to the built-in default size. */
+  resetPanelSize: (id: string) => void
   bringToFront: (id: string) => void
   setTitle: (id: string, title: string) => void
   /** Pin/unpin a panel in place (blocks its move + resize gestures). */
@@ -65,6 +71,10 @@ interface PanelState {
   setGroupLayout: (id: string, layout: DockNode) => void
   /** Mark/unmark a panel as docked inside a group (rendered there, not as its own frame). */
   setDocked: (id: string, groupId: string | undefined) => void
+  /** Insert a FULLY-FORMED panel (e.g. a phone-materialized terminal) without touching the
+   *  rest of the live canvas — never rebuild the store from a snapshot here, or docks/groups
+   *  that live only in the live store get wiped. */
+  insertPanel: (panel: Panel) => void
   replaceAll: (panels: Panel[]) => void
   clear: () => void
 }
@@ -76,11 +86,11 @@ export const usePanelStore = create<PanelState>()(
     panels: {},
     zCounter: 1,
 
-    addPanel: (type, worldCenter) => {
+    addPanel: (type, worldCenter, initialProps) => {
       const id = newId()
       const meta = PANEL_META[type]
       // Reopen at the user's last-used size for this type, falling back to the default.
-      const { width, height } = loadSize(type) ?? meta.defaultSize
+      const { width, height } = loadSize(type, meta.defaultSize) ?? meta.defaultSize
       // Cascade new panels slightly when no explicit drop point is given.
       const offset = (cascade = (cascade + 1) % 8) * 28
       const center = worldCenter ?? { x: 240 + offset, y: 200 + offset }
@@ -96,7 +106,7 @@ export const usePanelStore = create<PanelState>()(
         rect: { x: center.x - width / 2, y: center.y - height / 2, width, height },
         z,
         title: meta.label.replace(/^New\s+/, ''),
-        props: defaultProps(type),
+        props: { ...defaultProps(type), ...initialProps },
       } as Panel
 
       set((s) => {
@@ -136,6 +146,25 @@ export const usePanelStore = create<PanelState>()(
         const p = s.panels[id]
         if (p) p.rect = rect
       }),
+
+    resetPanelSize: (id) => {
+      const panel = get().panels[id]
+      if (!panel) return
+      clearSize(panel.type)
+      const { width, height } = PANEL_META[panel.type].defaultSize
+      set((s) => {
+        const p = s.panels[id]
+        if (!p) return
+        const centerX = p.rect.x + p.rect.width / 2
+        const centerY = p.rect.y + p.rect.height / 2
+        p.rect = {
+          x: Math.round(centerX - width / 2),
+          y: Math.round(centerY - height / 2),
+          width,
+          height,
+        }
+      })
+    },
 
     bringToFront: (id) =>
       set((s) => {
@@ -234,6 +263,12 @@ export const usePanelStore = create<PanelState>()(
       set((s) => {
         const p = s.panels[id]
         if (p) p.dockedIn = groupId
+      }),
+
+    insertPanel: (panel) =>
+      set((s) => {
+        s.panels[panel.id] = panel
+        if (panel.z >= s.zCounter) s.zCounter = panel.z + 1
       }),
 
     replaceAll: (panels) =>

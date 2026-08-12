@@ -25,6 +25,7 @@ const AGENT_BY_WORD: Record<string, { command: string; kind: AgentKind; display:
   kiro: { command: 'kiro-cli chat', kind: 'kiro-cli', display: 'Kiro CLI' },
   opencode: { command: 'opencode', kind: 'opencode', display: 'opencode' },
   aider: { command: 'aider', kind: 'aider', display: 'Aider' },
+  pi: { command: 'pi', kind: 'pi', display: 'Pi' },
 }
 
 function agentInfo(word?: string): { command: string; kind: AgentKind; display: string } | null {

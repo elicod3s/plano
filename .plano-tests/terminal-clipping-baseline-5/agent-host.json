@@ -1,0 +1,10 @@
+{
+  "pid": 25516,
+  "port": 61348,
+  "token": "b6b706fc-7d0d-4504-810b-6cddb0345dde",
+  "webPort": 61349,
+  "mdns": "plano.local",
+  "version": "0.2.2",
+  "startedAt": 1786225046971,
+  "ptyAvailable": true
+}

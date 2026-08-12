@@ -10,6 +10,8 @@ import os from 'node:os'
 import path from 'node:path'
 import { SESSION_ID_RE } from '@shared/domain/agent'
 
+const codexRolloutCache = new Map<string, string>()
+
 /**
  * Claude Code's per-project session dir name. It replaces every non-alphanumeric char in the
  * absolute cwd with `-` (verified on Windows: `D:\Tools\Plano` → `D--Tools-Plano` under
@@ -43,15 +45,168 @@ export function codexDayDirs(startMs: number): string[] {
   return dirs
 }
 
-/** First JSON line of a Codex rollout → `{ id, cwd }` (read only the head, files can be large). */
-export function readRolloutMeta(filePath: string): { id?: string; cwd?: string } | null {
-  const head = readHead(filePath)
-  if (head === null) return null
+/**
+ * Pull an exact session id from a Codex process command line. This is the strongest signal for a
+ * resumed process because its rollout keeps the ORIGINAL timestamp, so matching by process/file
+ * birthtime cannot work.
+ */
+export function codexSessionIdFromCommand(command: string): string | null {
+  const match = /(?:^|\s)resume\s+([0-9a-fA-F-]{8,64})(?=\s|$)/i.exec(command)
+  return match && SESSION_ID_RE.test(match[1]) ? match[1] : null
+}
+
+/** Locate a Codex rollout by id (fast UUIDv7 lookup, with a compatibility scan for older UUIDs). */
+export function findCodexRollout(sessionId: string): string | null {
+  if (!SESSION_ID_RE.test(sessionId)) return null
+  const key = sessionId.toLowerCase()
+  const cached = codexRolloutCache.get(key)
+  if (cached !== undefined) return cached
+
+  const suffix = `-${key}.jsonl`
+  const compact = key.replace(/-/g, '')
+  // Current Codex ids are UUIDv7: their first 48 bits are epoch milliseconds. Restrict the direct
+  // lookup to v7 ids; interpreting an older UUIDv4 as a timestamp points at a nonsense year.
+  if (compact.length >= 13 && compact[12] === '7') {
+    const sessionMs = Number.parseInt(compact.slice(0, 12), 16)
+    if (Number.isFinite(sessionMs)) {
+      for (const dir of codexDayDirs(sessionMs)) {
+        try {
+          const name = fs.readdirSync(dir).find((candidate) => candidate.toLowerCase().endsWith(suffix))
+          if (name) {
+            const found = path.join(dir, name)
+            codexRolloutCache.set(key, found)
+            return found
+          }
+        } catch {
+          /* missing day directory */
+        }
+      }
+    }
+  }
+
+  // Compatibility fallback for pre-UUIDv7 sessions and stores moved between Codex versions. The
+  // tree is only year/month/day directories, so this bounded metadata walk is cheap and reads no
+  // conversation content.
+  const root = path.join(os.homedir(), '.codex', 'sessions')
+  const dirs = [root]
+  while (dirs.length > 0) {
+    const dir = dirs.pop()!
+    let entries: fs.Dirent[]
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true })
+    } catch {
+      continue
+    }
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name)
+      if (entry.isDirectory()) dirs.push(fullPath)
+      else if (entry.isFile() && entry.name.toLowerCase().endsWith(suffix)) {
+        codexRolloutCache.set(key, fullPath)
+        return fullPath
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * Newest Codex session ids that accepted a prompt after `sinceMs`. Unlike rollout birthtime,
+ * history.jsonl also identifies a newly-started process that resumed an older conversation.
+ */
+export function recentCodexHistoryIds(sinceMs: number, slackMs: number): string[] {
+  const file = path.join(os.homedir(), '.codex', 'history.jsonl')
   try {
-    const parsed = JSON.parse(head.split('\n')[0]) as { payload?: { id?: string; cwd?: string } }
+    const stat = fs.statSync(file)
+    const maxBytes = 1024 * 1024
+    const start = Math.max(0, stat.size - maxBytes)
+    const fd = fs.openSync(file, 'r')
+    const buffer = Buffer.alloc(stat.size - start)
+    let read = 0
+    try {
+      read = fs.readSync(fd, buffer, 0, buffer.length, start)
+    } finally {
+      fs.closeSync(fd)
+    }
+    let text = buffer.toString('utf8', 0, read)
+    if (start > 0) text = text.slice(Math.max(0, text.indexOf('\n') + 1))
+    const ids: string[] = []
+    const seen = new Set<string>()
+    const lines = text.split(/\r?\n/)
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (!lines[i]) continue
+      try {
+        const row = JSON.parse(lines[i]) as { session_id?: unknown; ts?: unknown }
+        const id = typeof row.session_id === 'string' ? row.session_id : ''
+        const ts = Number(row.ts)
+        if (!SESSION_ID_RE.test(id) || !Number.isFinite(ts)) continue
+        if (ts * 1000 < sinceMs - slackMs) continue
+        const key = id.toLowerCase()
+        if (!seen.has(key)) {
+          seen.add(key)
+          ids.push(id)
+        }
+      } catch {
+        /* tolerate a partial/corrupt line */
+      }
+    }
+    return ids
+  } catch {
+    return []
+  }
+}
+
+/** First JSON line of a Codex rollout → `{ id, cwd }` (never reads conversation rows). */
+export function readRolloutMeta(
+  filePath: string,
+): { id?: string; cwd?: string; originator?: string } | null {
+  const firstLine = readFirstLine(filePath)
+  if (firstLine === null) return null
+  try {
+    const parsed = JSON.parse(firstLine) as {
+      payload?: { id?: string; cwd?: string; originator?: string }
+    }
     return parsed.payload ?? null
   } catch {
     return null
+  }
+}
+
+/**
+ * Read exactly the first JSONL row, up to a defensive ceiling. Codex 0.145 expanded its metadata
+ * row beyond 18 KB; the old fixed 4 KB head truncated valid JSON and silently lost every session id.
+ */
+function readFirstLine(filePath: string, maxBytes = 512 * 1024): string | null {
+  let fd: number | null = null
+  try {
+    fd = fs.openSync(filePath, 'r')
+    const chunks: Buffer[] = []
+    let total = 0
+    while (total < maxBytes) {
+      const chunk = Buffer.alloc(Math.min(16 * 1024, maxBytes - total))
+      const read = fs.readSync(fd, chunk, 0, chunk.length, total)
+      if (read <= 0) break
+      const slice = chunk.subarray(0, read)
+      const newline = slice.indexOf(0x0a)
+      if (newline >= 0) {
+        chunks.push(slice.subarray(0, newline))
+        return Buffer.concat(chunks).toString('utf8').replace(/\r$/, '')
+      }
+      chunks.push(slice)
+      total += read
+    }
+    // A small final row without a trailing newline is still valid; a row that hit the ceiling is
+    // treated as malformed rather than reading arbitrary conversation data.
+    return total < maxBytes ? Buffer.concat(chunks).toString('utf8').replace(/\r$/, '') : null
+  } catch {
+    return null
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd)
+      } catch {
+        /* already closed */
+      }
+    }
   }
 }
 
@@ -75,6 +230,43 @@ export function geminiChatsDir(cwd: string): string | null {
   } catch {
     return null
   }
+}
+
+/**
+ * Pi's per-project session dir, mirroring pi's own encoding
+ * (`getDefaultSessionDir` in @earendil-works/pi-coding-agent):
+ * `~/.pi/agent/sessions/--<cwd with [/\\:] → ->--/`. On Windows `C:\Tools\Foo` → `--C-Tools-Foo--`.
+ */
+export function piSessionDir(cwd: string): string {
+  const encoded = `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
+  return path.join(os.homedir(), '.pi', 'agent', 'sessions', encoded)
+}
+
+/**
+ * Oh My Pi (omp) is a fork of pi — same session layout and same cwd encoding, but its own
+ * home: `~/.omp/agent/sessions/--<encoded-cwd>--` (confirmed in the omp bundle:
+ * `Yn="omp", sW=".omp"`; `--export ~/.omp/agent/sessions/...`). Same `<timestamp>_<uuid>.jsonl`
+ * filenames, so `parsePiSessionName` applies unchanged.
+ */
+export function ompSessionDir(cwd: string): string {
+  const encoded = `--${cwd.replace(/^[/\\]/, '').replace(/[/\\:]/g, '-')}--`
+  return path.join(os.homedir(), '.omp', 'agent', 'sessions', encoded)
+}
+
+/** Pi session filename → id. Files are `<ISO-timestamp-with-dashes>_<uuid>.jsonl`. */
+export function parsePiSessionName(name: string): string | null {
+  const m = /_([0-9a-fA-F-]{8,64})\.jsonl$/.exec(name)
+  return m && SESSION_ID_RE.test(m[1]) ? m[1] : null
+}
+
+/**
+ * Pull an exact (full-uuid) session id from a `pi --session <id>` command line — the strongest
+ * signal for a manually resumed process whose file birthtime predates the process. Partial ids
+ * are deliberately not captured so the on-disk existence check keeps working.
+ */
+export function piSessionIdFromCommand(command: string): string | null {
+  const match = /(?:^|\s)--session\s+([0-9a-fA-F-]{36})(?=\s|$)/i.exec(command)
+  return match ? match[1] : null
 }
 
 /**

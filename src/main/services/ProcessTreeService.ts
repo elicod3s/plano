@@ -37,8 +37,11 @@ export interface Proc {
 // cold spawn), so we can afford a shorter TTL: it bounds how long after an agent CLI's child
 // process appears we keep reading a stale (childless) snapshot — i.e. how fast the panel morphs.
 const TTL_MS = 700
-/** Hard ceiling on one enumeration; a worker that misses it is wedged → killed + respawned. */
-const QUERY_TIMEOUT_MS = 4000
+/** Hard ceiling on one enumeration; a worker that misses it is wedged → killed + respawned.
+ *  Generous on purpose: the FIRST query pays a cold PowerShell start (measured up to ~5 s on a
+ *  busy machine — the daemon runs it before the user's terminal session even opens), and a
+ *  wedge here silently means ZERO agent detection for every session until a query succeeds. */
+const QUERY_TIMEOUT_MS = 15_000
 /** Printed by the worker after each query's JSON so we know its output is complete. */
 const SENTINEL = '<<<PLANO_PROC_END>>>'
 const WIN_QUERY =

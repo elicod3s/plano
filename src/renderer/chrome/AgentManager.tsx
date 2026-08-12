@@ -1,12 +1,13 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { useTerminalStore } from '@/stores/useTerminalStore'
 import { useAgentStore } from '@/stores/useAgentStore'
 import { usePanelStore } from '@/stores/usePanelStore'
-import { useSpacesStore } from '@/stores/useSpacesStore'
+import { useUiStore } from '@/stores/useUiStore'
+import { useMeshLinks, useMeshMembers, useMeshTimeline } from '@/stores/useMeshLinks'
 import { switchSpace } from '@/app/workspaceActions'
 import { focusPanel } from '@/app/actions'
-import { AGENTS, type AgentKind, type AgentVerdict } from '@shared/domain/agent'
+import { buildAgentRoster, type RunningAgent } from '@/app/agentRoster'
+import { AGENTS, type AgentKind } from '@shared/domain/agent'
 import { AgentLogo } from '@/panels/terminal/AgentLogo'
 import { Icon } from '@/design-system/Icon'
 import { cn } from '@/lib/cn'
@@ -18,92 +19,30 @@ function tint(color: string, pct: number): string {
   return `color-mix(in srgb, ${color} ${pct}%, transparent)`
 }
 
-/** A running agent resolved to the panel/space it lives in (its PTY may be in a backgrounded space). */
-interface RunningAgent {
-  panelId: string
-  /** The specific terminal (tab) inside the panel that hosts this agent. */
-  termId: string
-  ptyId: string
-  verdict: AgentVerdict
-  prompt: string
-  /** Panel title (the terminal's name on the canvas). */
-  title: string
-  spaceId: string | null
-  spaceName: string | null
-  inActiveSpace: boolean
-}
-
 /**
  * Agent manager — the TopBar running-agents control. The static count pill becomes a button that
- * opens a floating roster of every terminal currently hosting a detected AI CLI. Each row reads its
- * agent (kind + live Working/Idle phase + first prompt); clicking jumps straight to that terminal on
- * the canvas — switching workspace first when the agent lives in a backgrounded space (PTYs keep
- * running there), in which case the row also names that workspace. Portaled to <body>, right-aligned.
+ * opens a floating roster of every terminal currently hosting a detected AI CLI (reusing the ONE
+ * cross-workspace join from app/agentRoster). Each row reads its agent (kind + live Working/Idle
+ * phase + first prompt); clicking jumps straight to that terminal on the canvas — switching
+ * workspace first when the agent lives in a backgrounded space (PTYs keep running there), in which
+ * case the row also names that workspace. Portaled to <body>, right-aligned.
  */
 export function AgentManager() {
-  const sessions = useTerminalStore((s) => s.byPanel)
   const verdicts = useAgentStore((s) => s.byPty)
-  const prompts = useAgentStore((s) => s.promptByPty)
-  const panels = usePanelStore((s) => s.panels)
-  const spaces = useSpacesStore((s) => s.spaces)
-  const activeId = useSpacesStore((s) => s.activeId)
+  const toggleMesh = useUiStore((s) => s.toggleAgentControl)
 
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null)
+  // v4 A5: Agents | Mesh tab inside the manager dropdown.
+  const [tab, setTab] = useState<'agents' | 'mesh'>('agents')
 
-  // Join the three runtime stores: a terminal session whose PTY carries an active verdict is a
-  // running agent. Resolve its panel/space — live canvas if in the active space, else its snapshot.
+  // Recompute only when the underlying stores change (the roster reads them directly).
   const agents = useMemo<RunningAgent[]>(() => {
-    const out: RunningAgent[] = []
-    // sessions is keyed by terminal id; a terminal's owning panel is rt.panelId (a panel can host
-    // several tabs, each potentially running its own agent — every one gets a roster row).
-    for (const [termId, rt] of Object.entries(sessions)) {
-      const verdict = verdicts[rt.ptyId]
-      if (!verdict?.active) continue
-
-      const panelId = rt.panelId
-      let title = 'Terminal'
-      let spaceId: string | null = null
-      let spaceName: string | null = null
-      let inActiveSpace = false
-
-      const live = panels[panelId]
-      if (live) {
-        title = live.title || 'Terminal'
-        spaceId = activeId
-        spaceName = spaces.find((s) => s.id === activeId)?.name ?? null
-        inActiveSpace = true
-      } else {
-        for (const sp of spaces) {
-          const p = sp.panels.find((pp) => pp.id === panelId)
-          if (p) {
-            title = p.title || 'Terminal'
-            spaceId = sp.id
-            spaceName = sp.name
-            break
-          }
-        }
-      }
-
-      out.push({
-        panelId,
-        termId,
-        ptyId: rt.ptyId,
-        verdict,
-        prompt: prompts[rt.ptyId] ?? '',
-        title,
-        spaceId,
-        spaceName,
-        inActiveSpace,
-      })
-    }
-    // Active-space agents first, then alphabetical by title so the roster reads stably.
-    return out.sort((a, b) => {
-      if (a.inActiveSpace !== b.inActiveSpace) return a.inActiveSpace ? -1 : 1
-      return a.title.localeCompare(b.title)
-    })
-  }, [sessions, verdicts, prompts, panels, spaces, activeId])
+    // Force recompute on verdict changes by reading the raw map in the dep array.
+    void verdicts
+    return buildAgentRoster()
+  }, [verdicts])
 
   const count = agents.length
 
@@ -117,8 +56,8 @@ export function AgentManager() {
     const r = triggerRef.current?.getBoundingClientRect()
     if (r) {
       setPos({
-        left: Math.max(8, Math.min(r.right - DROPDOWN_W, window.innerWidth - DROPDOWN_W - 8)),
-        top: r.bottom + 8,
+        left: Math.max(12, Math.min(r.right - DROPDOWN_W, window.innerWidth - DROPDOWN_W - 12)),
+        top: r.bottom + 12,
       })
     }
   }, [open])
@@ -151,16 +90,16 @@ export function AgentManager() {
         aria-label={`${count} agent${count > 1 ? 's' : ''} running — manage`}
         title={`${count} agent${count > 1 ? 's' : ''} running`}
         className={cn(
-          'app-no-drag flex items-center gap-1.5 rounded-pill border py-1 pl-2 pr-2.5 transition-colors',
-          open ? 'border-strong bg-accent-soft' : 'border-subtle bg-surface-2 hover:border-default hover:bg-accent-soft',
+          'app-no-drag flex items-center gap-1.5 rounded-pill border border-glass py-1 pl-2.5 pr-2.5 transition-colors',
+          open ? 'border-glass-hover bg-glass-hover' : 'hover:border-glass-hover hover:bg-glass',
         )}
       >
         <span
           className="h-1.5 w-1.5 shrink-0 rounded-pill animate-status-pulse"
           style={{ background: 'var(--status-active)' }}
         />
-        <span className="font-mono text-[11px] tabular-nums text-text-secondary">{count}</span>
-        <span className="label-caps text-text-tertiary">{count > 1 ? 'Agents' : 'Agent'}</span>
+        <span className="font-mono text-[11px] tabular-nums text-text-2">{count}</span>
+        <span className="text-[11.5px] text-text-2">{count > 1 ? 'Agents' : 'Agent'}</span>
         <Icon
           name="ChevronDown"
           size={12}
@@ -171,16 +110,11 @@ export function AgentManager() {
       {open &&
         pos &&
         createPortal(
-          <div className="fixed inset-0 z-[55]" onPointerDown={() => setOpen(false)}>
+          <div className="fixed inset-0 z-[var(--z-popover)]" onPointerDown={() => setOpen(false)}>
             <div
-              className="animate-palette-in absolute flex flex-col overflow-hidden rounded-2xl border border-strong shadow-overlay"
-              style={{
-                left: pos.left,
-                top: pos.top,
-                width: DROPDOWN_W,
-                background: 'color-mix(in srgb, var(--bg-base) 94%, transparent)',
-                backdropFilter: 'blur(20px)',
-              }}
+              data-surface-layer="popover"
+              className="animate-palette-in surface-layer surface-layer--popover absolute flex flex-col overflow-hidden rounded-[20px]"
+              style={{ left: pos.left, top: pos.top, width: DROPDOWN_W }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between px-4 pb-1.5 pt-3">
@@ -190,15 +124,50 @@ export function AgentManager() {
                 </span>
               </div>
 
-              <div className="max-h-[52vh] overflow-y-auto px-1.5 pb-1.5">
-                {agents.map((a) => (
-                  <AgentRow key={a.panelId} agent={a} onGoTo={() => goTo(a)} />
+              {/* v4 A5: Agents | Mesh */}
+              <div className="flex gap-1 px-4 pb-2">
+                {(['agents', 'mesh'] as const).map((t) => (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setTab(t)}
+                    className={cn(
+                      'rounded-pill px-2.5 py-1 text-[11px] font-medium capitalize transition-colors',
+                      tab === t ? 'bg-accent text-text-onsolid' : 'text-text-2 hover:bg-glass-hover',
+                    )}
+                  >
+                    {t === 'agents' ? 'Agents' : 'Mesh'}
+                  </button>
                 ))}
               </div>
 
-              <div className="flex items-center gap-3.5 border-t border-subtle bg-surface-2 px-4 py-2 font-mono text-[10px] text-text-quaternary">
-                <span>↵ Jump to terminal</span>
-              </div>
+              {tab === 'agents' ? (
+                <>
+                  <div className="max-h-[52vh] overflow-y-auto px-1.5 pb-1.5">
+                    {agents.map((a) => (
+                      <AgentRow key={a.panelId} agent={a} onGoTo={() => goTo(a)} />
+                    ))}
+                  </div>
+
+                  <div className="flex items-center gap-3.5 border-t border-glass bg-glass px-4 py-2 font-mono text-[10px] text-text-4">
+                    <span>↵ Jump to terminal</span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOpen(false)
+                      toggleMesh()
+                    }}
+                    className="flex w-full items-center justify-center gap-2 border-t border-glass bg-glass px-4 py-2 text-[12px] font-medium text-text-2 transition-colors hover:bg-glass-hover hover:text-text-1"
+                  >
+                    <Icon name="Waypoints" size={14} />
+                    Open agent mesh
+                  </button>
+                </>
+              ) : (
+                <MeshView />
+              )}
             </div>
           </div>,
           document.body,
@@ -207,8 +176,138 @@ export function AgentManager() {
   )
 }
 
-function AgentRow({ agent, onGoTo }: { agent: RunningAgent; onGoTo: () => void }) {
-  const kind: AgentKind = agent.verdict.kind ?? 'generic-agent'
+interface ChainRow {
+  id: string
+  from: string
+  to: string
+  when: string
+  payloadSource: string
+  status: string
+  failReason?: string | null
+}
+
+/** v4 A5: compact mesh graph (nodes + relations), the audit timeline, and cancelable chains. */
+function MeshView() {
+  const links = useMeshLinks()
+  const members = useMeshMembers()
+  const timeline = useMeshTimeline()
+  const [chains, setChains] = useState<ChainRow[]>([])
+  const [refreshing, setRefreshing] = useState(false)
+
+  const refresh = (): void => {
+    setRefreshing(true)
+    void window.plano.agentMesh
+      .getChains()
+      .then((r) => {
+        if (Array.isArray(r.chains)) setChains(r.chains as ChainRow[])
+      })
+      .finally(() => setRefreshing(false))
+  }
+  useEffect(refresh, [])
+
+  const jump = (panelId: string): void => {
+    if (!panelId) return
+    focusPanel(panelId)
+  }
+
+  return (
+    <div className="max-h-[52vh] overflow-y-auto px-3 pb-3">
+      {/* graph */}
+      <div className="label-caps mb-1.5 mt-1">Relationships</div>
+      {members.length === 0 ? (
+        <div className="py-3 text-center text-[11.5px] text-text-4">No mesh members yet</div>
+      ) : (
+        <svg viewBox="0 0 320 130" className="w-full" aria-hidden>
+          {links.map((link) => {
+            const a = members.find((m) => m.panelId === link.fromPanel)
+            const b = members.find((m) => m.panelId === link.toPanel)
+            if (!a || !b) return null
+            const ia = members.indexOf(a)
+            const ib = members.indexOf(b)
+            const x1 = 30 + (ia % 2) * 260 + (ia % 2 === 0 ? 40 : -40)
+            const y1 = 18 + Math.floor(ia / 2) * 52
+            const x2 = 30 + (ib % 2) * 260 + (ib % 2 === 0 ? 40 : -40)
+            const y2 = 18 + Math.floor(ib / 2) * 52
+            const dash = link.chained ? '4 3' : undefined
+            const opacity = link.state === 'idle' ? 0.15 : link.state === 'active' ? 0.5 : link.state === 'waiting' ? 0.6 : 0.3
+            return <path key={link.id} d={`M ${x1} ${y1} L ${x2} ${y2}`} stroke={link.color} strokeWidth={1.2} strokeDasharray={dash} opacity={opacity} fill="none" />
+          })}
+          {members.map((m, i) => {
+            const kind = m.kind as AgentKind
+            const accent = AGENTS[kind]?.accent ?? '#8b9bff'
+            const x = 30 + (i % 2) * 260 + (i % 2 === 0 ? 40 : -40)
+            const y = 18 + Math.floor(i / 2) * 52
+            return (
+              <g key={m.ptyId} onClick={() => jump(m.panelId)} className="cursor-pointer">
+                <circle cx={x} cy={y} r={9} fill={accent} opacity={0.22} />
+                <circle cx={x} cy={y} r={5} fill={accent} />
+                <text x={x} y={y + 20} textAnchor="middle" fontSize={9} fill="var(--text-2)" style={{ fontVariantNumeric: 'tabular-nums' }}>
+                  {AGENTS[kind]?.displayName ?? 'terminal'}
+                </text>
+              </g>
+            )
+          })}
+        </svg>
+      )}
+
+      {/* chains */}
+      <div className="mb-1.5 mt-2 flex items-center justify-between">
+        <span className="label-caps">Chained tasks</span>
+        <button type="button" onClick={refresh} className="text-[10.5px] text-text-3 transition-colors hover:text-text-1">
+          Refresh
+        </button>
+      </div>
+      {chains.length === 0 ? (
+        <div className="py-2 text-center text-[11.5px] text-text-4">{refreshing ? 'Loading…' : 'No chained tasks'}</div>
+      ) : (
+        <div className="flex flex-col gap-1">
+          {chains.map((c) => (
+            <div key={c.id} className="flex items-center gap-2 rounded-lg border border-glass px-2 py-1.5">
+              <span
+                className={cn('h-1.5 w-1.5 shrink-0 rounded-pill', c.status === 'armed' && 'animate-status-pulse')}
+                style={{ background: c.status === 'armed' ? 'var(--status-active)' : c.status === 'fired' ? 'var(--diff-added, #34d399)' : 'var(--text-quaternary)' }}
+              />
+              <span className="min-w-0 flex-1 truncate font-mono text-[10.5px] text-text-2">
+                {c.when} · {c.payloadSource} · {c.status}
+                {c.failReason ? ` · ${c.failReason}` : ''}
+              </span>
+              {c.status === 'armed' && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    void window.plano.agentMesh.cancelChain(c.id).then(() => refresh())
+                  }}
+                  className="shrink-0 rounded-pill border border-glass px-2 py-0.5 text-[10px] text-text-3 transition-colors hover:border-[var(--destructive-border)] hover:text-[var(--destructive)]"
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* timeline */}
+      <div className="label-caps mb-1.5 mt-2">Timeline</div>
+      <div className="flex flex-col gap-0.5 font-mono text-[10px] leading-4">
+        {timeline.slice(0, 12).map((e, i) => (
+          <div key={`${e.at}-${i}`} className="flex items-baseline gap-1.5 text-text-3">
+            <span className="shrink-0 text-text-quaternary">{new Date(e.at).toLocaleTimeString([], { hour12: false })}</span>
+            <span className="shrink-0 text-text-2">{e.kind}</span>
+            <span className="min-w-0 truncate">
+              {e.from.slice(0, 8)}
+              {e.to ? ` \u2192 ${e.to.slice(0, 8)}` : ''}
+              {e.detail ? ` · ${e.detail}` : ''}
+            </span>
+          </div>
+        ))}
+        {timeline.length === 0 && <div className="py-1 text-center text-text-4">No events yet</div>}
+      </div>
+    </div>
+  )
+}
+
+function AgentRow({ agent, onGoTo }: { agent: RunningAgent; onGoTo: () => void }) {  const kind: AgentKind = agent.verdict.kind ?? 'generic-agent'
   const info = AGENTS[kind]
   const name = agent.verdict.displayName ?? info.displayName
   const working = agent.verdict.phase === 'working'
@@ -245,7 +344,9 @@ function AgentRow({ agent, onGoTo }: { agent: RunningAgent; onGoTo: () => void }
 
         <span className="mt-0.5 flex items-center gap-1.5">
           <Icon name="SquareTerminal" size={11} className="shrink-0 text-text-quaternary" />
-          <span className="truncate font-mono text-[10px] text-text-tertiary">{agent.title}</span>
+          <span className="truncate font-mono text-[10px] text-text-tertiary">
+            {typeof agent.terminalNumber === 'number' ? `Terminal ${agent.terminalNumber}` : agent.title}
+          </span>
           {/* Only when the agent lives in another workspace: name it so you know the row will switch. */}
           {!agent.inActiveSpace && agent.spaceName && (
             <span className="flex shrink-0 items-center gap-1 rounded-pill bg-surface-3 px-1.5 py-px font-mono text-[9px] text-text-quaternary">

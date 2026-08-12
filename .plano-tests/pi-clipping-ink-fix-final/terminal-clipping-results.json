@@ -1,0 +1,65 @@
+{
+  "failures": 7,
+  "results": [
+    {
+      "name": "pi PTY started",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "terminal mounted",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "initial grid stays inside visible viewport",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":738,\"rowsClientWidth\":738,\"rowsScrollWidth\":738,\"scale\":1,\"overflowLayout\":-10,\"overflowScreen\":-10.140625,\"rightDelta\":-10.140625,\"inkOverflow\":1.46875,\"clippedTextNodes\":6}"
+    },
+    {
+      "name": "terminal input focused",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "font zoom keeps the last column visible",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":738,\"rowsClientWidth\":738,\"rowsScrollWidth\":738,\"scale\":1,\"overflowLayout\":-10,\"overflowScreen\":-10.140625,\"rightDelta\":-10.140625,\"inkOverflow\":1.46875,\"clippedTextNodes\":6}"
+    },
+    {
+      "name": "panel test resize applied",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "panel shrink refits before clipping",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":738,\"rowsClientWidth\":738,\"rowsScrollWidth\":738,\"scale\":1,\"overflowLayout\":-10,\"overflowScreen\":-10.140625,\"rightDelta\":-10.140625,\"inkOverflow\":1.46875,\"clippedTextNodes\":6}"
+    },
+    {
+      "name": "Pi resume thread picker rendered",
+      "pass": false,
+      "details": "{\"found\":false,\"rows\":[\" - pi-web-access\",\" - @narumitw/pi-goal\",\" - pi-mcp-adapter\",\"──────────────────────────────────────────────────────────────────────────────────────────────\",\"─\",\"──────────────────────────────────────────────────────────────────────────────────────────────\",\"─\",\" \",\"──────────────────────────────────────────────────────────────────────────────────────────────\",\"─\",\"D:\\\\Tools\\\\Plano (mac-build-odla)\",\"0.0%/1.0M (auto)                                                       deepseek-v4-flash • hig\",\"h\",\"🔌 MCP: 1 server enabled\",\" \",\"──────────────────────────────────────────────────────────────────────────────────────────────\",\"─\",\"D:\\\\Tools\\\\Plano (mac-build-odla)\",\"0.0%/1.0M (auto)                                                       deepseek-v4-flash • hig\",\"h\"]}"
+    },
+    {
+      "name": "Pi resume view keeps every rendered glyph before the visible edge",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":738,\"rowsClientWidth\":738,\"rowsScrollWidth\":738,\"scale\":1,\"overflowLayout\":-10,\"overflowScreen\":-10.140625,\"rightDelta\":-10.140625,\"inkOverflow\":1.46875,\"clippedTextNodes\":6}"
+    },
+    {
+      "name": "stale oversized grid injected",
+      "pass": true,
+      "details": ""
+    },
+    {
+      "name": "stale oversized grid self-heals to the visible viewport",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":738,\"rowsClientWidth\":738,\"rowsScrollWidth\":738,\"scale\":1,\"overflowLayout\":-10,\"overflowScreen\":-10.140625,\"rightDelta\":-10.140625,\"inkOverflow\":1.46875,\"clippedTextNodes\":6}"
+    },
+    {
+      "name": "fractional canvas scale keeps the last column visible",
+      "pass": false,
+      "details": "{\"renderBoxWidth\":758,\"xtermWidth\":758,\"viewportClientWidth\":748,\"viewportOffsetWidth\":758,\"screenOffsetWidth\":738,\"rowsClientWidth\":738,\"rowsScrollWidth\":738,\"scale\":1,\"overflowLayout\":-10,\"overflowScreen\":-10.140625,\"rightDelta\":-10.140625,\"inkOverflow\":1.46875,\"clippedTextNodes\":6}"
+    }
+  ]
+}

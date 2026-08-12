@@ -65,6 +65,8 @@ export interface DockTarget {
  */
 export function computeDockTarget(selfId: string, cursor: Point): DockTarget | null {
   const panels = usePanelStore.getState().panels
+  const self = panels[selfId]
+  const dragSize = self ? { width: self.rect.width, height: self.rect.height } : undefined
   let top: (typeof panels)[string] | null = null
   for (const p of Object.values(panels)) {
     if (p.id === selfId || p.dockedIn || p.type === 'region' || p.type === 'label') continue
@@ -85,11 +87,11 @@ export function computeDockTarget(selfId: string, cursor: Point): DockTarget | n
       width: pane.rect.width,
       height: pane.rect.height,
     }
-    return { targetId: pane.panelId, side, previewWorld: previewRect(paneWorld, side) }
+    return { targetId: pane.panelId, side, previewWorld: previewRect(paneWorld, side, dragSize) }
   }
 
   const side = sideForPoint(cursor, top.rect)
-  return { targetId: top.id, side, previewWorld: previewRect(top.rect, side) }
+  return { targetId: top.id, side, previewWorld: previewRect(top.rect, side, dragSize) }
 }
 
 /**
@@ -179,9 +181,11 @@ export function closeDockedPanel(panelId: string): void {
   const layout = groupLayout(gid)
   const worldByPane = layout && group ? paneWorldRects(layout, group.rect) : {}
   const next = layout ? removePane(layout, panelId) : null
+  // Dissolve/keep the group BEFORE removing the panel: after removePanel the group would briefly
+  // hold a single pane and render a hollow shell until React re-renders — the gray rectangle.
+  if (group) dissolveOrKeep(gid, next, worldByPane, group.rect)
   killTerminalSession(panelId)
   removePanel(panelId)
-  if (group) dissolveOrKeep(gid, next, worldByPane, group.rect)
 }
 
 /** Keep the group with the new layout, or dissolve it — the last survivor floats at its OWN pane

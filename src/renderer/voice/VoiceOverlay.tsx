@@ -38,12 +38,20 @@ function statusContent(phase: VoicePhase, errorMsg: string, micDenied: boolean):
 }
 
 export function VoiceOverlay(): JSX.Element | null {
+  const hydrated = useSettingsStore((s) => s.hydrated)
   const voice = useSettingsStore((s) => s.settings.voice)
   const { phase, errorMsg, micDenied } = useVoiceStore()
   const [value, setValue] = useState('')
 
   // Enable/disable the controller with the setting; keep the push-to-talk key in sync.
+  // Gated on hydration: the store boots from DEFAULT_SETTINGS (voice ON), so enabling before
+  // the real settings arrive would warm the ~600 MB speech model even when voice is disabled
+  // (and disable() never unloads it). Wait for main's settings before touching the controller.
   useEffect(() => {
+    if (!hydrated) {
+      voiceController.disable()
+      return undefined
+    }
     if (voice.enabled) {
       voiceController.setPushToTalkKey(voice.pushToTalkKey)
       voiceController.enable()
@@ -51,13 +59,14 @@ export function VoiceOverlay(): JSX.Element | null {
     }
     voiceController.disable()
     return undefined
-  }, [voice.enabled])
+  }, [hydrated, voice.enabled])
 
   useEffect(() => {
     voiceController.setPushToTalkKey(voice.pushToTalkKey)
   }, [voice.pushToTalkKey])
 
-  if (!voice.enabled) return null
+  // Never render the overlay from the pre-hydration defaults (would flash the voice bar on every launch).
+  if (!hydrated || !voice.enabled) return null
 
   const listening = phase === 'listening'
   const spinning = SPINNING.includes(phase)

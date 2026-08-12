@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { IconType } from 'react-icons'
-import { SiClaude, SiOpenai, SiGooglegemini } from 'react-icons/si'
+import { SiClaude, SiOpenai } from 'react-icons/si'
 import { Icon } from '@/design-system/Icon'
 import { cn } from '@/lib/cn'
 import { KiroLogo } from './KiroLogo'
+import { OmpLogo } from './OmpLogo'
+import { PiLogo } from './PiLogo'
 
 interface LauncherEntry {
   id: string
@@ -20,7 +22,9 @@ interface LauncherEntry {
 const LAUNCHERS: LauncherEntry[] = [
   { id: 'claude', name: 'Claude Code', command: 'claude', accent: '#d97757', Logo: SiClaude },
   { id: 'codex', name: 'Codex', command: 'codex', accent: '#4f8cf7', Logo: SiOpenai },
-  { id: 'gemini', name: 'Gemini', command: 'gemini', accent: '#a855f7', Logo: SiGooglegemini },
+  // Pi's brand mark is monochrome by design (black on light / white on dark), so it inherits the chip text color.
+  { id: 'pi', name: 'Pi Code', command: 'pi', accent: 'currentColor', Logo: PiLogo },
+  { id: 'omp', name: 'Oh My Pi', command: 'omp', accent: '#f97316', Logo: OmpLogo },
   { id: 'kiro', name: 'Kiro CLI', command: 'kiro-cli chat', accent: '#8b5cf6', Logo: KiroLogo },
   { id: 'opencode', name: 'opencode', command: 'opencode', accent: '#14b8a6', icon: 'SquareTerminal' },
   { id: 'aider', name: 'Aider', command: 'aider', accent: '#22c55e', icon: 'Bot' },
@@ -61,7 +65,7 @@ export function AgentLauncher({ ptyId }: { ptyId: string }) {
     <div ref={rootRef} className="app-no-drag pointer-events-auto absolute bottom-2.5 left-1/2 z-20 -translate-x-1/2">
       {open ? (
         <div
-          className="animate-menu-in flex max-w-full items-center gap-px rounded-xl border border-default p-1 shadow-popover backdrop-blur-md"
+          className="animate-menu-in flex max-w-full items-center gap-px rounded-xl border border-default p-1 shadow-popover"
           style={{ background: 'color-mix(in srgb, var(--surface-3) 90%, transparent)' }}
         >
           {LAUNCHERS.map((a) => (
@@ -69,7 +73,7 @@ export function AgentLauncher({ ptyId }: { ptyId: string }) {
               key={a.id}
               type="button"
               onClick={() => launch(a.command)}
-              title={`Run "${a.command}" in this terminal`}
+              title={`Run ${a.name}`}
               className={cn(
                 'agent-launch-btn flex shrink-0 items-center gap-1.5 rounded-lg text-[12px] font-medium text-text-secondary transition-colors',
                 showLabels ? 'px-2 py-1.5' : 'h-8 w-8 justify-center',
@@ -96,13 +100,13 @@ export function AgentLauncher({ ptyId }: { ptyId: string }) {
           type="button"
           onClick={() => setOpen(true)}
           title="Launch an AI agent in this terminal"
-          className="flex items-center gap-2 rounded-pill border border-default py-1.5 pl-2.5 pr-3 text-[12px] font-medium text-text-secondary shadow-popover backdrop-blur-md transition-colors hover:border-strong hover:text-text-primary"
+          className="flex items-center gap-2 rounded-pill border border-default py-1.5 pl-2.5 pr-3 text-[12px] font-medium text-text-secondary shadow-popover transition-colors hover:border-strong hover:text-text-primary"
           style={{ background: 'color-mix(in srgb, var(--surface-3) 82%, transparent)' }}
         >
           <span className="flex -space-x-1">
             <SiClaude size={12} style={{ color: '#d97757' }} />
             <SiOpenai size={12} style={{ color: '#4f8cf7' }} />
-            <SiGooglegemini size={12} style={{ color: '#a855f7' }} />
+            <PiLogo size={12} />
           </span>
           {showLabels && 'Agents'}
         </button>

@@ -7,7 +7,7 @@
  */
 
 import { app } from 'electron'
-import { promises as fs } from 'node:fs'
+import { promises as fs, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { DEFAULT_SETTINGS, mergeSettings, type PlanoSettings } from '@shared/domain/settings'
@@ -37,6 +37,21 @@ export class SettingsService {
     this.cache = merged
     await this.atomicWrite(this.filePath(), JSON.stringify(merged, null, 2))
     return { ok: true, settings: merged }
+  }
+
+  /**
+   * Synchronous read for teardown paths that can't await (`will-quit`): returns the cached doc
+   * when present, otherwise reads the file synchronously (tolerant, like `get`).
+   */
+  getSync(): PlanoSettings {
+    if (this.cache) return this.cache
+    try {
+      const raw = readFileSync(this.filePath(), 'utf8')
+      this.cache = mergeSettings(JSON.parse(raw))
+    } catch {
+      this.cache = DEFAULT_SETTINGS
+    }
+    return this.cache
   }
 
   private async atomicWrite(file: string, content: string): Promise<void> {

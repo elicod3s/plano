@@ -31,7 +31,7 @@ export function FolderMenu() {
   useLayoutEffect(() => {
     if (!open) return
     const r = triggerRef.current?.getBoundingClientRect()
-    if (r) setPos({ left: Math.min(r.left, window.innerWidth - MENU_W - 8), top: r.bottom + 6 })
+    if (r) setPos({ left: Math.min(r.left, window.innerWidth - MENU_W - 12), top: r.bottom + 12 })
   }, [open])
 
   useEffect(() => {
@@ -53,9 +53,10 @@ export function FolderMenu() {
       <button
         type="button"
         onClick={() => void openFolder()}
-        className="app-no-drag flex shrink-0 items-center gap-2 rounded-md border border-subtle px-2.5 py-1 text-[12px] text-text-secondary transition-colors hover:border-default hover:bg-accent-soft hover:text-text-primary"
+        className="app-no-drag flex h-7 shrink-0 items-center gap-2 rounded-pill border border-glass px-2.5 text-[12.5px] text-text-2 transition-colors hover:border-glass-hover hover:bg-glass hover:text-text-1"
+        style={{ background: 'var(--glass)' }}
       >
-        <Icon name="FolderPlus" size={14} className="shrink-0 text-text-tertiary" />
+        <Icon name="FolderPlus" size={14} className="shrink-0 text-text-3" />
         choose folder
       </button>
     )
@@ -88,38 +89,33 @@ export function FolderMenu() {
         aria-label="Project folder"
         className={cn(
           'app-no-drag flex min-w-0 shrink items-center gap-2 rounded-md border px-2.5 py-1 transition-colors',
-          open ? 'border-strong bg-accent-soft' : 'border-subtle hover:border-default hover:bg-accent-soft',
+          open ? 'border-glass-hover bg-glass-hover' : 'border-glass hover:border-glass-hover hover:bg-glass',
         )}
       >
-        <Icon name="Folder" size={14} className="shrink-0 text-text-tertiary" />
-        <span className="max-w-[280px] truncate font-mono text-[12px] text-text-secondary">
+        <Icon name="Folder" size={14} className="shrink-0 text-text-3" />
+        <span className="max-w-[220px] truncate text-[12.5px] text-text-2">
           {prettyPath(folderPath)}
         </span>
         {dirty && (
-          <span className="shrink-0 text-text-quaternary" title="Unsaved changes">
+          <span className="shrink-0 text-text-4" title="Unsaved changes">
             •
           </span>
         )}
         <Icon
           name="ChevronDown"
           size={12}
-          className={cn('shrink-0 text-text-tertiary transition-transform duration-200', open && 'rotate-180')}
+          className={cn('shrink-0 text-text-3 transition-transform duration-200', open && 'rotate-180')}
         />
       </button>
 
       {open &&
         pos &&
         createPortal(
-          <div className="fixed inset-0 z-[55]" onPointerDown={close}>
+          <div className="fixed inset-0 z-[var(--z-popover)]" onPointerDown={close}>
             <div
-              className="animate-palette-in absolute flex flex-col overflow-hidden rounded-xl border border-strong py-1 shadow-overlay"
-              style={{
-                left: pos.left,
-                top: pos.top,
-                width: MENU_W,
-                background: 'color-mix(in srgb, var(--bg-base) 94%, transparent)',
-                backdropFilter: 'blur(20px)',
-              }}
+              data-surface-layer="popover"
+              className="animate-palette-in surface-layer surface-layer--popover absolute flex flex-col overflow-hidden rounded-[16px] py-1"
+              style={{ left: pos.left, top: pos.top, width: MENU_W }}
               onPointerDown={(e) => e.stopPropagation()}
             >
               <MenuItem icon="FolderOpen" label="Reveal in File Explorer" onClick={reveal} />
@@ -140,9 +136,9 @@ function MenuItem({ icon, label, onClick }: { icon: string; label: string; onCli
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-2.5 px-3 py-1.5 text-left text-[12.5px] text-text-secondary transition-colors hover:bg-accent-soft hover:text-text-primary"
+      className="flex items-center gap-2.5 px-3 py-2 text-left text-[12.5px] text-text-2 transition-colors hover:bg-glass-hover hover:text-text-1"
     >
-      <Icon name={icon} size={14} className="shrink-0 text-text-tertiary" />
+      <Icon name={icon} size={14} className="shrink-0 text-text-3" />
       {label}
     </button>
   )

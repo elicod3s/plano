@@ -3,10 +3,12 @@ import type { Panel, RegionProps } from '@shared/domain/panel'
 import { snap, type Rect } from '@shared/domain/geometry'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useUiStore } from '@/stores/useUiStore'
-import { useViewportStore } from '@/stores/useViewportStore'
+
+import { viewportController } from '@/canvas/ViewportController'
 import { Icon } from '@/design-system/Icon'
 import { IconButton } from '@/design-system/IconButton'
 import { cn } from '@/lib/cn'
+import { prefersReducedMotion } from '@/lib/motion'
 
 const GRID = 8
 const MIN_W = 240
@@ -64,8 +66,8 @@ function RegionFrameInner({ panel, zIndex }: { panel: Panel; zIndex: number }) {
   const handleClose = (): void => {
     if (closing) return
     setClosing(true)
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-    closeTimer.current = window.setTimeout(() => remove(panel.id), reduce ? 0 : 260)
+    // Duration follows the APP's motion setting (not the OS media query) — see PanelFrame.
+    closeTimer.current = window.setTimeout(() => remove(panel.id), prefersReducedMotion() ? 0 : 260)
   }
 
   const onAnimationEnd = (e: React.AnimationEvent): void => {
@@ -97,7 +99,7 @@ function RegionFrameInner({ panel, zIndex }: { panel: Panel; zIndex: number }) {
     const g = gesture.current
     if (!g) return
     // Lazily read zoom during the drag instead of taking it as a render prop (see PanelFrame).
-    const zoom = useViewportStore.getState().zoom
+    const zoom = viewportController.getLive().zoom
     const dx = (e.clientX - g.sx) / zoom
     const dy = (e.clientY - g.sy) / zoom
 
@@ -157,6 +159,8 @@ function RegionFrameInner({ panel, zIndex }: { panel: Panel; zIndex: number }) {
         width: panel.rect.width,
         height: panel.rect.height,
         transform: `translate3d(${panel.rect.x}px, ${panel.rect.y}px, 0)`,
+        transformOrigin: '0 0',
+        willChange: undefined,
         zIndex,
         pointerEvents: 'none',
       }}

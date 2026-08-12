@@ -17,6 +17,9 @@
 !macroend
 
 !macro customUnInstall
+  ; Plan F9: strip the mesh `plano` MCP key from every harness config + restore backups +
+  ; delete the Claude skill BEFORE the installer removes the app files.
+  ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --mesh-deprovision'
   DeleteRegKey HKCU "Software\Classes\Directory\shell\OpenInPlano"
   DeleteRegKey HKCU "Software\Classes\Directory\Background\shell\OpenInPlano"
 !macroend

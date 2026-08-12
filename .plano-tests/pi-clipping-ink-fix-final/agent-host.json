@@ -1,0 +1,10 @@
+{
+  "pid": 21752,
+  "port": 55172,
+  "token": "06ac0a02-6295-420f-81ef-cb82da46fd30",
+  "webPort": 55173,
+  "mdns": "plano.local",
+  "version": "0.2.2",
+  "startedAt": 1786228293120,
+  "ptyAvailable": true
+}

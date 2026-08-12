@@ -1,13 +1,15 @@
-import { SCHEMA_VERSION, createSpace, type Space, type WorkspaceDoc } from '@shared/domain/workspace'
+import { SCHEMA_VERSION, createSpace, type Space, type SpaceColor, type WorkspaceDoc } from '@shared/domain/workspace'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useViewportStore } from '@/stores/useViewportStore'
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { useSpacesStore } from '@/stores/useSpacesStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { useTerminalStore } from '@/stores/useTerminalStore'
+import { pendingProtectedIds } from '@/app/externalTerminals'
 import { confirm } from '@/stores/useConfirmStore'
 import { openFilesPanel } from '@/app/actions'
 import { killTerminalSessions, reconcileTerminalSessions } from '@/app/terminalSessions'
+import { hibernateWorkspaceTerminals } from '@/app/terminalHibernation'
 import { setAutosaveSuspended } from '@/app/autosave'
 import { reconcileDocks } from '@/app/dockActions'
 import { newId } from '@/lib/id'
@@ -68,6 +70,18 @@ function withAutosaveSuspended(fn: () => void): void {
   } finally {
     setAutosaveSuspended(false)
   }
+}
+
+/**
+ * Hibernate the PREVIOUS workspace's terminals after a switch that moved `activeId` away from it.
+ * A no-op when the active id didn't actually change (a workspace reused in place) — its panels
+ * stayed mounted and must keep streaming. Must run AFTER the new canvas was loaded.
+ */
+function hibernateLeftOnSwitch(prevActiveId: string | null): void {
+  const { activeId, spaces } = useSpacesStore.getState()
+  if (!prevActiveId || prevActiveId === activeId) return
+  const left = spaces.find((s) => s.id === prevActiveId)
+  if (left) hibernateWorkspaceTerminals(left.panels)
 }
 
 /** How many of the given panels currently host a live terminal/agent session. (byPanel is keyed by
@@ -169,10 +183,16 @@ export function switchSpace(id: string): void {
   const { activeId, spaces } = useSpacesStore.getState()
   if (id === activeId || !spaces.some((s) => s.id === id)) return
   flushCanvasToActive()
+  const prevActive = activeId
   withAutosaveSuspended(() => {
     useSpacesStore.getState().setActiveId(id)
     loadActiveIntoCanvas()
   })
+  // Hibernate the terminals of the workspace we just LEFT (the new canvas is now loaded, so the
+  // "still on the active canvas?" guard inside hibernate reads the right panels). The PTYs keep
+  // running in main; only their renderer representation is torn down to free WebGL contexts +
+  // continuous IPC/parsing. Returning re-attaches and replays main's buffered output.
+  hibernateLeftOnSwitch(prevActive)
   syncActiveMeta()
   void saveCurrent()
 }
@@ -183,16 +203,24 @@ export function createNewSpace(): string {
   // Name is a placeholder; the store renumbers auto-named workspaces to their slot on add.
   const space = createSpace(newId(), 'Workspace', null)
   useSpacesStore.getState().add(space)
+  const prevActive = useSpacesStore.getState().activeId
   withAutosaveSuspended(() => {
     useSpacesStore.getState().setActiveId(space.id)
     loadActiveIntoCanvas()
   })
+  hibernateLeftOnSwitch(prevActive)
   syncActiveMeta()
   void saveCurrent()
   return space.id
 }
 
 /** Rename a workspace. */
+/** Tag a workspace with one of the curated label colours (or clear it). Persists like a rename. */
+export function setSpaceColor(id: string, color: SpaceColor | undefined): void {
+  useSpacesStore.getState().setColor(id, color)
+  void saveCurrent()
+}
+
 export function renameSpace(id: string, name: string): void {
   const trimmed = name.trim()
   if (!trimmed) return
@@ -226,13 +254,15 @@ async function adoptFolder(targetId: string, folderPath: string): Promise<void> 
       ? res.workspace.spaces.find((s) => s.id === res.workspace.activeSpaceId) ?? res.workspace.spaces[0]
       : undefined
 
+  const prevActive = useSpacesStore.getState().activeId
   withAutosaveSuspended(() => {
     if (useSpacesStore.getState().activeId !== targetId) useSpacesStore.getState().setActiveId(targetId)
     if (importSpace) useSpacesStore.getState().writeBack(targetId, importSpace.panels, importSpace.viewport)
     loadActiveIntoCanvas()
     // End any PTY whose panel no longer exists anywhere (e.g. a replaced canvas's terminals).
-    reconcileTerminalSessions()
+    reconcileTerminalSessions(pendingProtectedIds())
   })
+  hibernateLeftOnSwitch(prevActive)
   syncActiveMeta()
   await saveCurrent()
 
@@ -396,7 +426,7 @@ export async function restoreWorkspaces(): Promise<void> {
     withAutosaveSuspended(() => {
       useSpacesStore.getState().hydrate(restored.workspaces, restored.activeId)
       loadActiveIntoCanvas()
-      reconcileTerminalSessions()
+      reconcileTerminalSessions(pendingProtectedIds())
     })
     syncActiveMeta()
     return
@@ -428,7 +458,7 @@ async function migrateFromLegacySession(): Promise<void> {
         withAutosaveSuspended(() => {
           useSpacesStore.getState().hydrate(workspaces, res.workspace.activeSpaceId)
           loadActiveIntoCanvas()
-          reconcileTerminalSessions()
+          reconcileTerminalSessions(pendingProtectedIds())
         })
         syncActiveMeta()
         await saveCurrent()

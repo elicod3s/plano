@@ -6,7 +6,9 @@ import type { ITheme } from '@xterm/xterm'
  * palette stays a tasteful, legible dark set; only the surface/cursor follow Monolith.
  */
 export const xtermTheme: ITheme = {
-  background: '#0b0b0a', // --surface-inset (recessed well)
+  // Keep the terminal surface fully opaque. A translucent xterm background exposes its viewport
+  // and the panel material as differently shaded rectangles below the rendered rows.
+  background: '#0b0b0a',
   foreground: '#e9e9e6',
   cursor: '#ffffff',
   cursorAccent: '#0b0b0a',
@@ -35,7 +37,9 @@ export const xtermTheme: ITheme = {
 // JetBrains Mono first (box/block/geometric/✓✗ + all Latin). Then the two BUNDLED symbol layers from
 // styles/terminal-symbols.css — "PLANO Term Symbols" (Cascadia: Braille spinners + Powerline) and
 // "PLANO Term Dingbats" (DejaVu: Claude Code's ✻✳ star marks) — so CLI glyphs render in a real
-// monospace on ANY machine. Trailing entries are last-resort OS monospace fallbacks (never a
-// proportional system symbol font, which mangles terminal alignment).
+// monospace on ANY machine. The OS emoji fonts come LAST (they are proportional, so they must never
+// claim a monospace codepoint — only emoji, which no mono font covers) so emoji resolve to a COLOR
+// emoji font instead of a missing-glyph box. Trailing entries are last-resort OS monospace fallbacks
+// (never a proportional system symbol font, which mangles terminal alignment).
 export const TERMINAL_FONT =
-  '"JetBrains Mono", "PLANO Term Symbols", "PLANO Term Dingbats", "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", ui-monospace, SFMono-Regular, Menlo, "DejaVu Sans Mono", monospace'
+  '"JetBrains Mono", "PLANO Term Symbols", "PLANO Term Dingbats", "Cascadia Mono", "Cascadia Code", Consolas, "Courier New", ui-monospace, SFMono-Regular, Menlo, "DejaVu Sans Mono", "Segoe UI Emoji", "Apple Color Emoji", "Noto Color Emoji", monospace'

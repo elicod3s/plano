@@ -10,7 +10,7 @@
 
 import type { AgentSessionRef } from '@shared/domain/agent'
 import { buildAgentResumeCommand } from '@shared/domain/agent'
-import { usePanelStore } from '@/stores/usePanelStore'
+import { persistTerminalTabPatch } from '@/app/agentSessionPersistence'
 
 const normCwd = (p: string): string => p.replace(/[/\\]+$/, '').replace(/\//g, '\\').toLowerCase()
 
@@ -27,13 +27,14 @@ interface ResumeArgs {
   /** Resolves once the shell is at its first prompt (so the command lands cleanly). */
   whenShellReady: () => Promise<void>
   isDisposed: () => boolean
-}
+  }
 
 export async function resumeAgentSession(args: ResumeArgs): Promise<void> {
-  const { ptyId, panelId, termId, saved, spawnCwd, liveCwd, whenShellReady, isDisposed } = args
+  const { ptyId, panelId, termId, saved, spawnCwd, liveCwd, whenShellReady, isDisposed} = args
 
-  const cmd = buildAgentResumeCommand(saved)
-  if (!cmd) return
+  const resumeCommand = buildAgentResumeCommand(saved)
+  if (!resumeCommand) return
+  const cmd = resumeCommand
 
   // cwd guard — if the shell fell back from the saved dir (folder moved/untrusted), skip:
   // resuming from the wrong directory fails or reopens a different project's conversation.
@@ -64,5 +65,5 @@ export async function resumeAgentSession(args: ResumeArgs): Promise<void> {
 }
 
 function clearAgentSession(panelId: string, termId: string): void {
-  usePanelStore.getState().updateTerminalTab(panelId, termId, { agentSession: undefined })
+  persistTerminalTabPatch(panelId, termId, { agentSession: undefined })
 }

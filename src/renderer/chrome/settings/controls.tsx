@@ -10,14 +10,24 @@ import { cn } from '@/lib/cn'
 /** Section header with PLANO's blueprint datum rule (accent tick + measured hairline). */
 export function SectionTitle({ children }: { children: ReactNode }) {
   return (
-    <div className="mb-3">
-      <h2 className="text-[15px] font-semibold tracking-tightui text-text-primary">{children}</h2>
-      <div className="mt-2 flex items-center gap-1.5">
+    <div className="mb-4">
+      <h2 className="text-[17px] font-semibold tracking-tightui text-text-1">{children}</h2>
+      <div className="mt-2.5 flex items-center gap-1.5">
         <span className="h-[2px] w-7 rounded-pill bg-accent" />
-        <span className="h-px flex-1 bg-[var(--border-subtle)]" />
+        <span className="h-px flex-1 bg-[var(--border-glass)]" />
       </div>
     </div>
   )
+}
+
+/**
+ * A group divider inside a section: a mono label on a hairline. It replaces the habit of
+ * explaining a cluster of rows in each row's description — the group says what they are once.
+ */
+export function GroupLabel({ children }: { children: ReactNode }) {
+  // Same `label-caps` vocabulary the other sections already use for their groups
+  // ("Canvas & Workspace", "Account", "Mobile & Remote") — one house style, not a second one.
+  return <div className="label-caps mb-2 mt-6 px-1">{children}</div>
 }
 
 /** One setting: title + short description on the left, a control on the right. Compact. */
@@ -35,11 +45,11 @@ export function SettingRow({
   control?: ReactNode
 }) {
   return (
-    <div className="flex items-center justify-between gap-5 border-b border-subtle py-3 last:border-b-0">
+    <div className="flex items-center justify-between gap-5 border-b border-glass py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <div className="text-[13px] font-medium text-text-primary">{title}</div>
+        <div className="text-[13.5px] text-text-1">{title}</div>
         {description && (
-          <div className="mt-0.5 text-[12px] leading-snug text-text-tertiary">{description}</div>
+          <div className="mt-0.5 text-[12px] leading-snug text-text-3">{description}</div>
         )}
       </div>
       <div className="flex shrink-0 items-center">{control ?? children}</div>
@@ -58,10 +68,10 @@ export function SettingBlock({
   children: ReactNode
 }) {
   return (
-    <div className="border-b border-subtle py-3 last:border-b-0">
-      <div className="text-[13px] font-medium text-text-primary">{title}</div>
+    <div className="border-b border-glass py-3 last:border-b-0">
+      <div className="text-[13.5px] text-text-1">{title}</div>
       {description && (
-        <div className="mt-0.5 text-[12px] leading-snug text-text-tertiary">{description}</div>
+        <div className="mt-0.5 text-[12px] leading-snug text-text-3">{description}</div>
       )}
       <div className="mt-2.5">{children}</div>
     </div>
@@ -84,7 +94,7 @@ export function Segmented<T extends string>({
   onChange: (v: T) => void
 }) {
   return (
-    <div className="inline-flex items-center gap-0.5 rounded-md border border-default bg-surface-inset p-0.5">
+    <div className="inline-flex items-center gap-0.5 rounded-pill border border-glass bg-inset p-0.5">
       {options.map((o) => {
         const active = o.value === value
         return (
@@ -93,10 +103,10 @@ export function Segmented<T extends string>({
             type="button"
             onClick={() => onChange(o.value)}
             className={cn(
-              'app-no-drag h-7 rounded-[5px] px-2.5 font-mono text-[11px] transition-colors focus-caliper',
+              'app-no-drag h-7 rounded-pill px-2.5 font-mono text-[11px] transition-colors focus-caliper',
               active
-                ? 'bg-accent-soft-strong text-text-primary'
-                : 'text-text-secondary hover:text-text-primary',
+                ? 'bg-accent text-text-onsolid'
+                : 'text-text-2 hover:text-text-1',
             )}
           >
             {o.label}
@@ -181,13 +191,13 @@ export function Select<T extends string>({
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="app-no-drag flex h-8 w-full items-center justify-between gap-2 rounded-md border border-default bg-surface-inset px-2.5 text-text-primary transition-colors hover:border-strong focus-caliper"
+        className="app-no-drag flex h-8 w-full items-center justify-between gap-2 rounded-[12px] border border-glass bg-inset px-2.5 text-text-1 transition-colors hover:border-glass-hover focus-caliper"
       >
         <span className="truncate font-mono text-[12px]">{current?.label ?? value}</span>
-        <Icon name="ChevronDown" size={14} className="shrink-0 text-text-tertiary" />
+        <Icon name="ChevronDown" size={14} className="shrink-0 text-text-3" />
       </button>
       {open && (
-        <div className="animate-menu-in absolute right-0 top-[calc(100%+4px)] z-50 max-h-60 w-full overflow-y-auto rounded-md border border-strong bg-surface-3 p-1 shadow-popover">
+        <div data-surface-layer="popover" className="animate-menu-in surface-layer surface-layer--popover absolute right-0 top-[calc(100%+4px)] z-50 max-h-60 w-full overflow-y-auto rounded-[14px] p-1">
           {options.map((o) => (
             <button
               key={o.value}
@@ -235,7 +245,7 @@ export function TextField({
       spellCheck={false}
       onChange={(e) => onChange(e.target.value)}
       style={{ width }}
-      className="app-no-drag h-8 rounded-sm border border-default bg-surface-inset px-2.5 font-mono text-[12px] text-text-primary placeholder:text-text-quaternary focus-caliper"
+      className="app-no-drag h-8 rounded-[12px] border border-glass bg-inset px-2.5 font-mono text-[12px] text-text-1 placeholder:text-text-4 focus-caliper"
     />
   )
 }
@@ -266,7 +276,7 @@ export function NumberField({
   }
   return (
     <div
-      className="app-no-drag flex h-8 items-center gap-1 rounded-sm border border-default bg-surface-inset pl-2.5 pr-1 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
+      className="app-no-drag flex h-8 items-center gap-1 rounded-[12px] border border-glass bg-inset pl-2.5 pr-1 focus-within:outline focus-within:outline-2 focus-within:outline-offset-2"
       style={{ width, outlineColor: 'var(--focus-ring)' }}
     >
       <input
@@ -294,12 +304,12 @@ export function PlaceholderCard({
   body: string
 }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-default bg-surface-inset px-6 py-12 text-center">
-      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-md border border-default bg-surface-2 text-text-secondary">
+    <div className="flex flex-col items-center justify-center rounded-[16px] border border-dashed border-glass-strong bg-inset px-6 py-12 text-center">
+      <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-pill border border-glass bg-glass text-text-2">
         <Icon name={icon} size={20} />
       </div>
-      <div className="text-[14px] font-semibold text-text-primary">{title}</div>
-      <div className="mt-1.5 max-w-xs font-mono text-[11.5px] leading-relaxed text-text-tertiary">
+      <div className="text-[14px] font-semibold text-text-1">{title}</div>
+      <div className="mt-1.5 max-w-xs font-mono text-[11.5px] leading-relaxed text-text-3">
         {body}
       </div>
     </div>

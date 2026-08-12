@@ -83,12 +83,44 @@ const paper: ITheme = {
   brightWhite: '#1a1a18',
 }
 
+/**
+ * Exact copy of Windows Terminal's default "Campbell" color scheme (read from the installed
+ * Windows Terminal defaults.json). Picking this makes CLI output colors match the user's external
+ * terminal pixel-for-pixel — same ANSI ramp, same surface, same cursor.
+ */
+const campbell: ITheme = {
+  background: '#0C0C0C',
+  foreground: '#CCCCCC',
+  cursor: '#FFFFFF',
+  cursorAccent: '#0C0C0C',
+  selectionBackground: 'rgba(255,255,255,0.35)',
+  black: '#0C0C0C',
+  red: '#C50F1F',
+  green: '#13A10E',
+  yellow: '#C19C00',
+  blue: '#0037DA',
+  magenta: '#881798',
+  cyan: '#3A96DD',
+  white: '#CCCCCC',
+  brightBlack: '#767676',
+  brightRed: '#E74856',
+  brightGreen: '#16C60C',
+  brightYellow: '#F9F1A5',
+  brightBlue: '#3B78FF',
+  brightMagenta: '#B4009E',
+  brightCyan: '#61D6D6',
+  brightWhite: '#F2F2F2',
+}
+
 export const TERMINAL_THEMES: TerminalThemeDef[] = [
   { id: 'monolith', label: 'Monolith', theme: xtermTheme, accent: null },
   { id: 'midnight', label: 'Midnight', theme: midnight, accent: '#7aa2ff' },
   { id: 'amber', label: 'Amber', theme: amber, accent: '#ffb454' },
   { id: 'matrix', label: 'Matrix', theme: matrix, accent: '#57e389' },
   { id: 'paper', label: 'Paper', theme: paper, accent: null },
+  // Matches Windows Terminal's stock look — the drop-in answer to "why do my colors differ from my
+  // terminal outside?". No panel tint (stays monochrome chrome, like the OS terminal).
+  { id: 'campbell', label: 'Windows Terminal', theme: campbell, accent: null },
 ]
 
 export function getTerminalTheme(id: TerminalThemeId | undefined): ITheme {

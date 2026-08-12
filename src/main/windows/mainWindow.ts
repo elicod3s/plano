@@ -17,8 +17,12 @@ const BROWSER_PARTITION = 'persist:plano-browser'
 // Window/taskbar icon. In dev this PNG drives the taskbar; once packaged, Windows uses the
 // .exe's embedded icon (from build/icon.ico) so this is a harmless no-op there.
 const ICON_PATH = join(__dirname, '../../build/icon.png')
+type DiagnosticSink = (event: string, details?: unknown) => void
 
-export function createMainWindow(): BrowserWindow {
+
+export function createMainWindow(
+  onDiagnostic: DiagnosticSink = () => undefined,
+): BrowserWindow {
   const win = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -42,24 +46,46 @@ export function createMainWindow(): BrowserWindow {
 
   win.once('ready-to-show', () => win.show())
 
-  // Dev diagnostics: surface renderer console + crashes in the dev terminal.
+  // Persist production failures as well as dev-console diagnostics. Electron exposes precise reasons
+  // such as oom, crashed, killed, launch-failed and integrity-failure here.
+  win.webContents.on('render-process-gone', (_event, details) =>
+    onDiagnostic('render-process-gone', details),
+  )
+  win.webContents.on('preload-error', (_event, preloadPath, error) =>
+    onDiagnostic('preload-error', { preloadPath, error: String(error), stack: error.stack }),
+  )
+  win.on('unresponsive', () => onDiagnostic('window-unresponsive'))
+  win.on('responsive', () => onDiagnostic('window-responsive'))
+  win.on('close', () => onDiagnostic('window-close'))
+  win.on('closed', () => onDiagnostic('window-closed'))
+
+  // Dev diagnostics: surface renderer console + crashes in the dev terminal. Every log is wrapped
+  // so a broken pipe (the renderer crashed / the dev terminal closed mid-teardown) can NEVER kill
+  // the main process — an uncaught EPIPE from console.log did exactly that.
+  const safeLog = (...args: unknown[]): void => {
+    try {
+      console.log(...args)
+    } catch {
+      /* pipe is gone — the renderer died before us; never throw */
+    }
+  }
   if (is.dev) {
     win.webContents.on('console-message', (...args: unknown[]) => {
       // Electron <=34: (event, level, message, line, sourceId). Electron >=35: (event{message,level}).
       const second = args[1] as { message?: string; level?: number } | number
       if (second && typeof second === 'object' && 'message' in second) {
-        console.log('[renderer]', second.message)
+        safeLog('[renderer]', second.message)
       } else {
-        console.log('[renderer]', args[2])
+        safeLog('[renderer]', args[2])
       }
     })
     win.webContents.on('render-process-gone', (_e, details) =>
-      console.log('[render-process-gone]', JSON.stringify(details)),
+      safeLog('[render-process-gone]', JSON.stringify(details)),
     )
     win.webContents.on('did-fail-load', (_e, code, desc, url) =>
-      console.log('[did-fail-load]', code, desc, url),
+      safeLog('[did-fail-load]', code, desc, url),
     )
-    win.webContents.on('did-finish-load', () => console.log('[renderer] loaded', win.webContents.getURL()))
+    win.webContents.on('did-finish-load', () => safeLog('[renderer] loaded', win.webContents.getURL()))
     // DevTools available on demand (Ctrl+Shift+I / F12) rather than auto-opening.
   }
 

@@ -33,6 +33,13 @@ interface HistEntry {
 const RESUME_RE =
   /\bclaude\s+--resume\s+([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\b/g
 
+// Hermes prints its own resume hint on exit. Only SAFE forms are captured: the bare
+// `hermes --continue` (no interpolation at all), and `hermes --resume <id>` where the id
+// is strictly bounded ASCII (letters, digits, hyphens, underscores, ≤64 chars) — never
+// free-form titles with spaces.
+const HERMES_RESUME_RE =
+  /\bhermes(?:\s+--continue|\s+--resume\s+([A-Za-z0-9_-]{1,64}))\b/g
+
 // SGR/CSI sequences and OSC strings the shell paints around the text.
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b[\]P][^\x07\x1b]*(?:\x07|\x1b\\)?/g
@@ -77,6 +84,13 @@ export class TerminalHistoryService {
     let m: RegExpExecArray | null
     while ((m = RESUME_RE.exec(e.buf)) !== null) {
       const cmd = `claude --resume ${m[1]}`
+      if (this.seen.has(cmd)) continue
+      this.seen.add(cmd)
+      void this.remember(e, cmd)
+    }
+    HERMES_RESUME_RE.lastIndex = 0
+    while ((m = HERMES_RESUME_RE.exec(e.buf)) !== null) {
+      const cmd = m[1] ? `hermes --resume ${m[1]}` : 'hermes --continue'
       if (this.seen.has(cmd)) continue
       this.seen.add(cmd)
       void this.remember(e, cmd)

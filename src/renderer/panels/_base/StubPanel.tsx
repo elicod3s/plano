@@ -6,7 +6,7 @@ import { Icon } from '@/design-system/Icon'
 export function StubPanel({ panel }: { panel: Panel }) {
   const meta = PANEL_META[panel.type]
   return (
-    <div className="flex h-full flex-col items-center justify-center gap-3 bg-surface-1 px-6 text-center">
+    <div className="flex h-full flex-col items-center justify-center gap-3 bg-transparent px-6 text-center">
       <div className="flex h-12 w-12 items-center justify-center rounded-md bg-surface-3">
         <Icon name={meta.icon} size={22} className="text-text-secondary" />
       </div>

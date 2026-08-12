@@ -124,19 +124,19 @@ export function TerminalCloseDialog() {
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-center justify-center p-6"
-      style={{ background: 'var(--scrim)', backdropFilter: 'blur(12px)' }}
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-6"
+      style={{ background: 'var(--scrim)' }}
       onPointerDown={() => respond(false)}
     >
       <div
-        className="animate-palette-in flex max-h-[85vh] w-[420px] max-w-[92vw] flex-col overflow-hidden rounded-xl border border-strong shadow-overlay"
-        style={{ background: 'var(--bg-base)' }}
+        data-surface-layer="modal"
+        className="animate-palette-in surface-layer surface-layer--modal flex max-h-[85vh] w-[420px] max-w-[92vw] flex-col overflow-hidden rounded-[26px]"
         onPointerDown={(e) => e.stopPropagation()}
       >
         {/* content */}
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-5">
-          <h2 className="text-[15px] font-semibold text-text-primary">Close agent terminal</h2>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-text-secondary">
+          <h2 className="text-[16.5px] font-semibold text-text-1">Close agent terminal</h2>
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-text-2">
             {agentName} is running in this terminal. Closing it will end the session.
           </p>
 
@@ -189,7 +189,7 @@ export function TerminalCloseDialog() {
             ref={confirmRef}
             type="button"
             onClick={confirmClose}
-            className="app-no-drag inline-flex h-9 w-full items-center justify-center rounded-md border border-strong bg-surface-3 text-[13px] font-semibold text-destructive-hover transition-colors hover:bg-surface-4 focus-caliper"
+            className="app-no-drag inline-flex h-9 w-full items-center justify-center rounded-[12px] border border-glass-strong bg-glass-hover text-[13px] font-semibold text-destructive-hover transition-colors hover:bg-glass-active focus-caliper"
           >
             Close terminal
           </button>
@@ -197,10 +197,10 @@ export function TerminalCloseDialog() {
             type="button"
             onClick={toggleExpand}
             className={cn(
-              'app-no-drag inline-flex h-9 w-full items-center justify-center rounded-md border text-[13px] font-medium text-text-primary transition-colors',
+              'app-no-drag inline-flex h-9 w-full items-center justify-center rounded-[12px] border text-[13px] font-medium text-text-1 transition-colors',
               expanded
-                ? 'border-strong bg-surface-2'
-                : 'border-default bg-surface-1 hover:border-strong hover:bg-surface-2',
+                ? 'border-glass-hover bg-glass-hover'
+                : 'border-glass bg-glass hover:border-glass-hover hover:bg-glass-hover',
             )}
           >
             {expanded ? 'Hide running processes' : 'Show running processes'}
@@ -208,7 +208,7 @@ export function TerminalCloseDialog() {
           <button
             type="button"
             onClick={() => respond(false)}
-            className="app-no-drag inline-flex h-9 w-full items-center justify-center rounded-md text-[13px] font-medium text-text-secondary transition-colors hover:bg-accent-soft hover:text-text-primary focus-caliper"
+            className="app-no-drag inline-flex h-9 w-full items-center justify-center rounded-[12px] text-[13px] font-medium text-text-2 transition-colors hover:bg-glass-hover hover:text-text-1 focus-caliper"
           >
             Cancel
           </button>

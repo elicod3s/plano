@@ -22,7 +22,19 @@ export default defineConfig({
       },
     },
     build: {
-      rollupOptions: { input: { index: resolve('src/main/index.ts') } },
+      rollupOptions: {
+        input: {
+          index: resolve('src/main/index.ts'),
+          // The detached Agent Host (ELECTRON_RUN_AS_NODE child) that owns every PTY session so
+          // agents survive the app quitting. Built alongside index.js into out/main/daemon.js.
+          daemon: resolve('src/main/daemon/index.ts'),
+          // The `plano` mesh CLI (plan v5 A1): a self-contained node script the daemon copies
+          // into <userData>/bin at boot so every agent terminal has it on PATH. Built into
+          // out/main/cli.js and executed via ELECTRON_RUN_AS_NODE by the plano.cmd/plano
+          // launchers — no system Node required, no embedded source string to drift.
+          cli: resolve('src/main/daemon/cli/index.ts'),
+        },
+      },
     },
   },
   preload: {

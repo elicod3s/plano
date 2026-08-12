@@ -44,6 +44,8 @@ export interface TerminalTab {
   /** Resumable reference to the AI-agent conversation last detected in THIS terminal (captured
    *  live, persisted so a workspace reopen can re-enter it; gated by `restoreAgentSessions`). */
   agentSession?: AgentSessionRef
+  /** Launch Claude/Codex without approval prompts. Stored per terminal tab. */
+  autoApprove?: boolean
 }
 
 export interface TerminalProps {
@@ -69,6 +71,8 @@ export interface TerminalProps {
   shell?: string
   fontSize?: number
   agentSession?: AgentSessionRef
+  /** Legacy pre-tabs source, migrated into tab[0] on first mount. */
+  autoApprove?: boolean
 }
 export interface EditorProps {
   /** Folder opened in this editor's file-tree sidebar (its own root, independent of the workspace). */
@@ -86,6 +90,7 @@ export interface BrowserProps {
 }
 export interface AgentProps {
   provider?: string
+  autoApprove?: boolean
 }
 export interface FilesProps {
   rootPath?: string
@@ -124,7 +129,16 @@ export interface TodoProps {
   /** List view filter. */
   filter: 'all' | 'active' | 'completed'
 }
-export type StickyTone = 'slate' | 'stone' | 'chalk' | 'outline'
+export type StickyTone =
+  | 'stone'
+  | 'amber'
+  | 'sage'
+  | 'sky'
+  | 'rose'
+  | 'slate'
+  /** Legacy tones kept so older workspace documents remain valid. */
+  | 'chalk'
+  | 'outline'
 export interface StickyProps {
   text: string
   tone: StickyTone
@@ -199,9 +213,10 @@ export const PANEL_META: Record<PanelType, PanelMeta> = {
   // Spawns roomy so a fresh terminal — and an agent CLI (Claude/Codex) that morphs into agent mode,
   // incl. when opened by voice — is legible from the start instead of a cramped little box.
   terminal: { type: 'terminal', label: 'New Terminal', icon: 'SquareTerminal', defaultSize: { width: 720, height: 480 } },
-  // Unified Files panel: a file-tree explorer that grows into a code editor / image
-  // viewer when a file is opened. Starts compact (tree-only) per `defaultSize`.
-  editor: { type: 'editor', label: 'New Files', icon: 'FolderTree', defaultSize: { width: 300, height: 480 } },
+  // Unified Files panel: a file-tree explorer with an inline code editor / image viewer.
+  // It spawns ALREADY at an editor-capable size — opening a file must never resize the
+  // panel rect (instant-open), so the default is the editor size, not a compact tree size.
+  editor: { type: 'editor', label: 'New Files', icon: 'FolderTree', defaultSize: { width: 880, height: 600 } },
   browser: { type: 'browser', label: 'New Browser', icon: 'Globe', defaultSize: { width: 720, height: 520 } },
   agent: { type: 'agent', label: 'New PLANO Agent', icon: 'Sparkles', defaultSize: { width: 480, height: 520 } },
   files: { type: 'files', label: 'New File Explorer', icon: 'FolderTree', defaultSize: { width: 300, height: 460 } },
@@ -248,7 +263,14 @@ export function defaultProps<T extends PanelType>(type: T): PanelPropsMap[T] {
     case 'todo':
       return { todos: [] as TodoItem[], filter: 'all' } as PanelPropsMap[T]
     case 'sticky':
-      return { text: '', tone: 'stone' } as PanelPropsMap[T]
+      // A freshly created note gets a RANDOM tone (the user can re-pick from the note's
+      // hidden color control); fixed defaults made every new note look identical.
+      return {
+        text: '',
+        tone: (['amber', 'stone', 'sage', 'sky', 'rose', 'slate'] as const)[
+          Math.floor(Math.random() * 6)
+        ],
+      } as PanelPropsMap[T]
     case 'voice':
       return {} as PanelPropsMap[T]
     case 'region':

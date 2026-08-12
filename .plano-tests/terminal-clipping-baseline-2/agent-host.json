@@ -1,0 +1,10 @@
+{
+  "pid": 24240,
+  "port": 61245,
+  "token": "c5430fe2-1497-4b64-b397-31229ce53024",
+  "webPort": 61246,
+  "mdns": "plano.local",
+  "version": "0.2.2",
+  "startedAt": 1786224822856,
+  "ptyAvailable": true
+}

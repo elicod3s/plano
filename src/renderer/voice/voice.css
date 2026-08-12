@@ -107,7 +107,6 @@
   background: color-mix(in srgb, var(--surface-2) 92%, transparent);
   border: 1px solid var(--border-default);
   box-shadow: var(--shadow-popover);
-  backdrop-filter: blur(14px);
   transition: opacity 200ms var(--ease-settle), border-color 200ms var(--ease-settle),
     box-shadow 200ms var(--ease-settle);
 }
@@ -200,7 +199,6 @@
   background: color-mix(in srgb, var(--surface-3) 94%, transparent);
   border: 1px solid var(--border-subtle);
   box-shadow: var(--shadow-popover);
-  backdrop-filter: blur(12px);
   color: var(--text-secondary);
   font-family: var(--font-display);
   font-size: 12.5px;
@@ -343,11 +341,13 @@
   }
 }
 
+/* Same data-motion gate as theme.css — the OS preference never damps the HUD once the app
+   has opted into full motion (Windows "Animation effects" off / RDP report reduce). */
 @media (prefers-reduced-motion: reduce) {
-  .voice-think-dot,
-  .voice-think-dot::after,
-  .voice-done,
-  .voice-mic.done {
+  :root:not([data-motion='full']) .voice-think-dot,
+  :root:not([data-motion='full']) .voice-think-dot::after,
+  :root:not([data-motion='full']) .voice-done,
+  :root:not([data-motion='full']) .voice-mic.done {
     animation: none;
   }
 }

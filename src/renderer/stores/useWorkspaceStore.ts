@@ -34,6 +34,6 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   clearWorkspace: () =>
     set({ folderPath: null, name: 'PLANO', status: 'no-folder', dirty: false, lastSavedAt: null }),
   setStatus: (status) => set({ status }),
-  markDirty: () => set({ dirty: true }),
+  markDirty: () => set((s) => (s.dirty ? s : { dirty: true })),
   markSaved: (savedAt) => set({ dirty: false, lastSavedAt: savedAt }),
 }))

@@ -45,3 +45,11 @@ stitch_export/
 .electron-cache/
 .playwright-mcp/
 _debug_screenshot.png
+
+# Local working junk — never part of the app (11 GB of Backups was one `git add -A` away).
+Backups/
+Microsoft/
+release-*/
+dev-server.err
+Plano mac version/
+Plano mac version.zip

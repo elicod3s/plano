@@ -1,8 +1,6 @@
 /**
- * The Settings modal — a compact, focused panel: a close button + search sit above a tight
- * section rail on the left, the active section on the right. Deliberately minimal (no heavy
- * title bar, solid active item, sentence-case headers) so it reads clean and unmistakably
- * PLANO rather than a heavier preferences dialog.
+ * The Settings modal — a glass sheet (760×564, rounded-[28px]) with a close button + search
+ * field above a tight section rail (214px) on the left and the active section on the right.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSettingsStore, type SettingsSection } from '@/stores/useSettingsStore'
@@ -32,7 +30,6 @@ export function SettingsModal() {
     return () => window.removeEventListener('keydown', onKey)
   }, [open, setOpen])
 
-  // Reset scroll to top whenever the section (or search state) changes.
   useEffect(() => {
     if (contentRef.current) contentRef.current.scrollTop = 0
   }, [section, query])
@@ -52,39 +49,51 @@ export function SettingsModal() {
 
   return (
     <div
-      className="fixed inset-0 z-[60] flex items-center justify-center p-6"
-      style={{ background: 'var(--scrim)', backdropFilter: 'blur(14px)' }}
+      className="fixed inset-0 z-[var(--z-modal)] flex items-center justify-center p-6"
+      style={{ background: 'var(--scrim)' }}
       onPointerDown={() => setOpen(false)}
     >
       <div
-        className="animate-palette-in flex h-[580px] max-h-[88vh] w-[760px] max-w-[94vw] overflow-hidden rounded-xl border border-strong shadow-overlay"
-        style={{ background: 'var(--bg-base)' }}
+        data-surface-layer="modal"
+        className="animate-palette-in surface-layer surface-layer--modal flex h-[564px] max-h-[88vh] w-[760px] max-w-[94vw] flex-col overflow-hidden rounded-[28px]"
         onPointerDown={(e) => e.stopPropagation()}
       >
-        {/* ── rail ── */}
-        <aside className="flex w-[208px] shrink-0 flex-col border-r border-subtle bg-surface-1">
-          <div className="flex items-center gap-2 p-2.5">
-            <button
-              type="button"
-              aria-label="Close settings"
-              onClick={() => setOpen(false)}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-surface-3 text-text-secondary transition-colors hover:bg-surface-4 hover:text-text-primary focus-caliper"
-            >
-              <Icon name="X" size={15} />
-            </button>
-            <div className="flex h-8 flex-1 items-center gap-1.5 rounded-md border border-default bg-surface-inset px-2.5">
-              <Icon name="Search" size={13} className="shrink-0 text-text-tertiary" />
-              <input
-                ref={searchRef}
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search"
-                spellCheck={false}
-                className="h-full w-full bg-transparent text-[12px] text-text-primary placeholder:text-text-tertiary focus:outline-none"
-              />
-            </div>
+        {/* top row: close + search */}
+        <div
+          className="flex h-14 shrink-0 items-center gap-2.5 px-4"
+          style={{ borderBottom: '1px solid var(--border-glass)' }}
+        >
+          <button
+            type="button"
+            aria-label="Close settings"
+            onClick={() => setOpen(false)}
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[12px] text-text-secondary transition-colors hover:bg-glass-hover hover:text-text-primary focus-caliper"
+            style={{ background: 'var(--glass)' }}
+          >
+            <Icon name="X" size={15} />
+          </button>
+          <div
+            className="flex h-[34px] min-w-0 flex-1 items-center gap-2.5 rounded-[11px] border border-glass px-3.5 transition-colors focus-within:border-glass-hover"
+            style={{ background: 'var(--inset-soft)', boxShadow: '0 1px 6px rgba(0,0,0,0.5)' }}
+          >
+            <Icon name="Search" size={14} className="shrink-0 text-text-3" />
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search"
+              spellCheck={false}
+              className="h-full w-full bg-transparent text-[13px] text-text-1 placeholder:text-text-3 focus:outline-none"
+            />
           </div>
-          <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto px-2 pb-2">
+        </div>
+
+        {/* body: rail + content */}
+        <div className="flex min-h-0 flex-1">
+          <aside
+            className="flex w-[214px] shrink-0 flex-col gap-1 overflow-y-auto p-2.5"
+            style={{ borderRight: '1px solid var(--border-glass)' }}
+          >
             {SECTIONS.map((s) => {
               const active = !query && s.id === section
               return (
@@ -96,35 +105,35 @@ export function SettingsModal() {
                     setQuery('')
                   }}
                   className={cn(
-                    'flex h-9 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-[13px] transition-colors',
+                    'flex h-9 w-full shrink-0 items-center gap-2.5 rounded-[11px] px-[11px] text-left text-[13px] transition-colors',
                     active
-                      ? 'bg-surface-3 font-medium text-text-primary'
-                      : 'text-text-secondary hover:bg-surface-2 hover:text-text-primary',
+                      ? 'bg-glass-hover font-medium text-text-1'
+                      : 'text-text-2 hover:bg-glass hover:text-text-1',
                   )}
                 >
-                  <Icon name={s.icon} size={16} className="shrink-0" />
+                  <Icon name={s.icon} size={15} className="shrink-0" />
                   <span className="truncate">{s.label}</span>
                 </button>
               )
             })}
-          </nav>
-        </aside>
+          </aside>
 
-        {/* ── content ── */}
-        <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="px-6 py-5">
-            {results ? (
-              <SearchResults
-                results={results}
-                sectionLabel={sectionLabel}
-                onPick={(id) => {
-                  setSection(id)
-                  setQuery('')
-                }}
-              />
-            ) : (
-              <Active />
-            )}
+          {/* content */}
+          <div ref={contentRef} className="min-h-0 flex-1 overflow-y-auto">
+            <div className="px-6 py-6">
+              {results ? (
+                <SearchResults
+                  results={results}
+                  sectionLabel={sectionLabel}
+                  onPick={(id) => {
+                    setSection(id)
+                    setQuery('')
+                  }}
+                />
+              ) : (
+                <Active />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -146,7 +155,7 @@ function SearchResults({
   }
   return (
     <>
-      <h2 className="mb-2.5 text-[15px] font-semibold tracking-tightui text-text-primary">
+      <h2 className="mb-2.5 text-[17px] font-semibold tracking-tightui text-text-1">
         {results.length} result{results.length === 1 ? '' : 's'}
       </h2>
       <div className="space-y-1">
@@ -155,10 +164,10 @@ function SearchResults({
             key={`${r.section}:${r.title}:${i}`}
             type="button"
             onClick={() => onPick(r.section as SettingsSection)}
-            className="flex w-full items-center justify-between gap-3 rounded-md border border-subtle px-3 py-2.5 text-left transition-colors hover:border-strong hover:bg-surface-2"
+            className="flex w-full items-center justify-between gap-3 rounded-[11px] border border-glass px-3 py-2.5 text-left transition-colors hover:border-glass-hover hover:bg-glass"
           >
-            <span className="text-[13px] text-text-primary">{r.title}</span>
-            <span className="flex items-center gap-1.5 text-[11px] text-text-tertiary">
+            <span className="text-[13px] text-text-1">{r.title}</span>
+            <span className="flex items-center gap-1.5 text-[11px] text-text-3">
               {sectionLabel(r.section)}
               <Icon name="ArrowRight" size={12} />
             </span>

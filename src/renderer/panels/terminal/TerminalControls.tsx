@@ -13,7 +13,7 @@ export function TerminalControls({ termId }: { termId: string }) {
 
   return (
     <div
-      className="app-no-drag pointer-events-auto absolute bottom-2.5 right-2.5 z-20 flex items-center gap-px rounded-pill border border-default p-0.5 opacity-70 shadow-popover backdrop-blur-md transition-opacity hover:opacity-100"
+      className="app-no-drag pointer-events-auto absolute bottom-2.5 right-2.5 z-20 flex items-center gap-px rounded-pill border border-default p-0.5 opacity-70 shadow-popover transition-opacity hover:opacity-100"
       style={{ background: 'color-mix(in srgb, var(--surface-3) 82%, transparent)' }}
     >
       <IconButton icon="Eraser" label="Clear terminal" size={26} onClick={controls.clear} />

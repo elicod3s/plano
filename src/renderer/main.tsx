@@ -2,7 +2,8 @@ import React from 'react'
 import { createRoot } from 'react-dom/client'
 
 // Bundled offline (Fontsource) so the packaged app never needs the network for type.
-import '@fontsource-variable/space-grotesk'
+import '@fontsource-variable/instrument-sans'
+import '@fontsource-variable/geist-mono'
 import '@fontsource/jetbrains-mono/400.css'
 import '@fontsource/jetbrains-mono/600.css'
 // Fills the box-drawing / Braille / block / symbol ranges Fontsource's subsets drop, so terminal
@@ -12,7 +13,18 @@ import './styles/terminal-symbols.css'
 
 import './styles/theme.css'
 import './styles/globals.css'
+import { applyAppearance } from './theme/themes'
 import { App } from './app/App'
+
+// Apply the SAVED theme before React renders — a synchronous settings read via the preload,
+// so the very first paint already shows the user's theme (no wrong-theme launch flash while
+// the async settings hydrate + workspace restore run). Idempotent with the hydrate below.
+try {
+  const saved = window.plano?.settings?.getSync?.()
+  if (saved?.appearance) applyAppearance(saved.appearance)
+} catch {
+  /* preload bridge unavailable (dev edge) — the async hydrate will apply the theme */
+}
 
 // Surface anything that escapes React so a blank screen always has a cause in the log.
 window.addEventListener('error', (e) =>

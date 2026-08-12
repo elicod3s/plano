@@ -1,0 +1,13 @@
+{
+  "version": 9,
+  "general": { "restoreLastWorkspace": true, "restoreAgentSessions": false, "showFilesOnLaunch": false, "warnBeforeQuit": false, "confirmClosePanelWithProcess": false },
+  "appearance": { "theme": "monolith", "accent": "#FFFFFF", "gridStyle": "dots", "gridOpacity": 1, "grain": false, "reduceMotion": true },
+  "editor": { "fontSize": 13, "tabSize": 2, "wordWrap": true, "lineNumbers": true },
+  "terminal": { "shell": "cmd", "shellPath": "", "fontFamily": "", "fontSize": 0, "lineHeight": 1.0, "cursorStyle": "bar", "cursorBlink": true, "scrollback": 5000, "theme": "campbell", "copyOnSelect": false, "predictiveHistory": false, "smartActions": false, "autoSuspendIdle": true, "keepAgentsOnQuit": "__KEEP__" },
+  "canvas": { "snapToGrid": true, "showMinimap": false, "zoomSensitivity": 1, "autosave": true },
+  "browser": { "homepage": "about:blank", "searchEngine": "google", "terminalUrlAction": "plano" },
+  "privacy": { "telemetry": false, "saveTerminalHistory": true },
+  "advanced": { "hardwareAcceleration": true },
+  "agentMesh": { "contextPersistence": false, "maxPersistBytes": 524288, "mcp": { "enabled": false, "port": 0, "enableMutations": false } },
+  "voice": { "enabled": false, "pushToTalkKey": "Ctrl+Shift+Space", "autoSend": true, "inputDeviceId": "", "language": "auto", "speakResponses": false, "gemini": { "enabled": true, "apiKey": "", "model": "gemini-3.1-flash-lite" }, "llmFallback": { "enabled": false, "baseUrl": "http://localhost:11434/v1", "model": "llama3.1" } }
+}

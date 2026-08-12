@@ -13,28 +13,25 @@ function tip(label: string, type: PanelType): string {
   return sc ? `${label} · ${fmtKeys(sc)}` : label
 }
 
-/** Left vertical dock — purely for ADDING panels. View controls (zoom, fit-to-screen, the
- *  minimap toggle) live in the separate bottom-right ViewControls cluster. */
+/** Left vertical glass dock — purely for ADDING panels. View controls live bottom-right. */
 export function Dock() {
   const setCommandPalette = useUiStore((s) => s.setCommandPalette)
 
   return (
     <div
-      className="app-no-drag pointer-events-auto absolute left-6 top-1/2 z-30 flex -translate-y-1/2 flex-col items-center gap-1 rounded-xl border border-default px-1.5 py-3 shadow-dock"
-      style={{ background: 'color-mix(in srgb, var(--bg-base) 72%, transparent)', backdropFilter: 'blur(12px)' }}
+      className="app-no-drag pointer-events-auto surface-layer surface-layer--chrome absolute left-5 top-1/2 z-[var(--z-chrome)] flex -translate-y-1/2 flex-col items-center gap-1 rounded-[26px] px-1.5 py-2"
+      data-surface-layer="chrome"
     >
-      {/* Primary action — the only colored item in the dock (token-driven warm accent), kept
-          icon-only so the bar stays a thin vertical strip. Shortcut lives in the tooltip. */}
+      {/* Primary action — the Library circle (accent-filled), opens the command palette. */}
       <button
         type="button"
         onClick={() => setCommandPalette(true)}
         aria-label="Library"
         title={`Library (${fmtKeys('Ctrl+Shift+E')})`}
         className={cn(
-          'app-no-drag inline-flex h-7 w-7 items-center justify-center rounded-sm border',
-          'border-[var(--dock-accent-border)] bg-[var(--dock-accent-soft)] text-[var(--dock-accent)]',
-          'transition-[background,color,transform] duration-150 ease-settle active:scale-[0.96] focus-caliper',
-          'hover:bg-[var(--dock-accent-soft-strong)]',
+          'app-no-drag mb-0.5 inline-flex h-9 w-9 items-center justify-center rounded-full text-text-onsolid',
+          'bg-accent transition-[background,color,transform] duration-150 ease-settle active:scale-[0.96] focus-caliper',
+          'hover:bg-accent-hover',
         )}
       >
         <Icon name="LayoutGrid" size={16} />
@@ -58,5 +55,5 @@ export function Dock() {
 }
 
 function Divider() {
-  return <div className={cn('my-1 h-px w-5 bg-[var(--border-subtle)]')} />
+  return <div className="my-1 h-px w-6 bg-[rgba(255,255,255,0.1)]" />
 }

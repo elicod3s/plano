@@ -6,28 +6,45 @@ import { Unicode11Addon } from '@xterm/addon-unicode11'
 import '@xterm/xterm/css/xterm.css'
 import type { TerminalProps } from '@shared/domain/panel'
 import type { TerminalSettings } from '@shared/domain/settings'
-import type { AgentKind, AgentVerdict } from '@shared/domain/agent'
+import type { AgentKind, AgentVerdict, ResumableAgent } from '@shared/domain/agent'
+import { agentSessionFromCommand } from '@shared/domain/agent'
 import { resumeAgentSession } from '../agentResume'
 import { useTerminalStore } from '@/stores/useTerminalStore'
 import { useTerminalControlStore } from '@/stores/useTerminalControlStore'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useViewportStore } from '@/stores/useViewportStore'
 import { useAgentStore } from '@/stores/useAgentStore'
+import { useSpacesStore } from '@/stores/useSpacesStore'
 import { useWorkspaceStore } from '@/stores/useWorkspaceStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
+import {
+  getPersistedTerminalTab,
+  persistTerminalTabPatch,
+} from '@/app/agentSessionPersistence'
 import { TERMINAL_FONT } from '../xtermTheme'
 import { getTerminalTheme } from '../terminalThemes'
 import { applyCanvasZoomMouseFix } from '../canvasZoomMouse'
 import {
-  FIT_DEBOUNCE_MS,
-  FIT_RESIZE_EPSILON,
   FIT_RETRY_FRAMES,
   clampFontSize,
   effectiveFontSize,
   parseOsc7Cwd,
   resolveShell,
   snapRenderScale,
+  isEmojiPresentationWide,
 } from './render'
+import { makeSmartTitle } from '../smartTitle'
+
+// The verified setup loads xterm's WebGL renderer for every visible terminal. Its canvas renderer
+// is important here: the DOM fallback paints rows as positioned spans, and those spans are clipped
+// at the right edge when they inherit the canvas/panel transforms. Keep the working-set accounting
+// for detach/reattach, but do not impose an application-level cap; Chromium remains the authority on
+// context availability and loadWebgl() already falls back safely if allocation fails.
+const MAX_WEBGL_TERMINALS = Number.POSITIVE_INFINITY
+let liveWebglTerminals = 0
+// Match the verified smooth setup: observe real box changes and coalesce a resize burst.
+const FIT_DEBOUNCE_MS = 32
+const FIT_RESIZE_EPSILON = 0.5
 
 /**
  * A live terminal session that OUTLIVES React. The xterm `Terminal` instance, its addons, the PTY
@@ -35,8 +52,14 @@ import {
  * live here for the whole life of the terminal — not the life of a React mount. React only `attach`es
  * the DOM (re-parenting the existing `term.element` into a freshly-mounted render box) and `detach`es
  * it on unmount. The PTY keeps streaming into the (possibly off-screen) `Terminal` the entire time,
- * so returning to a space / switching back to a tab is a pure DOM re-parent — NO buffered replay, no
- * flicker, no scroll jump. The session is destroyed only by `dispose` (an explicit teardown).
+ * so switching TABS within a panel is a pure DOM re-parent — NO buffered replay, no flicker, no scroll
+ * jump. The session is destroyed only by `dispose` (an explicit teardown, e.g. closing the tab).
+ *
+ * The one exception to that persistence is workspace ("space") hibernation: switching away from a
+ * workspace whose terminals are kept running rips their renderer sessions down (freeing the WebGL
+ * context + parser + subscriptions) while the PTY keeps running in main. Returning re-enters the
+ * HMR-style `reattachPty` path — main replays its bounded 512 KB buffer once and the screen is rebuilt.
+ * See app/terminalHibernation.ts + the `autoSuspendIdle` setting (a safety valve to turn it off).
  */
 export interface TerminalSession {
   readonly termId: string
@@ -48,6 +71,12 @@ export interface TerminalSession {
   /** Destroy the renderer-side Terminal + addons + listeners. Does NOT kill the PTY — the teardown
    *  helpers in app/terminalSessions own that (they are the single PTY choke point). */
   dispose: () => void
+  /** Deska-parity keyboard focus: focus this terminal's xterm helper textarea with scroll
+   *  preservation and bounded retries while the DOM is still attaching. Never resizes, reattaches
+   *  or recreates the Terminal and never touches PTY state. A new run supersedes any in-flight one. */
+  focus: () => void
+  /** Cancel any in-flight focus run for this terminal (focus moved elsewhere / component unmount). */
+  cancelFocus: () => void
 }
 
 const termTheme = (id: TerminalSettings['theme'], override?: TerminalProps['theme']) =>
@@ -72,7 +101,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   // Per-PANEL props (theme is shared by all tabs); per-TERMINAL config lives in this tab.
   const panelProps = (): TerminalProps | undefined =>
     usePanelStore.getState().panels[panelId]?.props as TerminalProps | undefined
-  const tab = () => panelProps()?.tabs?.find((t) => t.id === termId)
+  const tab = () => getPersistedTerminalTab(panelId, termId)
   // Per-terminal font override: this tab's own value. Falls back to the panel-level LEGACY field ONLY
   // in the pre-migration window (no tab record yet); once a tab record exists — every tab created with
   // "+", and every tab after migration — it owns its zoom and never inherits the panel-level legacy.
@@ -110,9 +139,14 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   const term = new Terminal({
     fontFamily: ts0.fontFamily || TERMINAL_FONT,
     fontSize: scaledFontFor(currentScale),
-    // Clamp ≥ 1.0: custom-glyph block-art is clipped to the cell, so lineHeight > 1 reopens a strip
-    // below each row that tears box-drawing apart (xterm #2572); < 1 crushes the rows.
-    lineHeight: Math.max(1, ts0.lineHeight),
+    // Clamp ≥ 1.0: the box-drawing glyphs of the bundled font stack carry ~1.32em of ink. xterm ceils
+    // each row to `normalLineHeight × lineHeight`, so above ~1.3 the cell outgrows the ink and a strip
+    // below every row tears vertical strokes (│ ║ ╭ sides) — measured in both the DOM and WebGL
+    // renderers. The pre-glass build shipped 1.4 and the user verified it as pixel-perfect; the v9
+    // experiment at 1.0 packed rows so tight that glyph ink overflowed the cell and CLI output read
+    // as clipped/joined ("cut off"). Keep the effective floor at 1.4 for a terminal that matches the
+    // verified build; users can still lower it via the Settings slider.
+    lineHeight: Math.max(1.4, ts0.lineHeight),
     letterSpacing: 0, // non-zero corrupts selection geometry (xterm #4881)
     cursorBlink: ts0.cursorBlink,
     cursorStyle: ts0.cursorStyle,
@@ -124,13 +158,16 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     macOptionIsMeta: true,
     minimumContrastRatio: 1,
     // Deska parity: customGlyphs OFF → box-drawing / block / CLI-art glyphs are drawn FROM THE FONT
-    // (which carry their own intra-cell metrics) instead of as vectors clipped to the cell. Clipped
-    // vectors tear when lineHeight > 1 reopens a sub-cell gap (xterm #2572); font glyphs just gain
-    // leading. This is what lets Deska run lineHeight 1.4 with intact art — so we match it.
+    // (which carry their own intra-cell metrics) instead of as vectors clipped to the cell. Measured:
+    // the bundled JetBrains Mono box-drawing ink is ~1.32em, so at lineHeight 1.0 (the default) the
+    // strokes overflow the cell and connect; the moment lineHeight pushes the cell past the ink
+    // (~1.3), a sub-cell gap reopens below each row and tears the art — in BOTH customGlyphs modes.
     customGlyphs: false,
     rescaleOverlappingGlyphs: true, // wide/CJK/Powerline glyphs don't bleed into neighbors
     smoothScrollDuration: 0, // smooth scroll fights the zoom scroll-anchor — keep 0
-    allowTransparency: false, // opaque bg lets WebGL skip per-cell alpha blending
+    // Every theme owns one continuous, opaque terminal surface. Transparency makes xterm's
+    // viewport and its unrendered area show through as a second rectangle below the rows.
+    allowTransparency: false,
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
@@ -138,15 +175,40 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   const unicode = new Unicode11Addon()
   term.loadAddon(unicode)
   term.unicode.activeVersion = '11'
+  // Unicode-11's wcwidth already gives 2 cells to almost every emoji, but a handful of BMP
+  // emoji-presentation chars (❤ ⚡ ☀ ⭐ ⌚ …) are "ambiguous" and come out 1 cell — Windows
+  // Terminal/ConPTY render them 2. Patch the active provider so they render wide, matching the
+  // OS terminal. Wrapped defensively: if xterm's internals ever change shape this no-ops and the
+  // (mostly correct) Unicode-11 widths remain.
+  try {
+    const v11 = (
+      term as unknown as {
+        _core: { unicodeService: { _providers: Record<string, { wcwidth(cp: number): number }> } }
+      }
+    )._core.unicodeService._providers['11']
+    if (v11) {
+      const orig = v11.wcwidth.bind(v11)
+      v11.wcwidth = (cp: number): number => (isEmojiPresentationWide(cp) ? 2 : orig(cp))
+    }
+  } catch {
+    /* keep Unicode-11 widths */
+  }
 
   // Renderer: the WEBGL addon (Deska). DOM renderer's spans round to fractional positions under our
   // nested transforms and overlap; the 2D-canvas addon accumulates draws and ghosts. WebGL clears its
-  // framebuffer every frame and rebuilds the glyph atlas crisp on cell-size change. Context loss gets
-  // a ONE-SHOT guarded reload (no console-flood loop); a second loss falls back to xterm's DOM
-  // renderer. Loaded lazily on first open() — the renderer needs the element to exist.
+  // framebuffer every frame and rebuilds the glyph atlas crisp on cell-size change. Loaded lazily on
+  // first open() — the renderer needs the element to exist — and globally budgeted so a large number
+  // of terminals cannot exhaust Chromium's context allowance. Context loss falls back immediately;
+  // allocating a replacement during GPU pressure is exactly the churn that used to amplify the crash.
   let webglAddon: WebglAddon | null = null
-  let webglReloadAttempted = false
-  const loadWebgl = (): void => {
+  let ownsWebglSlot = false
+  const webglReloadAttempted = false
+  const releaseWebgl = (): void => {
+    if (!ownsWebglSlot) return
+    ownsWebglSlot = false
+    liveWebglTerminals = Math.max(0, liveWebglTerminals - 1)
+  }
+  const unloadWebgl = (): void => {
     if (webglAddon) {
       try {
         webglAddon.dispose()
@@ -155,22 +217,29 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
       }
       webglAddon = null
     }
+    releaseWebgl()
+  }
+  const loadWebgl = (): void => {
+    if (webglAddon || liveWebglTerminals >= MAX_WEBGL_TERMINALS) return
+    liveWebglTerminals += 1
+    ownsWebglSlot = true
     try {
       const addon = new WebglAddon()
       addon.onContextLoss(() => {
         try {
+          if (webglAddon !== addon) return
           addon.dispose()
         } catch {
           /* ignore */
         }
         webglAddon = null
         if (webglReloadAttempted) return // give up → DOM fallback, never loop (no console flood)
-        webglReloadAttempted = true
-        loadWebgl()
+        releaseWebgl()
       })
       term.loadAddon(addon)
       webglAddon = addon
     } catch {
+      releaseWebgl()
       webglAddon = null // WebGL unavailable → xterm keeps the DOM renderer
     }
   }
@@ -198,10 +267,13 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     const proposed = fit.proposeDimensions()
     if (!proposed || !Number.isFinite(proposed.cols) || !Number.isFinite(proposed.rows)) return
 
-    // FitAddon computes the maximum grid that reaches the viewport edge. Keep one full cell free
-    // before the scrollbar: this absorbs Chromium's fractional-pixel rounding and guarantees that
-    // no rightmost glyph can be painted into the clipping/gutter strip.
-    let cols = Math.max(2, Math.floor(proposed.cols) - 1)
+    // FitAddon computes the maximum grid that reaches the viewport edge. The scrollbar gutter
+    // (`scrollbar-gutter: stable` on .xterm-viewport) already reserves the strip the scrollbar
+    // occupies, so the last column can never slide under it — there is no need to sacrifice a
+    // column here. (A `-1` used to sit here: it stole one cell from every TUI, so full-width
+    // agents like omp clipped their rightmost column and the panel looked like a gray square
+    // was covering the content.)
+    let cols = Math.max(2, Math.floor(proposed.cols))
     let rows = Math.max(1, Math.floor(proposed.rows))
 
     const xel = term.element
@@ -319,31 +391,62 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
 
   // ── Agent-session capture (so a workspace reopen can resume the conversation) ────────────────────
   let lastCaptureKind: AgentKind | null = null
-  const clearAgentSessionProp = (): void => {
-    if (tab()?.agentSession)
-      usePanelStore.getState().updateTerminalTab(panelId, termId, { agentSession: undefined })
+  let captureRetryTimer: number | undefined
+  let captureInFlight = false
+  const idRequired = new Set<ResumableAgent>(['claude', 'codex', 'gemini'])
+  const stopCaptureRetry = (): void => {
+    window.clearTimeout(captureRetryTimer)
+    captureRetryTimer = undefined
   }
-  const captureAgentSession = (id: string, verdict: AgentVerdict): void => {
+  const scheduleCaptureRetry = (id: string): void => {
+    if (disposed || captureRetryTimer !== undefined) return
+    captureRetryTimer = window.setTimeout(() => {
+      captureRetryTimer = undefined
+      const current = useAgentStore.getState().byPty[id]
+      if (current?.active) captureAgentSession(id, current, true)
+    }, 1500)
+  }
+  const clearAgentSessionProp = (): void => {
+    if (tab()?.agentSession) persistTerminalTabPatch(panelId, termId, { agentSession: undefined })
+  }
+  const captureAgentSession = (id: string, verdict: AgentVerdict, retry = false): void => {
     if (!verdict.active || !verdict.kind) {
+      stopCaptureRetry()
       lastCaptureKind = null
       clearAgentSessionProp()
       return
     }
     const kindChanged = verdict.kind !== lastCaptureKind
     lastCaptureKind = verdict.kind
-    if (!kindChanged && verdict.phase !== 'idle') return
+    if (!retry && !kindChanged && verdict.phase !== 'idle') return
+    if (captureInFlight) {
+      scheduleCaptureRetry(id)
+      return
+    }
+    captureInFlight = true
     const liveCwd = useTerminalStore.getState().byPanel[termId]?.cwd ?? ''
     void window.plano.agent
       .resolveSession(id, liveCwd)
       .then((ref) => {
-        if (disposed || !ref) return
+        if (disposed) return
+        const current = useAgentStore.getState().byPty[id]
+        if (!current?.active || current.kind !== verdict.kind) return
+        if (!ref || (idRequired.has(ref.agent) && !ref.sessionId)) {
+          scheduleCaptureRetry(id)
+          return
+        }
         const cur = tab()?.agentSession
         if (cur && cur.agent === ref.agent && cur.sessionId === ref.sessionId && cur.cwd === ref.cwd)
           return
-        usePanelStore.getState().updateTerminalTab(panelId, termId, { agentSession: ref })
+        stopCaptureRetry()
+        persistTerminalTabPatch(panelId, termId, { agentSession: ref })
       })
-      .catch(() => {})
+      .catch(() => scheduleCaptureRetry(id))
+      .finally(() => {
+        captureInFlight = false
+      })
   }
+  unsubs.push(stopCaptureRetry)
 
   // OSC-7 cwd reports (consumed → never displayed) drive the live git badge; also latch shell-ready.
   const oscCwd = term.parser.registerOscHandler(7, (payload) => {
@@ -388,7 +491,16 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     requestFit()
   }
   unsubs.push(useSettingsStore.subscribe(applyTerminalOptions))
-  unsubs.push(usePanelStore.subscribe(applyTerminalOptions))
+  // Only react to THIS panel's props changing — a drag/resize of any OTHER panel was refiltering +
+  // re-stringifying the whole options signature for every live terminal each frame. Immer gives
+  // each panel a fresh `props` object only when ITS props actually change, so a reference check on
+  // `state.panels[panelId].props` skips the rest at O(1).
+  unsubs.push(
+    usePanelStore.subscribe((state, prev) => {
+      if (state.panels[panelId]?.props === prev.panels[panelId]?.props) return
+      applyTerminalOptions()
+    }),
+  )
 
   // FONT-LOAD RE-FIT. xterm measures the cell ONCE at open(); bundled webfonts (font-display: swap)
   // often aren't loaded yet, so it measures a narrower fallback and FitAddon over-counts columns.
@@ -446,7 +558,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     const t = useSettingsStore.getState().settings.terminal
     const current = effectiveFontSize(t, tab()?.fontSize)
     const next = clampFontSize(current + delta)
-    if (next !== current) usePanelStore.getState().updateTerminalTab(panelId, termId, { fontSize: next })
+    if (next !== current) persistTerminalTabPatch(panelId, termId, { fontSize: next })
   }
 
   // Ctrl/Cmd+C copies only with a selection (else stays SIGINT); Ctrl/Cmd+V falls through to OS paste
@@ -490,31 +602,62 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
       window.plano.agent.onSignal((e) => {
         if (e.ptyId !== id) return
         useAgentStore.getState().setVerdict(id, e.verdict)
+        // WinPTY (the default Windows PTY backend — ConPTY crashes on 25H2 26200.8313) swallows
+        // the TUI's startup `\x1b[?2004h` bracketed-paste handshake, so xterm never enables
+        // bracketed paste and a multi-line paste into an agent lands as one Enter per line
+        // (each line becomes its own prompt). Re-assert the mode here, driven by detection:
+        // agent TUIs all support bracketed paste; plain shells get it off again on exit.
+        term.write(e.verdict.active ? '\x1b[?2004h' : '\x1b[?2004l')
         captureAgentSession(id, e.verdict)
       }),
     )
 
-    // Best-effort capture of the FIRST real prompt sent to a detected agent (no AI). Buffer printable
+    // Best-effort capture of the prompts the user sends to a detected agent (no AI). Buffer printable
     // keystrokes while the agent is active; finalize on Enter; skip noise (slash-commands, menu nav).
+    // The FIRST real prompt is frozen for the header identity strip; the LAST one keeps updating so
+    // the "last prompt" peek can recall what was last asked without scrolling back through the output.
     let promptBuf = ''
-    let promptCaptured = false
+    let firstCaptured = false
     const looksLikePrompt = (text: string): boolean =>
       text.length >= 3 && !text.startsWith('/') && /[\p{L}\p{N}]/u.test(text)
     const capturePrompt = (data: string): void => {
       if (!useAgentStore.getState().byPty[id]?.active) {
         promptBuf = ''
-        promptCaptured = false
+        firstCaptured = false
         return
       }
-      if (promptCaptured) return
       for (const ch of data) {
         if (ch === '\r' || ch === '\n') {
           const text = promptBuf.replace(/\s+/g, ' ').trim()
           promptBuf = ''
           if (looksLikePrompt(text)) {
-            promptCaptured = true
-            useAgentStore.getState().setPrompt(id, text.slice(0, 120))
-            break
+            const store = useAgentStore.getState()
+            const first = !firstCaptured
+            if (first) {
+              firstCaptured = true
+              store.setPrompt(id, text.slice(0, 120))
+              // Smart tab title: derive from the user's first prompt (the actual task), local
+              // and instant. Persisted on the tab so the tab bar, mesh and manager all show it.
+              // A user-set title (or a title already generated) is never overwritten.
+              const smart = makeSmartTitle(text)
+              if (smart && !tab()?.title) {
+                persistTerminalTabPatch(panelId, termId, { title: smart })
+              }
+            }
+            // Keep the full-ish latest prompt (capped) for the on-demand peek.
+            store.setLastPrompt(id, text.slice(0, 2000))
+            // Forward to the CANONICAL context in main (mesh timeline + search).
+            try {
+              window.plano.agentMesh.reportPrompt({
+                ptyId: id,
+                text: text.slice(0, 4000),
+                first,
+                source: 'keyboard',
+                at: Date.now(),
+              })
+            } catch {
+              /* main may be mid-teardown; the renderer store is already updated */
+            }
           }
         } else if (ch === '\x7f' || ch === '\b') {
           promptBuf = promptBuf.slice(0, -1)
@@ -527,9 +670,54 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
       }
     }
 
+    // Track a straightforward shell command line while no agent is active. When Auto-approve is
+    // armed and the user types `codex`/`claude` manually, replace that still-unsubmitted line with
+    // the flagged command before Enter reaches the shell. Complex cursor/history edits are left
+    // untouched rather than guessing at shell state.
+    let shellLine = ''
+    let shellLineTrackable = true
+    const rewriteShellLaunch = (data: string): string => {
+      if (useAgentStore.getState().byPty[id]?.active) {
+        shellLine = ''
+        shellLineTrackable = true
+        return data
+      }
+      let outgoing = ''
+      for (const ch of data) {
+        if (ch === '\r' || ch === '\n') {
+          const command = shellLine
+          if (shellLineTrackable && command) {
+            const cwd = useTerminalStore.getState().byPanel[termId]?.cwd ?? ''
+            const explicit = agentSessionFromCommand(command, cwd)
+            if (explicit) persistTerminalTabPatch(panelId, termId, { agentSession: explicit })
+            const approved = command
+            if (approved !== command) {
+              outgoing += '\x7f'.repeat(command.length) + approved + ch
+              shellLine = ''
+              shellLineTrackable = true
+              continue
+            }
+          }
+          shellLine = ''
+          shellLineTrackable = true
+        } else if (ch === '\x7f' || ch === '\b') {
+          shellLine = shellLine.slice(0, -1)
+        } else if (ch === '\x03' || ch === '\x15') {
+          shellLine = ''
+          shellLineTrackable = true
+        } else if (ch === '\x1b' || ch === '\t' || ch < ' ') {
+          shellLineTrackable = false
+        } else if (shellLineTrackable) {
+          shellLine += ch
+        }
+        outgoing += ch
+      }
+      return outgoing
+    }
+
     term.onData((data) => {
       capturePrompt(data)
-      window.plano.terminal.write(id, data)
+      window.plano.terminal.write(id, rewriteShellLaunch(data))
     })
   }
 
@@ -553,6 +741,8 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     void window.plano.terminal
       .create({
         panelId,
+        terminalId: termId,
+        spaceId: useSpacesStore.getState().activeId ?? '',
         cols: term.cols,
         rows: term.rows,
         cwd,
@@ -561,7 +751,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
         predictiveHistory: ts0.predictiveHistory,
         // Launch an agent (voice "open Claude Code") via the shell's startup so it appears instantly.
         // Skipped when resuming a saved agent — that flow drives its own resume command below.
-        bootCommand: savedAgent ? undefined : boot,
+        bootCommand: savedAgent || !boot ? undefined : boot,
       })
       .then((res) => {
         if (disposed) {
@@ -586,7 +776,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
         // already running — just clear the one-shot prop so a reattach / workspace reopen never
         // re-launches it. (Resuming a saved agent is handled separately, below.)
         if (boot) {
-          if (t0) usePanelStore.getState().updateTerminalTab(panelId, termId, { bootCommand: undefined })
+          if (t0) persistTerminalTabPatch(panelId, termId, { bootCommand: undefined })
           else usePanelStore.getState().updateProps<'terminal'>(panelId, { bootCommand: undefined })
         }
 
@@ -660,7 +850,6 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     if (!opened) {
       term.open(renderBox)
       opened = true
-      loadWebgl()
       // Keep mouse selection / reporting / link-hover aligned with the on-screen scale (= world zoom ÷
       // render-box counter-scale). Patches the mouse service, which exists after open() and persists
       // across re-parenting, so this is applied exactly ONCE.
@@ -670,6 +859,10 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
       renderBox.appendChild(term.element)
     }
     applyFontSize()
+    // WebGL slots belong to VISIBLE terminals, not to whichever tabs happened to open first. Hidden
+    // tabs release their renderer in detachDom(); the newly active tab can now claim the slot instead
+    // of silently falling back to the DOM renderer (whose transformed rows can visually overlap).
+    loadWebgl()
 
     // Deska parity (registry.ts attach): self-heal the off-by-one where the DOM scrollbar reaches the
     // bottom but xterm's viewportY lands one row short of baseY, hiding the freshest line. Bound ONCE to
@@ -707,25 +900,23 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     nextContainer.addEventListener('paste', onPaste, true)
     nextContainer.addEventListener('contextmenu', onContextMenu)
 
-    // ResizeObserver on the RENDER BOX (Deska parity). The render box is the exact element xterm is
-    // opened into and the one FitAddon measures, so observing it makes a fit run on EVERY layout change
-    // that matters: a real panel resize (container changes → the box's %-width resolves to new px) AND a
-    // render-scale step (applyScale changes the box's %-width). Crucially the fit then runs AFTER the box
-    // has actually laid out at its new size — which is what fixes the zoom clip/underfill (the old
-    // container-observer never fired on a render-scale change, and applyScale's own fit raced the box's
-    // reflow). A pure pan/zoom is a CSS transform that does NOT change the box's layout size, so the
-    // observer stays quiet during gestures. Epsilon + ~32ms debounce coalesce a drag/pinch into one fit.
+    // ResizeObserver on the exact box FitAddon measures. This is the verified smooth-setup
+    // behavior: it stays dormant at rest and coalesces a resize burst into one fit. The removed
+    // watchdog forced clientWidth/offsetWidth layout reads for every visible terminal on every
+    // animation frame, so its idle cost grew linearly with terminal count.
     let fitTimer: ReturnType<typeof setTimeout> | null = null
     let observerRaf = 0
     let lastFitW = 0
     let lastFitH = 0
     const runObservedFit = (): void => {
-      if (!renderBox) return
+      if (disposed || !attached || renderBox !== nextRenderBox) return
       const w = renderBox.clientWidth
       const h = renderBox.clientHeight
       if (w === 0 || h === 0) return
-      if (Math.abs(w - lastFitW) < FIT_RESIZE_EPSILON && Math.abs(h - lastFitH) < FIT_RESIZE_EPSILON)
-        return
+      if (
+        Math.abs(w - lastFitW) < FIT_RESIZE_EPSILON &&
+        Math.abs(h - lastFitH) < FIT_RESIZE_EPSILON
+      ) return
       lastFitW = w
       lastFitH = h
       try {
@@ -744,11 +935,13 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
       }
     }
     const scheduleObservedFit = (): void => {
-      if (!renderBox) return
+      if (disposed || !attached || renderBox !== nextRenderBox) return
       const w = renderBox.clientWidth
       const h = renderBox.clientHeight
-      if (Math.abs(w - lastFitW) < FIT_RESIZE_EPSILON && Math.abs(h - lastFitH) < FIT_RESIZE_EPSILON)
-        return
+      if (
+        Math.abs(w - lastFitW) < FIT_RESIZE_EPSILON &&
+        Math.abs(h - lastFitH) < FIT_RESIZE_EPSILON
+      ) return
       if (fitTimer !== null) clearTimeout(fitTimer)
       if (observerRaf) cancelAnimationFrame(observerRaf)
       fitTimer = setTimeout(() => {
@@ -790,30 +983,132 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     }
     hostCleanup?.()
     hostCleanup = null
+    // Keep the small WebGL budget as a working-set budget. Without this, an inactive tab retained its
+    // slot forever and later visible tabs (often the agent named Hermes) alone used the DOM fallback.
+    unloadWebgl()
     renderBox = null
+  }
+
+  // ── Deska-parity keyboard focus ─────────────────────────────────────────────────────────────────
+  // Runs are per-session and supersede each other: `focus()` cancels the previous run and bumps the
+  // run id so stale callbacks become no-ops. The wait loop tolerates a DOM that is temporarily
+  // detached during tab/workspace attachment; after the first success a short recheck window keeps
+  // re-asserting focus so a detach/reattach race cannot drop it. Every timer is tracked and cleared
+  // by `cancelFocus` (unmount / focus moved elsewhere) and by `dispose`.
+  const FOCUS_WAIT_ATTEMPTS = 80 // 80 × 25 ms = 2 s — Deska parity: DOM may lag a tab/workspace attach
+  const FOCUS_RECHECK_ATTEMPTS = 20 // 20 × 25 ms = 0.5 s post-success detach/reattach race window
+  const FOCUS_INTERVAL_MS = 25
+  let focusRunId = 0
+  let focusTimers: number[] = [] // window.setTimeout ids (DOM lib)
+  const cancelFocusRun = (): void => {
+    focusTimers.forEach((t) => window.clearTimeout(t))
+    focusTimers = []
+  }
+
+  const focus = (): void => {
+    if (disposed) return
+    cancelFocusRun()
+    const runId = ++focusRunId
+    const isCurrent = (): boolean => runId === focusRunId && !disposed
+
+    // ONE focus attempt. Returns true only when the xterm helper textarea (or, as a fallback, the
+    // xterm element itself) actually received DOM focus. Scroll is captured BEFORE focusing and
+    // restored immediately AND on the next animation frame — focus({ preventScroll }) alone does not
+    // fully protect against xterm's own focus-time scroll anchoring.
+    const applyFocus = (): boolean => {
+      if (disposed || !attached || !term.element || !term.element.isConnected) return false
+      const vp = term.element.querySelector('.xterm-viewport') as HTMLElement | null
+      const savedScrollTop = vp ? vp.scrollTop : null
+      let ok = false
+      try {
+        const textarea = term.element.querySelector('.xterm-helper-textarea') as HTMLElement | null
+        if (textarea) {
+          textarea.focus({ preventScroll: true })
+          ok = document.activeElement === textarea
+        }
+        if (!ok) {
+          term.focus()
+          ok = textarea
+            ? document.activeElement === textarea || document.activeElement === term.element
+            : document.activeElement === term.element
+        }
+      } catch {
+        ok = false // focus() can throw while the element is mid-detach
+      }
+      if (savedScrollTop !== null && vp && vp.isConnected) {
+        vp.scrollTop = savedScrollTop
+        requestAnimationFrame(() => {
+          if (runId === focusRunId && !disposed && vp.isConnected) vp.scrollTop = savedScrollTop
+        })
+      }
+      return ok
+    }
+
+    // Post-success window: keep re-asserting focus in case the DOM detaches and reattaches again
+    // (tab switch / workspace reattach race). Bounded, then the run ends with no timers left behind.
+    const startRecheck = (): void => {
+      let rechecks = 0
+      const tick = (): void => {
+        if (!isCurrent()) return
+        if (rechecks++ >= FOCUS_RECHECK_ATTEMPTS) {
+          focusTimers = []
+          return
+        }
+        const t = window.setTimeout(() => {
+          if (!isCurrent()) return
+          applyFocus()
+          tick()
+        }, FOCUS_INTERVAL_MS)
+        focusTimers.push(t)
+      }
+      tick()
+    }
+
+    // First attempt immediately; if the DOM isn't connected yet, retry on a bounded 25 ms cadence.
+    if (applyFocus()) {
+      startRecheck()
+      return
+    }
+    let attempts = 0
+    const waitTick = (): void => {
+      if (!isCurrent()) return
+      if (attempts++ >= FOCUS_WAIT_ATTEMPTS) {
+        focusTimers = []
+        return
+      }
+      const t = window.setTimeout(() => {
+        if (!isCurrent()) return
+        if (applyFocus()) {
+          startRecheck()
+          return
+        }
+        waitTick()
+      }, FOCUS_INTERVAL_MS)
+      focusTimers.push(t)
+    }
+    waitTick()
+  }
+
+  const cancelFocus = (): void => {
+    focusRunId++ // invalidate any in-flight run
+    cancelFocusRun()
   }
 
   const dispose = (): void => {
     if (disposed) return
     disposed = true
+    cancelFocus()
     detachDom()
     unsubs.forEach((u) => u())
     unsubs.length = 0
     useTerminalControlStore.getState().unregister(termId)
     // Dispose WebGL BEFORE the terminal so its GL context is freed promptly (Deska) — GL contexts are
     // otherwise reclaimed only on GC.
-    if (webglAddon) {
-      try {
-        webglAddon.dispose()
-      } catch {
-        /* ignore */
-      }
-      webglAddon = null
-    }
+    unloadWebgl()
     term.dispose()
   }
 
-  return { termId, panelId, attach, detach: detachDom, dispose }
+  return { termId, panelId, attach, detach: detachDom, dispose, focus, cancelFocus }
 }
 
 /**
@@ -827,6 +1122,11 @@ class TerminalEngine {
   has(termId: string): boolean {
     return this.sessions.has(termId)
   }
+  /** Snapshot used by the workspace safety budget; never expose the mutable registry itself. */
+  liveSessions(): Array<{ termId: string; panelId: string }> {
+    return [...this.sessions.values()].map(({ termId, panelId }) => ({ termId, panelId }))
+  }
+
 
   /** Idempotent: returns the existing session (so a remount/StrictMode double-invoke never respawns)
    *  or creates one (which decides spawn-vs-reattach exactly once). */
@@ -846,6 +1146,18 @@ class TerminalEngine {
 
   detach(termId: string): void {
     this.sessions.get(termId)?.detach()
+  }
+
+  /** Deska-parity keyboard focus for the terminal (tab) whose DOM is mounted. Keyed by terminal TAB
+   *  id; never exposes the mutable registry and never resizes/reattaches/recreates the Terminal or
+   *  touches PTY state. A new call supersedes any in-flight focus run for the same terminal. */
+  focus(termId: string): void {
+    this.sessions.get(termId)?.focus()
+  }
+
+  /** Cancel any in-flight focus run for a terminal (focus moved elsewhere / component unmount). */
+  cancelFocus(termId: string): void {
+    this.sessions.get(termId)?.cancelFocus()
   }
 
   /** Destroy a session's renderer-side Terminal and forget it. The PTY is killed separately by the

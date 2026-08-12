@@ -11,8 +11,9 @@ interface IconButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   danger?: boolean
 }
 
+/** Glass icon button — 32px rounded-[12px] by default, hover lifts to glass-hover. */
 export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(function IconButton(
-  { icon, label, size = 28, active = false, danger = false, className, ...rest },
+  { icon, label, size = 32, active = false, danger = false, className, ...rest },
   ref,
 ) {
   return (
@@ -23,15 +24,17 @@ export const IconButton = forwardRef<HTMLButtonElement, IconButtonProps>(functio
       title={label}
       style={{ width: size, height: size }}
       className={cn(
-        'app-no-drag inline-flex items-center justify-center rounded-sm transition-[background,color,transform]',
+        'app-no-drag inline-flex items-center justify-center rounded-[12px] transition-[background,color,transform]',
         'duration-150 ease-settle active:scale-[0.96] focus-caliper',
-        active ? 'bg-accent-soft-strong text-text-primary' : 'text-text-secondary hover:bg-accent-soft hover:text-text-primary',
+        active
+          ? 'bg-glass-active text-text-primary'
+          : 'text-text-secondary hover:bg-glass-hover hover:text-text-primary',
         danger && 'hover:bg-destructive-soft hover:text-destructive-hover',
         className,
       )}
       {...rest}
     >
-      <Icon name={icon} size={Math.round(size * 0.57)} />
+      <Icon name={icon} size={Math.round(size * 0.5)} />
     </button>
   )
 })
