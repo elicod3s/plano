@@ -71,6 +71,7 @@ export const COMMANDS: CommandSpec[] = [
     args: ['<to>', '<text...>'],
     flags: [
       { flag: '--queue', desc: 'deliver when the target is idle instead of typing now' },
+      { flag: '--direct', desc: 'refuse if the target is mid-turn instead of queuing (pre-v6 behaviour)' },
       { flag: '--wait', desc: 'block until the target finishes the turn this message triggers (or exits)' },
       F_TIMEOUT,
       { flag: '--id', arg: '<uuid>', desc: 'idempotency key — replaying it never duplicates' },
@@ -107,6 +108,14 @@ export const COMMANDS: CommandSpec[] = [
     summary: 'Acknowledge a delivered inbox message',
     usage: 'plano ack <messageId>',
     args: ['<messageId>'],
+  },
+  {
+    command: 'watch',
+    summary: 'Block until a specific message is delivered (or expires) — the acknowledgement `wait` cannot give you',
+    usage: 'plano watch <messageId> [--timeout-ms <ms>] [--json]',
+    args: ['<messageId>'],
+    flags: [F_TIMEOUT, F_JSON],
+    aliases: ['track'],
   },
   {
     command: 'close',

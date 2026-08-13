@@ -360,6 +360,9 @@ interface Session {
   /** Plan v3 A2: honest-busy state threaded across polls. */
   activity?: import('./agentLight').ActivityState
   busyNow?: boolean
+  /** v6 C1: stale-`working` watchdog — the screen as last seen, and when it last changed. */
+  staleScreen?: string
+  staleSince?: number
   /** Rich verdict reported by the desktop app while it's connected. */
   appKind: AgentKind | null
   appPhase: AgentPhase | null
@@ -696,6 +699,32 @@ function startDetection(): void {
           if (!mesh.agent(entry.ptyId)?.manual || waiting) {
             const state: AgentState = waiting ? 'awaiting-input' : activity.busy ? 'working' : 'idle'
             mesh.setState(entry.ptyId, state)
+          }
+          // v6 C1: a `working` claim must be re-earned. Harnesses without lifecycle hooks (Pi and
+          // its OMP fork, and codex when another notify owner exists) get their state from output
+          // cadence alone, and a chatty TUI can pin that at `working` forever. A wedged `working`
+          // SEALS the mailbox — drainMailbox returns early on a busy target — so every message
+          // queued for that agent silently ages out. That is how a four-agent session goes quiet
+          // with everyone believing they delegated.
+          //
+          // Demote when nothing corroborates the claim: the screen has not changed AND no worker
+          // process is running under the harness. Hook-driven agents are exempt while their hold
+          // is live (the block above already `continue`s), so this only rescues the inferred path.
+          const meshState = mesh.agent(entry.ptyId)?.state
+          if (meshState === 'working') {
+            const screenNow = readScreen(entry.ptyId)
+            const changed = screenNow !== entry.staleScreen
+            if (changed || workers) {
+              entry.staleScreen = screenNow
+              entry.staleSince = Date.now()
+            } else if (Date.now() - (entry.staleSince ?? Date.now()) > STALE_WORKING_MS) {
+              log(`stale working demoted ptyId=${entry.ptyId.slice(0, 8)} (no screen change, no workers)`)
+              mesh.setState(entry.ptyId, 'idle')
+              entry.staleSince = Date.now()
+            }
+          } else {
+            entry.staleSince = undefined
+            entry.staleScreen = undefined
           }
         } else {
           // Plain terminal: preserve only a MANUAL claim (v3 B); any detect-loop
@@ -1128,6 +1157,12 @@ function webDeps() {
  * idle because the terminal happens to be quiet while the model thinks.
  */
 const hookHeldUntil = new Map<string, number>()
+/**
+ * v6 C1: how long an inferred `working` may stand with nothing corroborating it — no screen
+ * change and no worker process — before the agent is demoted to idle so its mailbox can drain.
+ * Long enough that a model thinking silently between tool calls is never demoted mid-thought.
+ */
+const STALE_WORKING_MS = 4 * 60_000
 /**
  * How long a hook-driven state is protected from the detect loop.
  *

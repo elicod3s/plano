@@ -17,7 +17,12 @@ import type { MeshAgent, MeshEvent, MeshMessage, MeshToolResult, AgentState, Mes
 const MAX_TIMELINE = 200
 const MAX_BROADCAST_TARGETS = 12
 const MAX_HOPS = 4
-const MAX_MESSAGE_LEN = 4000
+/**
+ * v6 A4: a single message's cap. Raised from 4000 now that delivery is bursted (12k is ~6 s of
+ * typing, not ~4 minutes) — a handoff contract that lost its tail at 4000 lost exactly the part
+ * that specified the work. Anything past this still truncates, but the sender is TOLD.
+ */
+const MAX_MESSAGE_LEN = 12000
 /**
  * v3 A3: mailbox drains on a timer too, never only on idle transitions. This is a RETRY net, not
  * the delivery path — a message to a free agent is typed into its terminal immediately, and a
@@ -27,6 +32,22 @@ const MAX_MESSAGE_LEN = 4000
 const DRAIN_POLL_MS = 750
 /** v3 A3: a queued message that cannot be delivered within this TTL expires. */
 const DEFAULT_TTL_MS = 10 * 60_000
+/**
+ * v6 A3: absolute lifetime of a queued message. Expiry now measures how long the target has been
+ * UNREACHABLE rather than how long the message has existed, so this is a staleness backstop —
+ * not the deadline that used to kill mail one tick before it could finally be delivered.
+ */
+const MAX_QUEUE_LIFE_MS = 60 * 60_000
+/** v6 B1: `plano watch <messageId>` default budget and cap. */
+const WATCH_DEFAULT_TIMEOUT_MS = 5 * 60_000
+const WATCH_MAX_TIMEOUT_MS = 60 * 60_000
+/**
+ * v6: pause between the last typed burst and the Enter that submits it. A TUI re-rendering its
+ * input box drops an Enter that arrives mid-repaint.
+ */
+const SUBMIT_SETTLE_MS = 90
+/** v6 C3: how long a peer may sit on a permission prompt before its senders are told. */
+const BLOCKED_NOTICE_MS = 10 * 60_000
 /** v3 A3: delivery attempts before a message becomes undeliverable. */
 const MAX_DELIVERY_ATTEMPTS = 5
 /**
@@ -193,6 +214,12 @@ export class MeshBus {
    * turn and return an empty delta). One-shot, and ignored once stale.
    */
   private spawnPrompts = new Map<string, { at: number; baseline: string }>()
+  /**
+   * v6 B1: callers blocked on `plano watch <messageId>`. Keyed by message id; resolved from every
+   * point that gives a message a terminal status, so "did my handoff land?" is a question with an
+   * answer instead of a guess built from echo tricks.
+   */
+  private watchers = new Map<string, Array<(result: MeshToolResult) => void>>()
 
   /** v3 E: persistent relations between pairs, keyed by ordered pair. */
   private links = new Map<string, MeshLink>()
@@ -490,6 +517,11 @@ export class MeshBus {
         capsSource: a.capsSource ?? (a.capabilities ? 'default' : 'unknown'),
         capabilities: this.capabilitiesFor(a),
         title: a.panelTitle,
+        // v6 B3: how much mail is waiting on this agent, and how long the oldest has waited.
+        // Saturation was invisible: an orchestrator could not see that a worker's inbox was
+        // backing up until its own messages started dying.
+        pending: this.mailboxes.load(a.id).filter((m) => !m.acked).length,
+        oldestPendingMs: this.oldestPendingAge(a.id),
       })),
     }
   }
@@ -549,27 +581,61 @@ export class MeshBus {
   private drainMailbox(agentId: string): void {
     const now = Date.now()
     const target = this.agents.get(agentId)
+    // v6 C3: a peer parked on a permission prompt is not going to read anything until a human
+    // answers it. Tell the senders once, instead of letting them wait on a wall.
+    if (target?.state === 'awaiting-input' && now - target.stateSince > BLOCKED_NOTICE_MS) {
+      for (const message of this.mailboxes.load(agentId)) {
+        if (message.acked || message.notified) continue
+        this.notifySender(
+          message,
+          'is still WAITING to be delivered',
+          `${this.displayName(agentId)} is blocked on a permission prompt — a human has to answer it, or \`plano interrupt\` them.`,
+          'blocked',
+        )
+      }
+    }
     // Queue mode means "deliver when idle" — never type into a mid-turn agent. The
     // timer drain retries on the next tick; the idle transition drains immediately.
     if (target?.busy) return
     const messages = this.mailboxes.load(agentId)
     for (const message of messages) {
       if (message.acked) continue
-      // v3 A3: real TTL — a message that can't be delivered expires and the sender is told
-      // (timeline event; the sender sees it via timeline or the ask correlation in block C).
-      if (message.ttl > 0 && now - message.at > message.ttl) {
+      // v6 A3: expiry measures REACHABLE time, not wall-clock. The old rule (10 min since the
+      // message was written) killed queued mail at the worst possible instant: this loop only
+      // runs when the target is free, and the check ran BEFORE the delivery attempt — so a
+      // message that patiently waited out an 11-minute turn was expired one tick before it
+      // would finally have landed. That is the exact way an orchestrator's verdicts vanished
+      // while both sides sat waiting for each other.
+      //
+      // Now only an absolutely stale message is reaped: an hour old, which means the target has
+      // been unreachable for an hour, not merely busy for a while.
+      const born = message.bornAt ?? message.at
+      if (now - born > MAX_QUEUE_LIFE_MS) {
         message.status = 'expired'
         message.acked = true
         this.mailboxes.remove(agentId, message.id)
         this.pushEvent({ at: now, kind: 'msg-expired', from: message.from, to: message.to, detail: 'ttl-expired' })
+        this.notifySender(
+          message,
+          'EXPIRED undelivered',
+          'it sat in their mailbox for an hour without them ever becoming free — re-send it, or `plano interrupt` them.',
+        )
+        this.resolveWatchers(message.id, message)
         continue
       }
+      // Baseline BEFORE the write: the anchor below marks where this turn starts, and a tail read
+      // taken after the echo landed would already contain the message itself.
+      const preBaseline = this.cleanTail(message.to)
       const delivered = this.onDeliver && this.onDeliver(message.to, this.messageLine(message)) && this.onDeliver(message.to, '\r')
       if (delivered) {
         message.status = 'delivered'
         message.acked = true
         this.mailboxes.remove(agentId, message.id)
         this.pushEvent({ at: Date.now(), kind: 'msg-delivered', from: message.from, to: message.to })
+        // v6 B2: the queued line just started a turn in the target — anchor it, so a `wait` that
+        // the sender fires now reports THAT turn instead of the peer's next unrelated one.
+        this.spawnPrompts.set(message.to, { at: Date.now(), baseline: preBaseline })
+        this.resolveWatchers(message.id, message)
         // v3 A4: the write succeeded — whether the receiver produced output beyond the
         // typed echo is observed in the background (the sender of a queued message isn't
         // blocked waiting; the timeline carries the final word).
@@ -584,6 +650,8 @@ export class MeshBus {
         message.acked = true
         this.mailboxes.remove(agentId, message.id)
         this.pushEvent({ at: Date.now(), kind: 'msg-undeliverable', from: message.from, to: message.to, detail: message.reason })
+        this.notifySender(message, 'could NOT be delivered', `writing to their terminal failed ${MAX_DELIVERY_ATTEMPTS} times — check they are still alive with \`plano roster\`.`)
+        this.resolveWatchers(message.id, message)
       } else {
         this.mailboxes.remove(agentId, message.id)
         this.mailboxes.push(agentId, message) // persist the attempt count
@@ -635,6 +703,112 @@ export class MeshBus {
       if (this.tailDelta(baseline, this.cleanTail(ptyId), WAIT_DELTA_MAX_CHARS).length >= minGain) return true
     }
     return false
+  }
+
+  /** Age of the longest-waiting undelivered message in an agent's box (0 when the box is clear). */
+  private oldestPendingAge(agentId: string): number {
+    const pending = this.mailboxes.load(agentId).filter((m) => !m.acked)
+    if (pending.length === 0) return 0
+    const oldest = Math.min(...pending.map((m) => m.bornAt ?? m.at))
+    return Math.max(0, Date.now() - oldest)
+  }
+
+  /** v6 B1: hand every waiter on this message its final answer. */
+  private resolveWatchers(messageId: string, message: MeshMessage): void {
+    const waiting = this.watchers.get(messageId)
+    if (!waiting || waiting.length === 0) return
+    this.watchers.delete(messageId)
+    const result: MeshToolResult = {
+      ok: true,
+      id: messageId,
+      status: message.status,
+      confirmed: message.confirmed ?? false,
+      reason: message.reason ?? null,
+      to: message.to,
+      at: Date.now(),
+    }
+    for (const resolve of waiting) resolve(result)
+  }
+
+  /**
+   * v6 B1: block until a specific message reaches a terminal status.
+   *
+   * `wait` answers "is the peer done with its turn"; that is not the same question as "did my
+   * message arrive", and conflating them is why agents resorted to echoing sentinels into their
+   * own transcripts to fake an acknowledgement. A message that already finished answers instantly.
+   */
+  async watchMessage(agentId: string, messageId: string, timeoutMs = WATCH_DEFAULT_TIMEOUT_MS): Promise<MeshToolResult> {
+    if (!this.agents.has(agentId)) return { ok: false, error: 'not-registered' }
+    if (!messageId) return { ok: false, error: 'missing-id' }
+    // Already finished? Every terminal outcome is on the timeline, so answer from there without
+    // making the caller wait for something that has already happened.
+    const done = [...this.timeline]
+      .reverse()
+      .find((e) => e.detail?.includes(`#${messageId}`) && (e.kind === 'msg-delivered' || e.kind === 'msg-undeliverable' || e.kind === 'msg-expired'))
+    if (done) {
+      return {
+        ok: true,
+        id: messageId,
+        status: done.kind === 'msg-delivered' ? 'delivered' : done.kind === 'msg-expired' ? 'expired' : 'undeliverable',
+        confirmed: done.detail?.includes('confirmed') ?? false,
+        already: true,
+      }
+    }
+    const ms = Math.max(1000, Math.min(timeoutMs || WATCH_DEFAULT_TIMEOUT_MS, WATCH_MAX_TIMEOUT_MS))
+    return new Promise<MeshToolResult>((resolve) => {
+      const timer = setTimeout(() => {
+        const list = this.watchers.get(messageId) ?? []
+        const next = list.filter((fn) => fn !== onDone)
+        if (next.length > 0) this.watchers.set(messageId, next)
+        else this.watchers.delete(messageId)
+        // A timeout still ANSWERS (v5 A3): the message is simply still queued.
+        resolve({ ok: true, id: messageId, status: 'queued', timedOut: true, detail: 'still queued — the target has not been free yet' })
+      }, ms)
+      const onDone = (result: MeshToolResult): void => {
+        clearTimeout(timer)
+        resolve(result)
+      }
+      const list = this.watchers.get(messageId) ?? []
+      list.push(onDone)
+      this.watchers.set(messageId, list)
+    })
+  }
+
+  /**
+   * v6 A2: tell the SENDER how their message ended. The timeline recorded every outcome and no
+   * participant was ever told, so a queued message that expired left both sides waiting on each
+   * other — the orchestrator believed it had delegated, the worker never heard anything. A
+   * timeline entry is only found by someone who already suspects a loss; a mailbox notice arrives.
+   *
+   * Notices are system mail: the existing drain types them into the sender's terminal as soon as
+   * it is idle, and `plano inbox` lists them until then. Never notify about a notice (they carry
+   * no `from` agent), and never notify twice for one message.
+   */
+  private notifySender(message: MeshMessage, outcome: string, hint: string, kind: 'outcome' | 'blocked' = 'outcome'): void {
+    const sender = message.from
+    if (!sender || sender === 'plano') return
+    // Two independent one-shots: a "still blocked" heads-up must not consume the slot reserved
+    // for the message's real ending, or a message that warns and then expires would report only
+    // the warning.
+    if (kind === 'outcome' ? message.notified : message.blockedNotified) return
+    if (!this.agents.has(sender)) return // the sender is gone too; the timeline keeps the record
+    if (kind === 'outcome') message.notified = true
+    else message.blockedNotified = true
+    const peer = this.displayName(message.to)
+    const excerpt = message.text.length > 90 ? `${message.text.slice(0, 90)}…` : message.text
+    this.mailboxes.push(sender, {
+      id: `sysx-${message.id}`,
+      at: Date.now(),
+      from: 'plano',
+      to: sender,
+      text: `your message to ${peer} ${outcome}. ${hint} (message: "${excerpt}")`,
+      mode: 'queue',
+      ttl: DEFAULT_TTL_MS,
+      hops: 0,
+      status: 'queued',
+      acked: false,
+    })
+    this.drainMailbox(sender)
   }
 
   /** Background confirmation for queued deliveries (never throws — v3 §3). */
@@ -710,12 +884,21 @@ export class MeshBus {
     mode: 'type' | 'queue' = 'type',
     hops = 0,
     messageId?: string,
+    /** v6 A1: refuse a mid-turn target instead of queuing (the pre-v6 contract). */
+    direct = false,
   ): Promise<MeshToolResult> {
     const resolved = this.resolveTarget(agentId, to)
     if (!resolved.ok) return resolved.result
     const target = resolved.agent
     to = target.id
     if (target.kind === 'unknown') return { ok: false, error: 'not-agent', detail: 'target is a plain terminal, no harness detected' }
+    // v6 A1: a busy target QUEUES instead of refusing. Refusing made "mid-turn" the caller's
+    // problem: every agent had to recognise the error, remember `--queue`, and retry — and the
+    // ones that didn't simply stopped talking. The message is never lost either way, so the
+    // useful answer is "it will land when they are free", not "no". `direct` keeps the old
+    // refusal for the rare caller that genuinely wants type-or-nothing.
+    const autoQueued = mode === 'type' && target.busy && !direct
+    if (autoQueued) mode = 'queue'
     if (mode === 'type' && target.busy) {
       return { ok: false, error: 'working', detail: 'target is mid-turn — use queue mode or ask the user to interrupt' }
     }
@@ -744,6 +927,7 @@ export class MeshBus {
       text,
       mode,
       ttl: DEFAULT_TTL_MS, // v3 A3: queued messages expire instead of hanging forever
+      bornAt: Date.now(), // v6 A3: never slides — the staleness backstop measures from here
       hops,
       status: 'queued',
       acked: false,
@@ -753,7 +937,9 @@ export class MeshBus {
     // intermediate newline splits the receiver's prompt and some CLIs send it half-formed).
     // Internal newlines are normalized to spaces; oversized lines truncate with a visible mark.
     let normalized = String(text).replace(/[\r\n]+/g, ' ').trim()
-    if (normalized.length > MAX_MESSAGE_LEN) normalized = `${normalized.slice(0, MAX_MESSAGE_LEN - 3)}\u2026`
+    // v6 A4: truncation is a fact the sender needs, not a silent edit.
+    const truncated = normalized.length > MAX_MESSAGE_LEN
+    if (truncated) normalized = `${normalized.slice(0, MAX_MESSAGE_LEN - 3)}\u2026`
     const line = `[plano \u2190 ${this.displayName(agentId)}] ${normalized}`
 
     if (mode === 'queue' && target.busy) {
@@ -761,7 +947,7 @@ export class MeshBus {
       target.currentTask = shortTask(text) // v3 B: the target has work coming
       this.touchLink(agentId, to, 'active')
       this.pushEvent({ at: Date.now(), kind: 'msg-queued', from: agentId, to })
-      return { ok: true, status: 'queued', id }
+      return { ok: true, status: 'queued', id, autoQueued, truncated }
     }
     const baseline = this.cleanTail(to) // v3 A4: before the echo lands
     // Anchor the turn this message is about to start, exactly as a spawn prompt does. Without it,
@@ -787,7 +973,10 @@ export class MeshBus {
     message.confirmed = confirmed
     message.status = confirmed ? 'delivered' : 'written-but-unconfirmed'
     this.pushEvent({ at: Date.now(), kind: 'msg-delivered', from: agentId, to, detail: `${confirmed ? 'confirmed' : 'written-but-unconfirmed'} #${id}` })
-    return { ok: true, status: message.status, confirmed, id }
+    this.resolveWatchers(id, message)
+    // v6 A4: truncation is REPORTED. A 4000-char cut used to happen silently, losing exactly the
+    // tail of a long contract where the specifics live; the sender can now split and re-send.
+    return { ok: true, status: message.status, confirmed, id, truncated }
   }
 
   /**
@@ -832,6 +1021,12 @@ export class MeshBus {
   /** Write a single Enter ('\r') to submit the typed line — exactly once per message. */
   private async submitLine(ptyId: string): Promise<boolean> {
     if (!this.onDeliver) return false
+    // Let the TUI finish ingesting the last burst before the Enter. Bursted delivery (v6) hands a
+    // harness 24 characters at a time, and a submit that lands while it is still re-rendering its
+    // input box is swallowed: the message sits in the box, unsent, and the sender waits on a turn
+    // that never starts. This was intermittent — exactly the kind of "sometimes they stop talking"
+    // the mesh must not have.
+    await sleep(SUBMIT_SETTLE_MS)
     return this.onDeliver(ptyId, '\r')
   }
 
@@ -1072,6 +1267,21 @@ export class MeshBus {
 
     const corr = Math.random().toString(16).slice(2, 7)
     const ms = Math.max(1000, Math.min(timeoutMs || ASK_DEFAULT_TIMEOUT_MS, ASK_MAX_TIMEOUT_MS))
+    // v6 A4: one busy rule for the whole mesh. `send` refused a mid-turn target while `ask` typed
+    // into it anyway — the same act with two contracts, and the ask path was corrupting the input
+    // of an agent that was still thinking. A busy peer gets the ask QUEUED (the correlation id
+    // rides along in the line, so the peer's `plano reply` still resolves it).
+    if (target.busy) {
+      const queued = await this.send(agentId, to, `${text} [reply with: plano reply ${corr} <summary>]`, 'queue')
+      if (!queued.ok) return queued
+      return {
+        ok: true,
+        status: 'queued',
+        correlationId: corr,
+        id: queued.id,
+        detail: 'target was mid-turn — the question is queued and will be typed in when they are free; watch it with `plano watch <id>`',
+      }
+    }
     const baseline = this.cleanTail(to)
     let normalized = String(text).replace(/[\r\n]+/g, ' ').trim()
     if (normalized.length > MAX_MESSAGE_LEN) normalized = `${normalized.slice(0, MAX_MESSAGE_LEN - 3)}\u2026`

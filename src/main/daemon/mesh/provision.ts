@@ -34,8 +34,16 @@ Every command is a subcommand of \`plano\` and prints JSON. Read it with your JS
 - **Read X's whole chat**: \`plano context <agentId> [--lines N]\` — the full redacted
   transcript of another agent, exactly like reading its conversation in Orca. It is bounded
   (~64 KiB, redacted) and works only while the desktop app is connected.
-- **Send a message**: \`plano send <to> <text>\` — typed visibly into their terminal (refused
-  while they are busy; add \`--queue\` to deliver when they are idle).
+- **Send a message**: \`plano send <to> <text>\` — typed visibly into their terminal. If they are
+  mid-turn it is QUEUED automatically and delivered the moment they go idle (the reply tells you
+  so, with the message id); nothing is lost and there is nothing to retry. Add \`--direct\` only if
+  you want it to fail instead of queuing.
+- **Know it landed**: \`plano watch <messageId>\` blocks until that message is delivered (or
+  expires) and answers either way. \`plano wait\` answers "is the peer done with its turn", which
+  is a DIFFERENT question — do not use it to check whether your message arrived.
+- **Read your system mail**: messages \`from plano\` in \`plano inbox\` are OUTCOME REPORTS about
+  your own messages (delivered, expired, undeliverable, target blocked). If you get one, act on it
+  — re-send or interrupt — instead of assuming your earlier message did its job.
 - **Ask AND wait for the answer**: \`plano ask <to> <text> [--timeout-ms N]\` — the delivered
   line carries a short correlation id (\`#a3f2b\`). When YOU receive a line containing
   \`#xxxxx\`, you MUST answer with \`plano reply <correlationId> <summary>\` when you finish; if

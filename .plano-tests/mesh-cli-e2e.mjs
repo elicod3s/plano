@@ -419,6 +419,42 @@ async function main() {
   const ctxParsed = parseJson(cliSync(['context', targetId, '--lines', '15', '--json'], tokenA).stdout) ?? {}
   const c9 = stParsed.ok === true && typeof stParsed.state === 'string' && ctxParsed?.ok === true && (ctxParsed.tail || '').length > 0
 
+  const c12detail = {}
+  let c12 = false
+  // ---- C11: a busy target AUTO-QUEUES instead of refusing (v6 A1) ----
+  // The old contract answered `failed: working` and made every agent invent its own retry. Send
+  // to a peer that is mid-turn and assert the message is accepted and parked, not rejected.
+  const c11detail = {}
+  let c11 = false
+  {
+    // Put B to work with something slow, then send while it is busy.
+    cliSync(['send', ptyB, 'sleep 6'], tokenA)
+    await sleep(1500)
+    const busySend = parseJson(cliSync(['send', ptyB, 'echo queued-under-load', '--json'], tokenA).stdout) ?? {}
+    c11detail.status = busySend.status
+    c11detail.autoQueued = busySend.autoQueued === true
+    c11detail.id = typeof busySend.id === 'string' ? busySend.id.slice(0, 8) : null
+    // Accepted is the point: either it went straight in (target finished early) or it was queued.
+    c11 = busySend.ok === true && (busySend.status === 'queued' || busySend.status === 'delivered')
+
+    // ---- C12: `plano watch` answers for that exact message (v6 B1) ----
+    if (busySend.ok === true && typeof busySend.id === 'string') {
+      const watched = parseJson(cliSync(['watch', busySend.id, '--timeout-ms', '45000', '--json'], tokenA, 60000).stdout) ?? {}
+      c12detail.status = watched.status
+      c12detail.already = watched.already === true
+      c12 = watched.ok === true && (watched.status === 'delivered' || watched.status === 'queued')
+    }
+  }
+
+  // ---- C13: the roster exposes backlog + workspace (v6 B3 / v5 roster columns) ----
+  const rosterV6 = parseJson(cliSync(['roster', '--json'], tokenA).stdout) ?? {}
+  const anyAgent = (rosterV6.agents ?? [])[0] ?? {}
+  const c13 =
+    rosterV6.ok === true &&
+    typeof anyAgent.pending === 'number' &&
+    typeof anyAgent.workspace === 'string' &&
+    typeof anyAgent.oldestPendingMs === 'number'
+
   // ---- C10: an agent can CLOSE a terminal (the undo of spawn) ----
   // Close one of the agents spawned above and prove it is really gone: the session dies, the mesh
   // drops it, and `status` can no longer find it.
@@ -441,7 +477,7 @@ async function main() {
   console.log(
     'RESULT:',
     JSON.stringify({
-      ok: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10,
+      ok: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13,
       c1: { ok: c1, id: whoParsed.id?.slice(0, 8), workspace: whoParsed.workspace },
       c2: { ok: c2, agents: rosParsed.agents?.length },
       c3: { ok: c3, status: bad.status, stderr: (bad.stderr || '').trim().slice(0, 80) },
@@ -452,6 +488,9 @@ async function main() {
       c8: { ok: c8, commands: acParsed.commands?.length },
       c9: { ok: c9, state: stParsed.state, chatBytes: (ctxParsed?.tail ?? '').length },
       c10: { ok: c10, ...c10detail },
+      c11: { ok: c11, ...c11detail },
+      c12: { ok: c12, ...c12detail },
+      c13: { ok: c13, pending: anyAgent.pending, workspace: anyAgent.workspace },
     }),
   )
 

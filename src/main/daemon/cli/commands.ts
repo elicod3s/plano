@@ -93,6 +93,17 @@ export async function run(rawKey: string, p: ParsedArgs, client: MeshClient): Pr
       // `--panel` takes down every terminal in that panel; the default closes just this session.
       return finish(client, 'plano_close', { agentId: id, panel: flags.panel === true }, json, formatClose)
     }
+    case 'watch': {
+      needClient(client)
+      const id = pos[0]
+      if (!id) throw usage('watch <messageId> [--timeout-ms <ms>]')
+      const timeoutMs = num(flags, 'timeout-ms', 300_000)
+      // Long-poll: the daemon answers the moment the message reaches a terminal status.
+      const res = await client.call('plano_watch', { id, timeoutMs }, { timeoutMs: timeoutMs + 30_000, keepalive: true })
+      if (json) return { output: JSON.stringify(res, null, 2), exitCode: 0 }
+      if (!res.ok) return { output: failText(res), exitCode: 1 }
+      return { output: formatWatch(res), exitCode: res.status === 'delivered' ? 0 : 2 }
+    }
     case 'inbox': {
       needClient(client)
       return finish(client, 'plano_inbox', {}, json, formatInbox)
@@ -113,13 +124,19 @@ export async function run(rawKey: string, p: ParsedArgs, client: MeshClient): Pr
       const since = flags.wait === true ? Date.now() : undefined
       const res = await client.call(
         'plano_send',
-        { to, text, mode: flags.queue === true ? 'queue' : 'type', id: typeof flags.id === 'string' ? flags.id : undefined },
+        {
+          to,
+          text,
+          mode: flags.queue === true ? 'queue' : 'type',
+          id: typeof flags.id === 'string' ? flags.id : undefined,
+          direct: flags.direct === true,
+        },
         { timeoutMs: since ? 60_000 : 30_000 },
       )
       if (!res.ok) return { output: failText(res), exitCode: 1 }
       if (!since) {
         if (json) return { output: JSON.stringify(res, null, 2), exitCode: 0 }
-        return { output: `sent to ${to}: ${String(res.status ?? 'delivered')}${res.confirmed ? ' (confirmed)' : ''}`, exitCode: 0 }
+        return { output: formatSend(res, to), exitCode: 0 }
       }
       const timeoutMs = num(flags, 'timeout-ms', WAIT_DEFAULT_TIMEOUT_MS)
       const quietMs = num(flags, 'quiet-ms', 2000)
@@ -442,12 +459,18 @@ function formatRoster(r: MeshResult): string {
   const rows = agents.map((a) => {
     const id = String(a.id ?? '')
     const short = id.length > 8 ? `${id.slice(0, 8)}\u2026` : id
+    // v6 B3: mailbox depth, with the oldest wait when it is starting to matter. Saturation used
+    // to be invisible until an orchestrator's own messages began dying.
+    const pending = typeof a.pending === 'number' ? a.pending : 0
+    const oldestMs = typeof a.oldestPendingMs === 'number' ? a.oldestPendingMs : 0
+    const inbox = pending === 0 ? '-' : oldestMs > 60_000 ? `${pending} (${Math.round(oldestMs / 60_000)}m)` : String(pending)
     return [
       short.padEnd(9),
       String(a.kind ?? '?').padEnd(11),
       String(a.state ?? '?').padEnd(14),
       String(a.workspace ?? '-').slice(0, 10).padEnd(11),
       folderOf(a.cwd).slice(0, 18).padEnd(19),
+      inbox.padEnd(8),
       String(a.currentTask ?? '').slice(0, 40),
     ].join(' ')
   })
@@ -457,9 +480,33 @@ function formatRoster(r: MeshResult): string {
     'state'.padEnd(14),
     'workspace'.padEnd(11),
     'folder'.padEnd(19),
+    'inbox'.padEnd(8),
     'task',
   ].join(' ')
   return `agents: ${agents.length}\n${header}\n${rows.join('\n')}`
+}
+
+/** v6 A1/A4: the answer says what actually happened — queued-because-busy and truncation included. */
+function formatSend(r: MeshResult, to: string): string {
+  const status = String(r.status ?? 'delivered')
+  const lines: string[] = []
+  if (r.autoQueued) {
+    lines.push(`queued for ${to}: they are mid-turn, so it will be typed in the moment they are free`)
+    lines.push(`follow it with: plano watch ${String(r.id ?? '')}`)
+  } else {
+    lines.push(`sent to ${to}: ${status}${r.confirmed ? ' (confirmed)' : ''}`)
+  }
+  if (r.truncated) lines.push('WARNING: the message was longer than the limit and was cut — send the rest as a second message')
+  return lines.join('\n')
+}
+
+function formatWatch(r: MeshResult): string {
+  const status = String(r.status ?? 'unknown')
+  if (status === 'delivered') return `delivered${r.confirmed ? ' and confirmed (they reacted)' : ' (written, no reaction observed yet)'}`
+  if (status === 'expired') return 'EXPIRED — never delivered; re-send it'
+  if (status === 'undeliverable') return `undeliverable: ${String(r.reason ?? 'write failed')}`
+  if (r.timedOut) return 'still queued — the target has not been free yet (watch again, or plano interrupt them)'
+  return status
 }
 
 function formatClose(r: MeshResult): string {

@@ -102,8 +102,22 @@ export class MeshEndpoint {
         return this.bus.timelineView()
       case 'plano_send': {
         const mode = args.mode === 'queue' ? 'queue' : 'type'
-        return this.bus.send(agentId, String(args.to ?? ''), String(args.text ?? ''), mode, 0, typeof args.id === 'string' ? args.id : undefined)
+        return this.bus.send(
+          agentId,
+          String(args.to ?? ''),
+          String(args.text ?? ''),
+          mode,
+          0,
+          typeof args.id === 'string' ? args.id : undefined,
+          args.direct === true,
+        )
       }
+      case 'plano_watch':
+        return this.bus.watchMessage(
+          agentId,
+          String(args.id ?? ''),
+          typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
+        )
       case 'plano_ask':
         return this.bus.ask(agentId, String(args.to ?? ''), String(args.text ?? ''), typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined)
       case 'plano_reply':

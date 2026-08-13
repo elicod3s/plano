@@ -65,6 +65,12 @@ export interface MeshMessage {
   confirmed?: boolean
   /** v3 A3: why delivery ultimately failed. */
   reason?: string
+  /** v6 A2: a terminal-outcome notice was already sent to `from` — never notify twice. */
+  notified?: boolean
+  /** v6 C3: the "target is blocked" heads-up was sent — independent of the outcome notice. */
+  blockedNotified?: boolean
+  /** v6 A3: absolute creation time; `at` slides while the target is busy, this never does. */
+  bornAt?: number
 }
 
 /** Timeline event (auditable in the AgentManager). */
