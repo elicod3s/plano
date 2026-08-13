@@ -5,6 +5,70 @@ intent. Anything marked *unverified* has NOT been proven working, whatever the c
 
 ---
 
+## 0. The root cause, found — PLANO had no way to RECEIVE
+
+Everything below §1 describes symptoms of one design difference from Orca.
+
+**PLANO delivered by typing into the peer's terminal.** That is the only channel it had, so every
+message depended on correctly reading a TUI we do not own: is the composer open, is it mid-turn, is
+bracketed paste on, did the Enter land. When the answer was "not right now", the message waited for
+an idle transition that a booting or long-running agent may never make. `send` even refused
+outright — `not-agent: target is a plain terminal` — for any peer whose harness was not yet
+detected, which is precisely what a freshly spawned agent looks like for its first minutes.
+
+**Orca never does this.** In Orca a worker receives by *calling* `orchestration check`, and a
+follow-up to a worker is, in its own words, *"structured inbox mail, not prompt injection"*. The
+worker blocks inside `check --wait`, so the message arrives as the output of a command it is
+already running — no composer to detect, no paste to confirm, no Enter to prove. Typing is used
+once, to wake an idle worker with its initial task.
+
+PLANO already had `check` (v7) with replaying delivery batches. What it did not have was the wire:
+**`send` never woke a `check --wait` waiter.** An agent told to "wait for messages" had no mechanism
+behind the instruction, and mail piled up in a mailbox nothing was draining.
+
+### What changed
+
+| | Before | Now |
+|---|---|---|
+| Delivery | typed into the TUI, or queued for an idle transition | recorded first, routed second |
+| Peer in `check --wait` | not a route at all | woken in **97 ms**, `channel: "check"` |
+| Undetected harness | `send` refused | accepted; waits in the mailbox |
+| Spawn prompt | task only | task **+ the lifecycle preamble** that teaches `check --wait` |
+| Timeout copy | `{"_keepalive":true}` ×N | says what it is waiting on, and the command to repeat |
+
+Proven by `C18` (a listening peer wakes with the message, **89 ms**) and `C19` (`send` never
+refuses) in `.plano-tests/mesh-cli-e2e.mjs`, with C1–C17 still green.
+
+### And the reason it had never worked with a real agent
+
+`.plano-tests/mesh-real-omp.mjs` runs the user's exact scenario against a **real OMP agent**:
+`plano spawn omp . --prompt "do nothing, wait for messages, answer when greeted"`, then a peer
+greets it. The first run failed in a way no amount of mesh work would have fixed:
+
+```
+STEP boot {"s":280,"state":"working","tail":"…╭── π  > 🗑 …le88d ▶───────────╮"}
+STEP adopted-contract {"listening":false}
+```
+
+Five minutes at `working` — **with its input box plainly drawn in the tail.** π and OMP render the
+composer inside the frame's top edge, so the prompt glyph sits after `╭── π `, and every marker in
+`agentLight.ts` required it at the start of the row. The composer was therefore never detected, so
+readiness could never say `sendable`, so the spawn prompt was never typed, so the agent never read
+the contract. Meanwhile its failing MCP servers kept the screen changing, which pinned the activity
+heuristic at "busy" forever. One regex, and the whole harness was unreachable.
+
+With `BOXED_INPUT_PROMPT` added, the same probe — MCP servers still failing — gives:
+
+```
+STEP boot   {"s":100,"tail":"⠧ Sigo esperando mensajes del mesh"}   ← it ran check --wait itself
+STEP adopted-contract {"listening":true}
+STEP send   {"status":"delivered","channel":"check",
+             "detail":"Codex is listening on `plano check --wait` — it woke with your message."}
+STEP answered {"tail":"⠴ Confirmando mensaje y siguiendo a la escucha"}
+```
+
+---
+
 ## 1. Still broken
 
 ### 1.1 `plano wait` burns its whole budget on keepalives

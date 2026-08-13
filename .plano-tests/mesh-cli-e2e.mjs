@@ -833,10 +833,72 @@ prompt(false)
     c17detail.landed === 40 &&
     c17detail.failures.length === 0
 
+  // ── C18: the PULL channel — a peer blocked in `check --wait` receives instantly ────────────
+  //
+  // This is the one delivery route that is guaranteed rather than attempted: the peer is already
+  // inside the CLI call, so the message arrives as that command's own output. No composer to
+  // detect, no paste to confirm, no Enter to prove. Everything else in the mesh degrades when a
+  // TUI is in an unexpected state; this does not.
+  const c18detail = {}
+  {
+    const listener = cliAsync(['check', '--wait', '--timeout-ms', '60000', '--json'], tokenB)
+    const listening = runAsync(listener, 70000, 'c18-check')
+    await sleep(2000) // let the long-poll register its waiter
+    const t0 = Date.now()
+    const push = cliSync(['send', ptyB, 'ping-through-check-18', '--json'], tokenA, 30000)
+    let pushParsed = {}
+    try {
+      pushParsed = JSON.parse(push.stdout || '{}')
+    } catch {}
+    const got = await listening
+    c18detail.wakeMs = Date.now() - t0
+    c18detail.channel = pushParsed.channel ?? null
+    c18detail.sendStatus = pushParsed.status ?? null
+    let checkParsed = {}
+    try {
+      checkParsed = JSON.parse(got.stdout || '{}')
+    } catch {}
+    c18detail.count = checkParsed.count ?? 0
+    c18detail.carriedText = JSON.stringify(checkParsed.messages ?? []).includes('ping-through-check-18')
+    // Fast is the point: the old path waited for an idle transition that could never come.
+    c18detail.fast = c18detail.wakeMs < 10000
+  }
+  const c18 =
+    c18detail.channel === 'check' &&
+    c18detail.sendStatus === 'delivered' &&
+    c18detail.count >= 1 &&
+    c18detail.carriedText === true &&
+    c18detail.fast === true
+
+  // ── C19: `send` never refuses a peer whose harness is not detected ─────────────────────────
+  //
+  // It used to answer `not-agent: target is a plain terminal` and drop the message on the floor.
+  // A booting agent is indistinguishable from a plain terminal for its first minutes, which is
+  // how a message sent to a newborn was rejected outright instead of waiting for it.
+  const c19detail = {}
+  {
+    await rpc(host, 'reportVerdict', { ptyId: ptyC, verdict: { active: false, kind: 'unknown', phase: 'idle', displayName: '' } })
+    await sleep(800)
+    const res = cliSync(['send', ptyC, 'mail-to-an-undetected-peer', '--json'], tokenA, 30000)
+    try {
+      const parsed = JSON.parse(res.stdout || '{}')
+      c19detail.ok = parsed.ok
+      c19detail.status = parsed.status ?? null
+      c19detail.error = parsed.error ?? null
+    } catch {
+      c19detail.parseFailed = (res.stdout || '').slice(0, 200)
+    }
+  }
+  const c19 = c19detail.ok === true && !c19detail.error
+
   console.log(
     'RESULT:',
     JSON.stringify({
-      ok: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13 && c14 && c15 && c16 && c17,
+      ok:
+        c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13 && c14 &&
+        c15 && c16 && c17 && c18 && c19,
+      c18: { ok: c18, ...c18detail },
+      c19: { ok: c19, ...c19detail },
       c1: { ok: c1, id: whoParsed.id?.slice(0, 8), workspace: whoParsed.workspace },
       c2: { ok: c2, agents: rosParsed.agents?.length },
       c3: { ok: c3, status: bad.status, stderr: (bad.stderr || '').trim().slice(0, 80) },

@@ -7,7 +7,7 @@
 import http from 'node:http'
 
 const DEFAULT_URL = 'http://127.0.0.1:56780/cli'
-const KEEPALIVE_MS = 15_000
+const KEEPALIVE_MS = 30_000
 
 /** A mesh result: `ok` is the only guaranteed field; commands add more. */
 export interface MeshResult {
@@ -105,9 +105,15 @@ export class MeshClient {
       })
       let keepalive: NodeJS.Timeout | null = null
       if (opts.keepalive) {
+        // A word, not a machine token. `{"_keepalive":true}` repeated on stderr read as a broken
+        // command to every agent that saw it — it says nothing about what is being waited on, and
+        // an agent staring at a wall of them concludes the call failed and stops waiting. Says
+        // what it is doing instead, and only every 30 s.
+        let ticks = 0
         keepalive = setInterval(() => {
           try {
-            process.stderr.write(JSON.stringify({ _keepalive: true }) + '\n')
+            ticks += 1
+            process.stderr.write(`plano: still listening (${ticks * (KEEPALIVE_MS / 1000)}s) — this call returns as soon as something arrives\n`)
           } catch {
             /* stderr closed — fine */
           }

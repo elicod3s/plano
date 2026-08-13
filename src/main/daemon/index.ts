@@ -59,6 +59,35 @@ import { probeHarnessOnHost } from './harnessResolve'
  *
  * Now each spawned ptyId gets its own prompt, and the requester is excluded outright.
  */
+/**
+ * The lifecycle preamble every spawned agent receives with its task — Orca's `dispatch --inject`,
+ * ported.
+ *
+ * Without it, "wait for messages and answer when someone greets you" is an instruction with no
+ * mechanism behind it: the agent finishes its turn, idles at its prompt, and the mesh's only way
+ * back in is typing at a TUI it has to guess the state of. The user watched exactly that happen —
+ * a spawned worker that acknowledged the task and then never heard anything again.
+ *
+ * `plano check --wait` turns that into a guarantee. The agent BLOCKS inside the CLI call, so the
+ * message arrives as the output of a command it is already running: no composer to detect, no
+ * paste to confirm, no Enter to prove. Waiting is a command, not a state we have to infer.
+ */
+function meshPreamble(agentId: string): string {
+  const me = agentId.slice(0, 8)
+  return [
+    `— PLANO mesh · you are ${me} —`,
+    'TO RECEIVE A MESSAGE, run: plano check --wait --timeout-ms 90000 --json',
+    'It BLOCKS until mail arrives and returns it. This is how you wait for messages: never sleep, never poll, never watch the screen.',
+    // 90 s, not 10 min: the binding limit is the HARNESS's own command timeout (OMP kills a shell
+    // call at 120 s), so a longer block would be killed by the caller and read as a broken mesh.
+    // Returning inside that window and looping is what makes waiting survivable.
+    'A timeout returns {"checkpoint":true} — that is not a failure and not silence, it just means nothing arrived in that window. Run the SAME command again; keep doing that for as long as you are waiting.',
+    'After you handle a batch, acknowledge it and keep listening in one call: plano check --ack <deliveryId> --wait --timeout-ms 90000 --json',
+    'If a message carries a correlation id like #a3f2b, you MUST answer it: plano reply a3f2b "<your answer>"',
+    'To reach the others: plano roster (who is here) · plano send <peer> "<text>" · plano ask <peer> "<question>"',
+  ].join('\n')
+}
+
 async function deliverPromptToSpawned(ptyIds: string[], prompt: string, requesterId: string): Promise<void> {
   await Promise.all(
     ptyIds.map(async (ptyId) => {
@@ -82,9 +111,10 @@ async function deliverPromptToSpawned(ptyIds: string[], prompt: string, requeste
       // Park it, never refuse it. `send` declines an `unknown` harness, and a newborn still
       // booting its MCP servers is exactly that — which is how a spawn prompt used to vanish into
       // a log line while the user watched an agent that never greeted them.
-      const delivered = await mesh.send(requesterId, ptyId, prompt, 'queue')
+      const withContract = `${prompt}\n\n${meshPreamble(ptyId)}`
+      const delivered = await mesh.send(requesterId, ptyId, withContract, 'queue')
       if (!delivered.ok) {
-        const parked = mesh.queueForAgent(requesterId, ptyId, prompt)
+        const parked = mesh.queueForAgent(requesterId, ptyId, withContract)
         log(`mesh spawn prompt parked for ${ptyId} (${String(delivered.error ?? 'unknown')}) → ${parked.ok ? 'queued' : 'LOST'}`)
       }
     }),

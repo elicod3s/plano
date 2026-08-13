@@ -531,10 +531,13 @@ function formatRoster(r: MeshResult): string {
     const pending = typeof a.pending === 'number' ? a.pending : 0
     const oldestMs = typeof a.oldestPendingMs === 'number' ? a.oldestPendingMs : 0
     const inbox = pending === 0 ? '-' : oldestMs > 60_000 ? `${pending} (${Math.round(oldestMs / 60_000)}m)` : String(pending)
+    // A peer inside `plano check --wait` is reachable in milliseconds; say so where the state is
+    // read, because "listening" is a stronger fact than any state we infer from a screen.
+    const state = a.listening === true ? 'listening' : String(a.state ?? '?')
     return [
       short.padEnd(9),
       String(a.kind ?? '?').padEnd(11),
-      String(a.state ?? '?').padEnd(14),
+      state.padEnd(14),
       String(a.workspace ?? '-').slice(0, 10).padEnd(11),
       folderOf(a.cwd).slice(0, 18).padEnd(19),
       inbox.padEnd(8),
@@ -599,9 +602,12 @@ function formatTasks(r: MeshResult): string {
 
 /** A timeout must never read as a failure — that is how a healthy worker gets declared dead. */
 function formatCheck(r: MeshResult): string {
-  if (r.checkpoint) return 'nothing waiting yet — checkpoint, not a failure. Keep waiting (the worker is still yours).'
+  if (r.checkpoint) return String(r.detail ?? 'nothing waiting yet — checkpoint, not a failure. Keep waiting.')
   const msgs = (r.messages as Array<Record<string, unknown>> | undefined) ?? []
-  const lines = msgs.map((m) => `[${String(m.kind)}] from ${String(m.from).slice(0, 8)}: ${String(m.text).slice(0, 160)}`)
+  // Never truncate the body. A question carries its reply instruction — `[reply with: plano reply
+  // <id> …]` — at the END of the text, so clipping at 160 characters removed the one part the
+  // receiver had to act on and left it holding a question it could not answer.
+  const lines = msgs.map((m) => `[${String(m.kind)}] from ${String(m.from).slice(0, 8)}: ${String(m.text)}`)
   const body = lines.join('\n')
   return `${msgs.length} message${msgs.length === 1 ? '' : 's'}\n${body}\n\nack with: plano check --ack ${String(r.deliveryId)}`
 }

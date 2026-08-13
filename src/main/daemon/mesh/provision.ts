@@ -22,7 +22,37 @@ You are running inside PLANO, an infinite-canvas workspace. Other agents (Claude
 Gemini CLI, OpenCode, Cursor agents…) may be running in other terminals on the same canvas —
 the PLANO mesh connects you through the \`plano\` CLI, which is already on your PATH.
 
-## Start here: the four things you will actually do
+## How you RECEIVE — read this first
+
+\`\`\`sh
+plano check --wait --timeout-ms 600000 --json
+\`\`\`
+
+This BLOCKS until mail arrives and then returns it. **This is how you wait for a message.** Do not
+sleep, do not poll, do not stare at your screen waiting for something to appear — block on this
+call and the message is handed to you as its output.
+
+A timeout returns \`{"checkpoint": true}\`. That is not a failure and not proof of silence; it
+means nothing arrived in that window. Run it again.
+
+Once you have handled a batch, acknowledge it and keep listening in a single call:
+
+\`\`\`sh
+plano check --ack <deliveryId> --wait --timeout-ms 600000 --json
+\`\`\`
+
+Until you acknowledge, the same batch comes back — so an agent that dies mid-batch loses nothing.
+
+If a message carries a correlation id like \`#a3f2b\`, someone is blocked on your answer:
+
+\`\`\`sh
+plano reply a3f2b "<your answer>"
+\`\`\`
+
+> Mail is durable the moment \`send\` returns. A peer that is booting, mid-turn or parked in
+> \`check --wait\` still receives it — being busy delays a message, it never loses one.
+
+## Then: the four things you will actually do
 
 Every command is a subcommand of \`plano\`. Add \`--json\` when you want to parse instead of read.
 
@@ -45,10 +75,12 @@ to ask "what did you do?", read it yourself first — it is faster and it costs 
 \`\`\`sh
 plano send <to> "the message"
 \`\`\`
-It is typed into their terminal. **If they are mid-turn it is queued automatically** and delivered
-the moment they are free — you get \`status: queued\` and a message id. There is nothing to retry
-and nothing is lost. Never invent your own acknowledgement (do not echo sentinels): to confirm it
-landed, use the id:
+The message is recorded first and routed second, so it cannot be lost by a screen that was not
+ready. If the peer is blocked on \`plano check --wait\` it wakes with your message immediately
+(\`channel: "check"\`). Otherwise it is typed into their terminal, and if they are mid-turn it
+waits in their mailbox until they are free or until they check. **\`send\` never refuses** — not a
+booting agent, not a plain shell. Never invent your own acknowledgement (do not echo sentinels):
+to confirm it landed, use the id:
 \`\`\`sh
 plano watch <messageId>               # blocks until delivered (or expired), then answers
 \`\`\`
@@ -297,6 +329,13 @@ other agents (Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Kiro…). The \`
 your PATH and is how you talk to them. Every command takes \`--json\`; exit code 2 means a wait
 timed out. Run \`plano agent-context\` for the full machine-readable command schema.
 
+**To RECEIVE a message: \`plano check --wait --timeout-ms 90000 --json\`.** It blocks until mail
+arrives and hands it to you as its output — that is what "wait for a message" means here. Never
+sleep, poll, or watch the screen. \`{"checkpoint": true}\` means nothing arrived in that window,
+not that the mesh is silent: run it again. Handle a batch, then acknowledge and keep listening in
+one call — \`plano check --ack <deliveryId> --wait --timeout-ms 90000 --json\`. The batch replays
+until you acknowledge it, so nothing is lost if you die mid-batch.
+
 - \`plano whoami\` — who and where you are.
 - \`plano roster\` — every live agent: id (unique prefixes work), harness, state, current task.
 - \`plano status <id>\` / \`plano context <id> [--lines N]\` — a peer's live state / its full
@@ -380,6 +419,9 @@ function briefingTargets(home: string): { label: string; dir: string; file: stri
     { label: 'opencode', dir: join(home, '.config', 'opencode'), file: join(home, '.config', 'opencode', 'AGENTS.md') },
     { label: 'cursor', dir: join(home, '.cursor'), file: join(home, '.cursor', 'AGENTS.md') },
     { label: 'pi', dir: join(home, '.pi'), file: join(home, '.pi', 'AGENTS.md') },
+    // OMP was missing entirely, which is why the harness the user actually spawns learned nothing
+    // about the mesh from provisioning — only from the prompt preamble.
+    { label: 'omp', dir: join(home, '.omp'), file: join(home, '.omp', 'AGENTS.md') },
   ]
 }
 
@@ -388,6 +430,9 @@ function skillTargets(home: string): { label: string; dir: string; create: boole
   return [
     { label: 'claude-code', dir: join(home, '.claude', 'skills', 'plano-mesh'), create: true },
     { label: 'kiro', dir: join(home, '.kiro', 'skills', 'plano-mesh'), create: existsSync(join(home, '.kiro', 'skills')) },
+    // Grok keeps a Claude-style ~/.grok/skills folder, so it gets the full guide rather than the
+    // short brief. Only when that folder already exists — PLANO never invents a config dir.
+    { label: 'grok', dir: join(home, '.grok', 'skills', 'plano-mesh'), create: existsSync(join(home, '.grok', 'skills')) },
   ]
 }
 

@@ -561,6 +561,11 @@ export class MeshBus {
         // backing up until its own messages started dying.
         pending: this.mailboxes.load(a.id).filter((m) => !m.acked).length,
         oldestPendingMs: this.oldestPendingAge(a.id),
+        // Parked in `plano check --wait` right now: a message to this peer is handed over in
+        // milliseconds, guaranteed. Worth seeing — it is the difference between "it will get
+        // there" and "it is already there", and it tells a coordinator which peers are actually
+        // holding the contract rather than merely sitting at a prompt.
+        listening: this.isListening(a.id),
       })),
     }
   }
@@ -627,6 +632,10 @@ export class MeshBus {
 
   private async drainMailboxNow(agentId: string): Promise<void> {
     const now = Date.now()
+    // Hands off: the agent is inside `plano check --wait` and will consume its own mailbox. Typing
+    // now would push the line into the CLI process the agent is blocked on instead of into the
+    // agent, and the message would be gone with nothing to replay.
+    if (this.isListening(agentId)) return
     const target = this.agents.get(agentId)
     // v6 C3: a peer parked on a permission prompt is not going to read anything until a human
     // answers it. Tell the senders once, instead of letting them wait on a wall.
@@ -830,13 +839,35 @@ export class MeshBus {
    * The alternative is what agents do today: sleep, poll `roster`, guess. A rolling long-poll that
    * only wakes on the message types you asked for replaces the whole polling loop with one call.
    */
-  private checkWaiters = new Map<string, Array<() => void>>()
+  /**
+   * Each waiter carries the filter it is waiting on, because waking is only useful when there is
+   * something that waiter would actually accept. A wake with nothing to hand over returns
+   * `count: 0`, which the agent correctly reads as a checkpoint — and in the gap between that
+   * return and its next call there is no waiter for a message to land in. A spurious wake is
+   * therefore not merely wasteful, it is a hole in the delivery guarantee.
+   */
+  private checkWaiters = new Map<string, Array<{ wake: () => void; matches: () => boolean }>>()
+
+  /**
+   * Is this agent parked inside `plano check --wait` right now?
+   *
+   * This is the one state in which delivery is guaranteed rather than attempted, so it outranks
+   * every other route. It is also why the typed path must stand down: an agent inside a long-poll
+   * is running a command, and typing at a running command feeds the child process, not the agent.
+   */
+  private isListening(agentId: string): boolean {
+    return (this.checkWaiters.get(agentId)?.length ?? 0) > 0
+  }
 
   private resolveCheckWaiters(agentId: string): void {
     const waiting = this.checkWaiters.get(agentId)
     if (!waiting || waiting.length === 0) return
-    this.checkWaiters.delete(agentId)
-    for (const wake of waiting) wake()
+    const ready = waiting.filter((w) => w.matches())
+    if (ready.length === 0) return
+    const rest = waiting.filter((w) => !ready.includes(w))
+    if (rest.length > 0) this.checkWaiters.set(agentId, rest)
+    else this.checkWaiters.delete(agentId)
+    for (const w of ready) w.wake()
   }
 
   /**
@@ -870,23 +901,35 @@ export class MeshBus {
       const ms = Math.max(1000, Math.min(opts.timeoutMs ?? CHECK_DEFAULT_TIMEOUT_MS, CHECK_MAX_TIMEOUT_MS))
       await new Promise<void>((resolve) => {
         const timer = setTimeout(() => {
-          const list = (this.checkWaiters.get(agentId) ?? []).filter((fn) => fn !== wake)
+          const list = (this.checkWaiters.get(agentId) ?? []).filter((w) => w !== waiter)
           if (list.length > 0) this.checkWaiters.set(agentId, list)
           else this.checkWaiters.delete(agentId)
           resolve()
         }, ms)
-        const wake = (): void => {
-          clearTimeout(timer)
-          resolve()
+        const waiter = {
+          wake: (): void => {
+            clearTimeout(timer)
+            resolve()
+          },
+          matches: (): boolean => matches().length > 0,
         }
         const list = this.checkWaiters.get(agentId) ?? []
-        list.push(wake)
+        list.push(waiter)
         this.checkWaiters.set(agentId, list)
       })
       batch = matches()
     }
     if (batch.length === 0) {
-      return { ok: true, count: 0, checkpoint: true, detail: 'nothing waiting — this is a checkpoint, not a failure' }
+      // Say what to do next, in the reply itself. An agent that reads "timeout" with no next step
+      // concludes the mesh is dead and stops listening — which is precisely how a worker told to
+      // "wait for messages" went quiet forever.
+      const again = `plano check --wait --timeout-ms ${Math.min(opts.timeoutMs ?? 90_000, 90_000)} --json`
+      return {
+        ok: true,
+        count: 0,
+        checkpoint: true,
+        detail: `nothing arrived in that window — a checkpoint, NOT a failure and NOT silence. Still waiting? run it again: ${again}`,
+      }
     }
     const deliveryId = `dlv_${Math.random().toString(36).slice(2, 10)}`
     const capped = batch.slice(0, CHECK_BATCH_MAX)
@@ -928,6 +971,7 @@ export class MeshBus {
     })
     target.currentTask = shortTask(text)
     this.pushEvent({ at: Date.now(), kind: 'msg-queued', from, to, detail: 'spawn prompt parked until the newborn can receive it' })
+    this.resolveCheckWaiters(to)
     this.drainMailbox(to)
     return { ok: true, status: 'queued', id }
   }
@@ -1276,7 +1320,13 @@ export class MeshBus {
     if (!resolved.ok) return resolved.result
     const target = resolved.agent
     to = target.id
-    if (target.kind === 'unknown') return { ok: false, error: 'not-agent', detail: 'target is a plain terminal, no harness detected' }
+    // v8 — copied from Orca: mail is DURABLE first and typed second.
+    //
+    // `send` used to refuse outright when the target's harness was still `unknown` ("target is a
+    // plain terminal"). A booting agent IS that for its first minutes, so a message to a newborn
+    // was rejected rather than kept. Orca never refuses a send: the message is recorded and the
+    // peer's own `check` consumes it — typing into the TUI is a WAKE-UP for an idle agent, not the
+    // delivery channel. A message therefore cannot be lost by a screen that was not ready.
     // v6 A1: a busy target QUEUES instead of refusing. Refusing made "mid-turn" the caller's
     // problem: every agent had to recognise the error, remember `--queue`, and retry — and the
     // ones that didn't simply stopped talking. The message is never lost either way, so the
@@ -1334,8 +1384,35 @@ export class MeshBus {
     if (truncated) normalized = `${normalized.slice(0, MAX_MESSAGE_LEN - 3)}\u2026`
     const line = `[plano \u2190 ${this.displayName(agentId)}] ${normalized}`
 
+    // The peer is BLOCKED INSIDE `plano check --wait`. That is the reliable channel and it beats
+    // every TUI heuristic: the message comes back as the output of the command the peer is already
+    // running, so there is no composer to detect, no paste to confirm, no Enter to prove. Note it
+    // also reads as "busy" to every screen-based measure — a command IS running — which is exactly
+    // why this decision has to come first, before readiness is consulted at all.
+    if (this.isListening(to)) {
+      this.mailboxes.push(to, message)
+      message.status = 'delivered'
+      target.currentTask = shortTask(text)
+      this.touchLink(agentId, to, 'active')
+      this.pushEvent({ at: Date.now(), kind: 'msg-delivered', from: agentId, to, detail: `check-wait #${id}` })
+      this.resolveCheckWaiters(to)
+      this.resolveWatchers(id, message)
+      return {
+        ok: true,
+        status: 'delivered',
+        channel: 'check',
+        id,
+        truncated,
+        detail: `${this.displayName(to)} is listening on \`plano check --wait\` — it woke with your message.`,
+      }
+    }
     if (mode === 'queue' && readiness.state !== 'sendable') {
       this.mailboxes.push(to, message)
+      // Wake a peer that is blocked in `check --wait` but had not registered when we looked (it
+      // starts waiting between our two statements). Without this the mailbox filled while the peer
+      // sat inside a long-poll that nothing ever resolved — the exact "it just stays there" the
+      // whole mesh was accused of.
+      this.resolveCheckWaiters(to)
       target.currentTask = shortTask(text) // v3 B: the target has work coming
       this.touchLink(agentId, to, 'active')
       this.pushEvent({ at: Date.now(), kind: 'msg-queued', from: agentId, to, detail: readiness.state })
@@ -1357,6 +1434,9 @@ export class MeshBus {
         bytesWritten: 0,
         readiness: readiness.state,
         humanActionRequired: permissionQueued,
+        detail: permissionQueued
+          ? `${this.displayName(to)} is on a permission prompt — a human must clear it. Your message is saved and lands the moment they do.`
+          : `saved to ${this.displayName(to)}'s mailbox (they are ${readiness.state}). They get it on their next \`plano check\`, or it is typed in when their composer opens. Nothing to retry.`,
       }
     }
     const baseline = this.cleanTail(to) // v3 A4: before the echo lands
@@ -1756,9 +1836,9 @@ export class MeshBus {
     if (!resolved.ok) return resolved.result
     const target = resolved.agent
     to = target.id
-    if (target.kind === 'unknown') {
-      return { ok: false, error: 'not-agent', detail: 'target is a plain terminal, no harness detected' }
-    }
+    // No `not-agent` refusal here either: `send` below decides the route, and a peer that is
+    // booting — or one parked in `plano check --wait`, which is where a well-behaved worker spends
+    // its idle time — must still be askable. Refusing here made the question the caller's problem.
     if (typeof text !== 'string' || text.length === 0) return { ok: false, error: 'empty' }
     if (text.length > MAX_MESSAGE_LEN) return { ok: false, error: 'too-large' }
     const corr = Math.random().toString(16).slice(2, 7)

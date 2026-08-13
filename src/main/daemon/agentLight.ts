@@ -208,11 +208,29 @@ const INPUT_PROMPT_MARKERS: Partial<Record<AgentKind, RegExp>> = {
 }
 const GENERIC_INPUT_PROMPT = /^[\s│┃╎┆┊┋╏╭╰┌└]*[›❯>]\s?/
 
+/**
+ * The composer drawn INSIDE a box header, which every marker above missed.
+ *
+ * π and OMP render their input line as part of the frame's top edge:
+ *
+ *     ╭── π  > 🗑 …le88d ▶───────────────────────────╮
+ *
+ * The prompt glyph sits after a rule and a label, so a pattern that only tolerates whitespace and
+ * corner characters before `>` never matched. The consequence was not cosmetic: with no composer
+ * detected, readiness could never say `sendable`, so an OMP agent whose MCP servers were noisily
+ * failing stayed `busy` for its entire life and every message to it waited for an idle transition
+ * that would never come. A real spawned agent sat like that for five minutes in the probe.
+ *
+ * Kept deliberately narrow — a corner, a rule, at most a short label, then the glyph — so ordinary
+ * output containing "> " cannot pass and make a working agent look free.
+ */
+const BOXED_INPUT_PROMPT = /^[\s│┃]*[╭╰┌└├]?[─═]{1,}\s*\S{0,12}\s*[›❯>]\s/u
+
 /** Index of the last rendered composer row, or -1 when no supported prompt is visible. */
 export function inputPromptRowIndex(rows: readonly string[], kind: AgentKind | 'unknown'): number {
   const marker = kind === 'unknown' ? GENERIC_INPUT_PROMPT : (INPUT_PROMPT_MARKERS[kind] ?? GENERIC_INPUT_PROMPT)
   for (let i = rows.length - 1; i >= 0; i -= 1) {
-    if (marker.test(rows[i])) return i
+    if (marker.test(rows[i]) || BOXED_INPUT_PROMPT.test(rows[i])) return i
   }
   return -1
 }
