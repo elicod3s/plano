@@ -125,7 +125,13 @@ export function installUsageHook(userData: string): ClaudeHookResult {
     mkdirSync(join(userData, 'bin'), { recursive: true })
     const cmdPath = join(userData, 'bin', 'plano-statusline.cmd')
     const shPath = join(userData, 'bin', 'plano-statusline')
-    const command = process.platform === 'win32' ? `cmd /c "${cmdPath}"` : shPath
+    // Claude runs statusLine through **sh**, not cmd.exe — the same lesson the agent hooks already
+    // learned. `cmd /c "<script.cmd>"` left cmd.exe reading the leftover payload from stdin and
+    // executing it as commands, which is why the raw session JSON appeared in the user's terminal
+    // instead of a status line. Use the POSIX twin on every platform, guarded so a missing script
+    // still drains stdin (an unread payload is what leaks) and never breaks the line.
+    const posix = shPath.replace(/\\/g, '/')
+    const command = `if [ -f '${posix}' ]; then '${posix}'; else { command -p cat 2>/dev/null || cat; } >/dev/null 2>&1 || :; fi`
     if (!claudeCredentialsPresent()) {
       // No Claude.ai session on this machine — the hook would fire into the void. Absent.
       writeHook(cmdPath, shPath, '')
