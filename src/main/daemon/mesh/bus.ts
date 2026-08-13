@@ -351,13 +351,35 @@ export class MeshBus {
     // v3 §3.5/3.6: pending messages to a dead peer are resolved with a REASON on the
     // timeline (never lost silently), then the box dies with the agent.
     const box = this.mailboxes.load(ptyId)
+    const notified = new Set<string>()
     for (const message of box) {
       if (message.acked) continue
       message.status = 'undeliverable'
       message.reason = 'peer-exited'
       this.pushEvent({ at: Date.now(), kind: 'msg-undeliverable', from: message.from, to: ptyId, detail: 'peer-exited' })
+      // Tell the SENDER, don't just log it. A timeline entry is only found by an agent that
+      // already suspects something went wrong — the one in the field ran `plano inbox` (its own,
+      // empty) and `plano status <dead id>` (not-found) and concluded its work had vanished. The
+      // notice goes into the sender's own mailbox, so the existing drain types it into their
+      // terminal the moment they are idle and `plano inbox` lists it until then.
+      if (message.from && message.from !== ptyId && !notified.has(message.from) && this.agents.has(message.from)) {
+        notified.add(message.from)
+        this.mailboxes.push(message.from, {
+          id: `sysx-${message.id}`,
+          at: Date.now(),
+          from: 'plano',
+          to: message.from,
+          text: `your queued message to ${this.displayName(ptyId)} was NOT delivered — that agent exited before consuming it. Re-send it to a live agent (plano roster).`,
+          mode: 'queue',
+          ttl: DEFAULT_TTL_MS,
+          hops: 0,
+          status: 'queued',
+          acked: false,
+        })
+      }
     }
     this.mailboxes.clear(ptyId)
+    for (const sender of notified) this.drainMailbox(sender)
     // v4 B4: a dead endpoint fails every chain it armed, watches, or targets.
     for (const chain of this.chains.values()) {
       if (chain.status !== 'armed') continue
@@ -593,9 +615,11 @@ export class MeshBus {
     const minGain = Math.max(40, Math.floor(submittedLen * 1.2))
     const deadline = Date.now() + CONFIRM_WINDOW_MS
     while (Date.now() < deadline) {
-      await sleep(300)
-      const tail = this.cleanTail(ptyId)
-      if (tail.length >= baseline.length + minGain) return true
+      await sleep(200)
+      // Measure the DELTA, not the raw length. A tail is a rendered screen now, and a screen that
+      // scrolls can gain content without gaining characters — comparing lengths would then read a
+      // busy receiver as silent.
+      if (this.tailDelta(baseline, this.cleanTail(ptyId), WAIT_DELTA_MAX_CHARS).length >= minGain) return true
     }
     return false
   }
@@ -1109,8 +1133,27 @@ export class MeshBus {
 
   /** Cleaned tail delta since the ask was sent (bounded). Nothing new → empty. */
   private tailDelta(baseline: string, tail: string, maxChars = ASK_REPLY_MAX_CHARS): string {
-    if (tail.length <= baseline.length) return ''
-    return tail.slice(baseline.length).slice(0, maxChars)
+    if (!tail) return ''
+    if (!baseline) return tail.slice(-maxChars)
+    // Fast path: the session only appended since the baseline.
+    if (tail.startsWith(baseline)) return tail.slice(baseline.length).slice(0, maxChars)
+    // A tail is now the RENDERED SCREEN (daemon/screen.ts), and a screen is not append-only — it
+    // scrolls and repaints, so the baseline stops being a prefix the moment a line leaves the top.
+    // Re-anchor on the last few non-empty lines of the baseline: whatever follows their last
+    // occurrence is what happened since. Three lines, because a TUI repeats single ones (prompt
+    // markers, box borders) and a one-line anchor would match the wrong place.
+    const anchor = baseline
+      .split('\n')
+      .filter((line) => line.trim() !== '')
+      .slice(-3)
+      .join('\n')
+    if (anchor) {
+      const at = tail.lastIndexOf(anchor)
+      if (at !== -1) return tail.slice(at + anchor.length).replace(/^\n+/, '').slice(0, maxChars)
+    }
+    // Scrolled clean past the baseline: everything visible is new to the caller. Keep the END —
+    // the most recent output is the answer, the top of the screen is history.
+    return tail.slice(-maxChars)
   }
 
   // ── wait (v5 A1): block until a target finishes its turn or exits ────────────

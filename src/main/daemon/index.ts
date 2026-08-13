@@ -34,6 +34,7 @@ import { ProcessTreeService } from '../services/ProcessTreeService'
 import { loadPty, ptyLoadErrorMessage, setUserDataDir, spawnShell, type SpawnShellResult } from './ptySpawn'
 import { detectAgentKind, lightPhase, computeBusy, hasActiveWorkers, awaitingInput } from './agentLight'
 import { normalizeTerminalText } from '../services/terminalText'
+import { writeScreen, readScreen, disposeScreen } from './screen'
 import { WebServer, type SessionView, type WorkspaceView, type WebCreateRequest } from './webServer'
 import { PendingPanelsStore } from './pendingPanels'
 import { initIdentity, revokeAgent, agentToken, setMeshPort } from './mesh/identity'
@@ -209,7 +210,10 @@ mesh.onEvent = (event) => {
 mesh.onTailRequest = (ptyId) => {
   const entry = sessions.get(ptyId)
   if (!entry || entry.exited) return ''
-  return entry.buffer.join('')
+  // The RENDERED screen, not the raw stream: an agent TUI repaints its input box on every
+  // keystroke, and concatenating those frames is what made peer reads come back as one fragment
+  // per character. Falls back to the raw buffer only if the emulator has nothing yet.
+  return readScreen(ptyId) || normalizeTerminalText(entry.buffer.join(''))
 }
 // Redacted context (plan F4): the daemon asks the connected app; empty while the app is closed.
 mesh.onContextRequest = async (ptyId) => {
@@ -394,6 +398,10 @@ function broadcast(frame: unknown): void {
 
 function appendBuffer(entry: Session, data: string): void {
   if (!data) return
+  // Mirror the stream into this session's off-screen emulator. The raw buffer stays as-is (the
+  // renderer replays it verbatim to reattach a terminal); the screen is what the MESH reads, so a
+  // peer sees the rendered panel instead of every repaint frame concatenated. See daemon/screen.ts.
+  writeScreen(entry.ptyId, data)
   entry.buffer.push(data)
   entry.bufferLen += data.length
   while (entry.bufferLen > REPLAY_BUFFER_MAX && entry.buffer.length > 0) {
@@ -440,6 +448,7 @@ function removeSession(ptyId: string): void {
   // The agent's mesh identity dies with its PTY (plan F2: revoke on exit).
   revokeAgent(ptyId)
   mesh.unregisterAgent(ptyId)
+  disposeScreen(ptyId)
 
   if (entry.outputTimer) clearTimeout(entry.outputTimer)
   if (entry.purgeTimer) clearTimeout(entry.purgeTimer)
