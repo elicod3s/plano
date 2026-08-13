@@ -474,10 +474,21 @@ async function main() {
     c10detail.skipped = 'no spawned agent to close'
   }
 
+  // ---- C14: SHORT-PREFIX ids work on every command, not just send/ask ----
+  // The roster prints truncated ids; `send`/`ask` resolved them while wait/status/context/close
+  // did an exact map lookup and answered not-found for the very id they had just been shown.
+  const c14detail = {}
+  const prefix = String(ptyB).slice(0, 8)
+  const stPrefix = parseJson(cliSync(['status', prefix, '--json'], tokenA).stdout) ?? {}
+  const ctxPrefix = parseJson(cliSync(['context', prefix, '--json'], tokenA).stdout) ?? {}
+  c14detail.status = stPrefix.ok === true
+  c14detail.context = ctxPrefix.ok === true
+  const c14 = c14detail.status && c14detail.context
+
   console.log(
     'RESULT:',
     JSON.stringify({
-      ok: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13,
+      ok: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10 && c11 && c12 && c13 && c14,
       c1: { ok: c1, id: whoParsed.id?.slice(0, 8), workspace: whoParsed.workspace },
       c2: { ok: c2, agents: rosParsed.agents?.length },
       c3: { ok: c3, status: bad.status, stderr: (bad.stderr || '').trim().slice(0, 80) },
@@ -491,6 +502,7 @@ async function main() {
       c11: { ok: c11, ...c11detail },
       c12: { ok: c12, ...c12detail },
       c13: { ok: c13, pending: anyAgent.pending, workspace: anyAgent.workspace },
+      c14: { ok: c14, ...c14detail },
     }),
   )
 

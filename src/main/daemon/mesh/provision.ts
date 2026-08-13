@@ -22,18 +22,73 @@ You are running inside PLANO, an infinite-canvas workspace. Other agents (Claude
 Gemini CLI, OpenCode, Cursor agents…) may be running in other terminals on the same canvas —
 the PLANO mesh connects you through the \`plano\` CLI, which is already on your PATH.
 
-## How to use the mesh
+## Start here: the four things you will actually do
 
-Every command is a subcommand of \`plano\` and prints JSON. Read it with your JSON eyes.
+Every command is a subcommand of \`plano\`. Add \`--json\` when you want to parse instead of read.
+
+**1. See who is here**
+\`\`\`sh
+plano roster
+\`\`\`
+One row per agent: id (short prefixes work), harness, state, workspace, folder, inbox depth, task.
+Pick peers by folder/workspace — that is what tells two agents apart.
+
+**2. Read what another agent wrote — this always works**
+\`\`\`sh
+plano context <agentId> --lines 60    # their conversation, like reading over their shoulder
+plano status  <agentId>               # their state, task, and a short tail
+\`\`\`
+You do NOT need their permission, and it does not need the desktop window open. If you are about
+to ask "what did you do?", read it yourself first — it is faster and it costs them nothing.
+
+**3. Say something**
+\`\`\`sh
+plano send <to> "the message"
+\`\`\`
+It is typed into their terminal. **If they are mid-turn it is queued automatically** and delivered
+the moment they are free — you get \`status: queued\` and a message id. There is nothing to retry
+and nothing is lost. Never invent your own acknowledgement (do not echo sentinels): to confirm it
+landed, use the id:
+\`\`\`sh
+plano watch <messageId>               # blocks until delivered (or expired), then answers
+\`\`\`
+
+**4. Delegate and wait for the result**
+\`\`\`sh
+plano send <to> "<the full task>" --wait      # types it, then blocks until that turn finishes
+plano ask  <to> "<question>"                  # same, but you want an ANSWER back
+\`\`\`
+\`--wait\` prints what they produced in \`delta\`. \`ask\` gives them a correlation id and they must
+answer it with \`plano reply\`.
+
+### The two questions people confuse
+
+| You want to know | Use | Not |
+|---|---|---|
+| Did my message arrive? | \`plano watch <messageId>\` | \`plano wait\` |
+| Is the peer done with its turn? | \`plano wait <agentId>\` | \`plano watch\` |
+| What did the peer actually say? | \`plano context <agentId>\` | guessing from \`status\` |
+
+### If something looks stuck
+
+- \`plano roster\` shows each agent's **inbox** count — a growing one means they are saturated,
+  not that they are ignoring you.
+- Read \`plano inbox\`: messages **from \`plano\`** are outcome reports about YOUR messages
+  (delivered / expired / undeliverable / peer blocked). Act on them; do not blindly re-send.
+- A peer stuck on a permission prompt reports \`awaiting-input\`. Only a human can clear it —
+  say so instead of waiting forever.
+
+## Full command reference
 
 - **Know yourself**: \`plano whoami\` — your agent id, workspace, capabilities.
 - **Discover peers**: \`plano roster\` — every agent's id (short unique prefixes work), harness,
   workspace, state (idle/working/awaiting-input/error/exited), current task, panel.
 - **How is X doing**: \`plano status <agentId>\` — live state (idle/working/awaiting-input/
   error/exited), current task, redacted output tail, pending messages, exit code.
-- **Read X's whole chat**: \`plano context <agentId> [--lines N]\` — the full redacted
-  transcript of another agent, exactly like reading its conversation in Orca. It is bounded
-  (~64 KiB, redacted) and works only while the desktop app is connected.
+- **Read X's whole chat**: \`plano context <agentId> [--lines N]\` — the full transcript of
+  another agent, exactly like reading its conversation in Orca. Bounded (~64 KiB) and redacted
+  when the desktop app answers; when it is closed or slow the daemon serves its own rendered copy
+  of that terminal, so this NEVER comes back empty just because the window is not open.
 - **Send a message**: \`plano send <to> <text>\` — typed visibly into their terminal. If they are
   mid-turn it is QUEUED automatically and delivered the moment they go idle (the reply tells you
   so, with the message id); nothing is lost and there is nothing to retry. Add \`--direct\` only if

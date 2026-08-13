@@ -533,8 +533,10 @@ export class MeshBus {
   async status(agentId: string, targetId: string): Promise<MeshToolResult> {
     const caller = this.agents.get(agentId)
     if (!caller) return { ok: false, error: 'not-registered', detail: 'your agent is not on the roster' }
-    const target = this.agents.get(targetId)
+    const target = this.findAgent(targetId)
     if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${targetId}` }
+    // A prefix resolved to a real agent — every later lookup must use its FULL id.
+    targetId = target.id
     const pendingMessages = this.mailboxes.load(targetId).filter((m) => !m.acked).length
     let lastOutput = ''
     if (this.onContextRequest) {
@@ -1018,6 +1020,27 @@ export class MeshBus {
     return { ok: false, result: { ok: false, error: 'not-found', detail: `no agent with id "${raw}" — call plano_roster` } }
   }
 
+  /**
+   * Resolve any user-supplied agent id: exact, else a unique prefix.
+   *
+   * `send`/`ask` accepted the short ids the roster prints while `wait`, `status`, `context`,
+   * `close` and `interrupt` did a raw map lookup and answered `not-found` for the very id they
+   * had just been shown. An agent copying an id out of the roster got "works / not-found /
+   * works" depending on the verb, concluded the peer had vanished, and gave up. One resolver,
+   * one answer, every command.
+   *
+   * Unlike resolveTarget this does NOT exclude the caller: reading or closing yourself is legal,
+   * only messaging yourself is not.
+   */
+  private findAgent(raw: string): MeshAgent | null {
+    if (!raw) return null
+    const exact = this.agents.get(raw)
+    if (exact) return exact
+    if (raw.length < 4) return null
+    const matches = [...this.agents.values()].filter((a) => a.id.startsWith(raw))
+    return matches.length === 1 ? matches[0] : null
+  }
+
   /** Write a single Enter ('\r') to submit the typed line — exactly once per message. */
   private async submitLine(ptyId: string): Promise<boolean> {
     if (!this.onDeliver) return false
@@ -1061,8 +1084,10 @@ export class MeshBus {
 
   /** Redacted tail of another agent (plan F4 — always through the redaction hook). */
   async context(_agentId: string, targetId: string): Promise<MeshToolResult> {
-    const target = this.agents.get(targetId)
+    const target = this.findAgent(targetId)
     if (!target) return { ok: false, error: 'not-found' }
+    // A prefix resolved to a real agent — every later lookup must use its FULL id.
+    targetId = target.id
     if (!this.onContextRequest) return { ok: false, error: 'context-unavailable' }
     const tail = await this.onContextRequest(targetId)
     return { ok: true, agent: targetId, tail }
@@ -1137,8 +1162,10 @@ export class MeshBus {
   async setModel(agentId: string, targetId: string, model: unknown): Promise<MeshToolResult> {
     const caller = this.agents.get(agentId)
     if (!caller) return { ok: false, error: 'not-registered' }
-    const target = this.agents.get(targetId)
+    const target = this.findAgent(targetId)
     if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${targetId}` }
+    // A prefix resolved to a real agent — every later lookup must use its FULL id.
+    targetId = target.id
     if (target.kind === 'unknown') return { ok: false, error: 'not-agent', detail: 'target is a plain terminal, no harness detected' }
     const control = HARNESS_CONTROL[target.kind as AgentKind] ?? null
     if (!control?.setModel) {
@@ -1169,8 +1196,10 @@ export class MeshBus {
   async interrupt(agentId: string, targetId: string): Promise<MeshToolResult> {
     const caller = this.agents.get(agentId)
     if (!caller) return { ok: false, error: 'not-registered' }
-    const target = this.agents.get(targetId)
+    const target = this.findAgent(targetId)
     if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${targetId}` }
+    // A prefix resolved to a real agent — every later lookup must use its FULL id.
+    targetId = target.id
     if (target.kind === 'unknown') return { ok: false, error: 'not-agent', detail: 'target is a plain terminal, no harness detected' }
     const control = HARNESS_CONTROL[target.kind as AgentKind] ?? null
     if (!control?.interrupt?.length) {
@@ -1190,8 +1219,10 @@ export class MeshBus {
   async compact(agentId: string, targetId: string): Promise<MeshToolResult> {
     const caller = this.agents.get(agentId)
     if (!caller) return { ok: false, error: 'not-registered' }
-    const target = this.agents.get(targetId)
+    const target = this.findAgent(targetId)
     if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${targetId}` }
+    // A prefix resolved to a real agent — every later lookup must use its FULL id.
+    targetId = target.id
     if (target.kind === 'unknown') return { ok: false, error: 'not-agent', detail: 'target is a plain terminal, no harness detected' }
     const control = HARNESS_CONTROL[target.kind as AgentKind] ?? null
     if (!control?.compact) {
@@ -1274,13 +1305,15 @@ export class MeshBus {
     if (target.busy) {
       const queued = await this.send(agentId, to, `${text} [reply with: plano reply ${corr} <summary>]`, 'queue')
       if (!queued.ok) return queued
-      return {
-        ok: true,
-        status: 'queued',
-        correlationId: corr,
-        id: queued.id,
-        detail: 'target was mid-turn — the question is queued and will be typed in when they are free; watch it with `plano watch <id>`',
-      }
+      // The ask still WAITS. Returning `queued` here (the first cut of this change) turned `ask`
+      // into fire-and-forget the moment a peer happened to be mid-turn: the caller got a status
+      // instead of an answer, no correlation was registered, and the peer's `plano reply` had
+      // nothing to resolve — so the answer never arrived anywhere. Register the correlation and
+      // fall through to the same promise the direct path uses; the only difference is WHEN the
+      // question reaches their terminal.
+      this.pushEvent({ at: Date.now(), kind: 'ask', from: agentId, to, detail: `queued #${corr}` })
+      this.touchLink(agentId, to, 'waiting', corr, true)
+      return this.awaitAskReply(agentId, to, corr, this.cleanTail(to), ms, queued.id ? String(queued.id) : undefined)
     }
     const baseline = this.cleanTail(to)
     let normalized = String(text).replace(/[\r\n]+/g, ' ').trim()
@@ -1297,6 +1330,23 @@ export class MeshBus {
     // an ask OPENS the relation (counts toward the grouping counter).
     this.touchLink(agentId, to, 'waiting', corr, true)
 
+    return this.awaitAskReply(agentId, to, corr, baseline, ms)
+  }
+
+  /**
+   * The waiting half of an ask, shared by the direct and the queued paths: register the
+   * correlation and block until the peer answers with `plano reply`, or until the timeout infers
+   * one from its transcript. Keeping this in one place is what lets a question asked of a busy
+   * peer behave exactly like one asked of a free peer.
+   */
+  private awaitAskReply(
+    agentId: string,
+    to: string,
+    corr: string,
+    baseline: string,
+    ms: number,
+    messageId?: string,
+  ): Promise<MeshToolResult> {
     return new Promise<MeshToolResult>((resolve) => {
       const timer = setTimeout(() => {
         const ask = this.pendingAsks.get(corr)
@@ -1304,7 +1354,14 @@ export class MeshBus {
         ask.settled = true
         this.pendingAsks.delete(corr)
         const tail = this.cleanTail(to)
-        resolve({ ok: true, correlationId: corr, reply: this.tailDelta(ask.baseline, tail), inferred: true, timeout: true })
+        resolve({
+          ok: true,
+          correlationId: corr,
+          reply: this.tailDelta(ask.baseline, tail),
+          inferred: true,
+          timeout: true,
+          ...(messageId ? { id: messageId, queued: true } : null),
+        })
         // v3 E: timed out → the relation flashes failed and leaves.
         this.touchLink(agentId, to, 'failed')
         this.pushEvent({ at: Date.now(), kind: 'ask', from: agentId, to, detail: `timeout #${corr}` })
@@ -1415,8 +1472,10 @@ export class MeshBus {
   ): Promise<MeshToolResult> {
     const caller = this.agents.get(agentId)
     if (!caller) return { ok: false, error: 'not-registered', detail: 'your agent is not on the roster' }
-    const target = this.agents.get(targetId)
+    const target = this.findAgent(targetId)
     if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${targetId}` }
+    // A prefix resolved to a real agent — every later lookup must use its FULL id.
+    targetId = target.id
     if (target.kind === 'unknown') {
       return { ok: false, error: 'not-agent', detail: 'target is a plain terminal, no harness detected' }
     }
@@ -1987,8 +2046,10 @@ export class MeshBus {
     if (!this.onClose) return { ok: false, error: 'close-unavailable', detail: 'no close hook (daemon not wired)' }
     const caller = this.agents.get(agentId)
     if (!caller) return { ok: false, error: 'not-registered', detail: 'your agent is not on the roster' }
-    const target = this.agents.get(targetId)
+    const target = this.findAgent(targetId)
     if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${targetId}` }
+    // A prefix resolved to a real agent — every later lookup must use its FULL id.
+    targetId = target.id
     // Closing a peer is a WRITE to someone's canvas — same consent gate as sending or spawning.
     const consent = await this.ensureConsent(agentId)
     if (!consent.ok) return consent

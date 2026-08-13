@@ -217,12 +217,19 @@ mesh.onTailRequest = (ptyId) => {
 }
 // Redacted context (plan F4): the daemon asks the connected app; empty while the app is closed.
 mesh.onContextRequest = async (ptyId) => {
+  // The app's answer is PREFERRED (it is redacted and structured), but it must never be the only
+  // source. This asked the desktop app and gave up on failure, so `plano context` and the tail in
+  // `plano status` returned "empty — nothing recorded yet" whenever the window was closed, still
+  // starting, or simply slow (6 s timeout) — agents concluded their peers had written nothing.
+  // The daemon has owned a faithful copy of every session since the screen emulator landed, so
+  // fall back to it: reading a peer works with the app closed, exactly like every other mesh call.
   try {
     const tail = await requestApp('agentContext', { ptyId })
-    return typeof tail === 'string' ? tail : ''
+    if (typeof tail === 'string' && tail.trim()) return tail
   } catch {
-    return ''
+    /* app closed, still booting, or too slow — the local screen answers below */
   }
+  return readScreen(ptyId)
 }
 // Mesh writes consent (plan F8): the daemon asks the app to show a one-click toast; the
 // workspace is remembered afterwards. Denied while the app is closed (no way to ask).

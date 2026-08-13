@@ -17,6 +17,63 @@ import { usePanelStore } from '@/stores/usePanelStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import { useMeshLinks, ingestMeshEvent } from '@/stores/useMeshLinks'
 
+interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
+}
+
+/**
+ * Where a link leaves one panel and meets the other, and the curve between them.
+ *
+ * This used to be hardcoded as "out of A's right edge, into B's left edge". On a canvas that is
+ * two-dimensional that is wrong most of the time: a panel sitting BELOW another still had its
+ * line exit sideways and loop back in, and a peer placed to the LEFT got a curve that ran
+ * backwards straight through both windows. The relation looked like a glitch instead of a link.
+ *
+ * So the dominant axis between the two centres picks the faces: mostly-horizontal panels connect
+ * side to side, mostly-vertical ones connect bottom to top (or top to bottom). Control points
+ * extend along the direction the line LEAVES by, which is what gives a cable its natural ease-out
+ * instead of a kink at the panel edge.
+ */
+function linkPath(a: Rect, b: Rect): { x1: number; y1: number; x2: number; y2: number; d: string } {
+  const ac = { x: a.x + a.width / 2, y: a.y + a.height / 2 }
+  const bc = { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+  const dx = bc.x - ac.x
+  const dy = bc.y - ac.y
+  const horizontal = Math.abs(dx) >= Math.abs(dy)
+
+  let x1: number, y1: number, x2: number, y2: number
+  if (horizontal) {
+    x1 = dx >= 0 ? a.x + a.width : a.x
+    x2 = dx >= 0 ? b.x : b.x + b.width
+    // Meet at the shared vertical span when the panels overlap, so a link between two panels of
+    // very different heights doesn't sag across one of them.
+    const top = Math.max(a.y, b.y)
+    const bottom = Math.min(a.y + a.height, b.y + b.height)
+    const shared = bottom > top ? (top + bottom) / 2 : null
+    y1 = shared ?? ac.y
+    y2 = shared ?? bc.y
+  } else {
+    y1 = dy >= 0 ? a.y + a.height : a.y
+    y2 = dy >= 0 ? b.y : b.y + b.height
+    const left = Math.max(a.x, b.x)
+    const right = Math.min(a.x + a.width, b.x + b.width)
+    const shared = right > left ? (left + right) / 2 : null
+    x1 = shared ?? ac.x
+    x2 = shared ?? bc.x
+  }
+
+  // Curvature scales with the gap, clamped so touching panels still get a readable bow and very
+  // distant ones don't balloon into a semicircle.
+  const gap = horizontal ? Math.abs(x2 - x1) : Math.abs(y2 - y1)
+  const k = Math.max(28, Math.min(gap * 0.5, 160))
+  const c1 = horizontal ? `${x1 + (dx >= 0 ? k : -k)} ${y1}` : `${x1} ${y1 + (dy >= 0 ? k : -k)}`
+  const c2 = horizontal ? `${x2 - (dx >= 0 ? k : -k)} ${y2}` : `${x2} ${y2 - (dy >= 0 ? k : -k)}`
+  return { x1, y1, x2, y2, d: `M ${x1} ${y1} C ${c1}, ${c2}, ${x2} ${y2}` }
+}
+
 /**
  * Outer shell: subscribes ONLY to the link set, which changes rarely. It deliberately does NOT
  * touch the panel registry — that reference changes on every pointer frame of every drag, and
@@ -59,6 +116,7 @@ function MeshLinkSvg({
   links: ReturnType<typeof useMeshLinks>
   panels: ReturnType<typeof usePanelStore.getState>['panels']
 }) {
+  // See linkPath below — anchors are chosen from the panels' real relative position.
   const reduced = useSettingsStore((s) => s.settings.appearance.reduceMotion)
 
   return (
@@ -71,12 +129,7 @@ function MeshLinkSvg({
         const a = panels[link.fromPanel]?.rect
         const b = panels[link.toPanel]?.rect
         if (!a || !b) return null
-        const x1 = a.x + a.width
-        const y1 = a.y + a.height / 2
-        const x2 = b.x
-        const y2 = b.y + b.height / 2
-        const mid = (x1 + x2) / 2
-        const d = `M ${x1} ${y1} C ${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`
+        const { x1, y1, x2, y2, d } = linkPath(a, b)
         const failed = link.state === 'failed'
         const color = failed ? 'var(--destructive, #f87171)' : link.color
         const opacity = failed ? 0.9 : link.state === 'done' ? 0.15 : link.state === 'waiting' ? 0.5 : link.state === 'active' ? 0.35 : 0.1
