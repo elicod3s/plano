@@ -181,8 +181,23 @@ async function main() {
   await sleep(1200)
   const zoomLabel = await ev(`document.querySelector('[title="Reset zoom"]')?.textContent?.trim() || null`)
 
+  // BOLD=1 reproduces the user's second report: BOLD words render scribbled — lowercase closing up
+  // into small-capital shapes — and snap to correct letterforms the instant they are selected.
+  // Emitted through node so the escape survives every shell verbatim, and built from character
+  // codes so no backslash has to cross a shell boundary. Long on purpose: the probe measures the
+  // inkiest row, and this must out-ink the echoed command line above it. `selectionText` in the
+  // output proves which row was actually measured.
+  const BOLD_WORDS = 'dashboard gestor de tareas fixer de proyectos CLI tool metricas del sistema persistencia local'
+  const BOLD_SAMPLE =
+    'node -e "process.stdout.write(String.fromCharCode(27)+' +
+    `'[1m${BOLD_WORDS}'` +
+    '+String.fromCharCode(27)+' +
+    "'[0m'" +
+    '+String.fromCharCode(13)+String.fromCharCode(10))"'
   // Deterministic sample: the exact shape of the user's screenshot (label + aligned path column).
-  const SAMPLE = 'echo Claude Code  C:\\Users\\Administrator\\Desktop\\FINAL_1080p.mp4'
+  const SAMPLE = process.env.BOLD
+    ? BOLD_SAMPLE
+    : 'echo Claude Code  C:\\Users\\Administrator\\Desktop\\FINAL_1080p.mp4'
   await ev(`(() => { window.plano.terminal.write(window.__pty, ${JSON.stringify(SAMPLE + '\r')}); return true })()`)
   await sleep(1800)
   // CLI art sample: box drawing, Braille spinner, Claude's star marks, blocks, checks. Must still

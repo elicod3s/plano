@@ -583,6 +583,29 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   // document.fonts.ready covers ALL bundled families (incl. the symbol layers); flipping fontFamily
   // forces a re-measure with the now-loaded font, then a fit (which only resizes the PTY on a real
   // cols/rows change, so this converges with no extra redraws).
+  /**
+   * Throw away every glyph the renderer rasterized before the real faces arrived.
+   *
+   * The WebGL renderer caches each rasterized glyph in a texture atlas keyed by (character,
+   * foreground, background, bold, italic…). Once a cell is baked with a SUBSTITUTED face it stays
+   * that way for the life of the terminal — re-measuring the cell does not evict it. That is the
+   * whole "bold looks scribbled" bug: the atlas is holding synthetic-bold glyphs, and the text
+   * looks correct the instant it is selected only because selection changes the background, which
+   * is part of the key, so those cells are rasterized fresh with the face that has since loaded.
+   *
+   * Safe to call at any time and it can never trigger a font load, so it cannot feed back into the
+   * `loadingdone` listener below.
+   */
+  const dropGlyphAtlas = (): void => {
+    if (disposed || !term.element) return
+    try {
+      term.clearTextureAtlas()
+      term.refresh(0, term.rows - 1)
+    } catch {
+      /* no renderer attached yet — the atlas it will build is fresh anyway */
+    }
+  }
+
   const remeasureAndFit = (): void => {
     if (disposed || !term.element) return
     const fam = useSettingsStore.getState().settings.terminal.fontFamily || TERMINAL_FONT
@@ -593,14 +616,40 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     // derived from it — belongs to the wrong font. Now the real face is loaded, so this lands the
     // cell pitch on the grid for the font actually being drawn.
     applyFontSize()
+    dropGlyphAtlas()
     requestFit()
   }
   if (typeof document !== 'undefined' && document.fonts) {
     const px = ts0.fontSize > 0 ? ts0.fontSize : 13
-    // Wait for the exact full terminal face, not Fontsource's separate JetBrains subsets. The
-    // latter can report ready while xterm is still holding fallback glyphs in its atlas.
-    void document.fonts.load(`${px}px "PLANO Terminal Text"`).then(remeasureAndFit).catch(() => {})
+    // Request EVERY weight and family the terminal can draw — explicitly, by weight.
+    //
+    // This used to ask for `${px}px "PLANO Terminal Text"`, which is a CSS font SHORTHAND, and the
+    // shorthand's default weight is 400. The SemiBold face that `fontWeightBold: 600` draws all
+    // bold text with was therefore never requested. A @font-face is only fetched when something
+    // uses it, so the 600 file did not begin downloading until the first bold text appeared on
+    // screen — by which point xterm had already rasterized it with whatever Chromium substituted,
+    // and the atlas kept that forever. Asking for the weight we actually draw with means the real
+    // face is present before the first bold glyph is ever baked.
+    // The primary of whatever stack is configured, so a font the user picked in Settings gets the
+    // same treatment as the bundled one — its bold is just as capable of arriving late.
+    const configured = (ts0.fontFamily || TERMINAL_FONT).split(',')[0].trim().replace(/^['"]|['"]$/g, '')
+    const faces = [
+      `400 ${px}px "PLANO Terminal Text"`,
+      `600 ${px}px "PLANO Terminal Text"`,
+      `400 ${px}px "${configured}"`,
+      `600 ${px}px "${configured}"`,
+      `${px}px "PLANO Term Symbols"`,
+      `${px}px "PLANO Term Dingbats"`,
+    ]
+    void Promise.all(faces.map((face) => document.fonts.load(face).catch(() => []))).then(remeasureAndFit)
     void document.fonts.ready.then(remeasureAndFit)
+    // A face can still finish arriving later — a font the user picks in Settings, or a subset
+    // fetched the first time a glyph needs it. Whenever any does, drop the atlas so nothing keeps
+    // a substituted glyph. Only the atlas: re-measuring here could request another face and feed
+    // this event back to itself.
+    const onFontsLoaded = (): void => dropGlyphAtlas()
+    document.fonts.addEventListener('loadingdone', onFontsLoaded)
+    unsubs.push(() => document.fonts.removeEventListener('loadingdone', onFontsLoaded))
   }
 
   // Copy-on-select (opt-in): mirror the selection to the clipboard as it's made.
