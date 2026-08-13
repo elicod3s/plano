@@ -162,6 +162,11 @@ export class MeshBus {
         from: string
       }) => { ok: boolean; error?: string; ptyIds?: string[] })
     | null = null
+  /**
+   * Close a terminal. `panel` closes every terminal in the target's panel (Orca's `--tab`), not
+   * just the one session (Orca's default). Returns the pty ids that were actually torn down.
+   */
+  onClose: ((req: { ptyId: string; panel: boolean }) => { ok: boolean; error?: string; closed?: string[] }) | null = null
   /** Event fan-out to the desktop app (mesh-link / mesh-msg frames). */
   onEvent: ((event: MeshEvent) => void) | null = null
   /** Consent prompt (plan F8): the daemon asks the app whether writes are allowed for a
@@ -1757,6 +1762,40 @@ export class MeshBus {
       // v5 A1: the exact ptyIds created — the caller can prompt them or wait on them.
       ptyIds: Array.isArray(result.ptyIds) ? result.ptyIds.map(String) : [],
     }
+  }
+
+  /**
+   * Close a terminal — the counterpart to spawnAgent, which agents had no way to undo: they could
+   * create workers all day and never tidy up after one.
+   *
+   * Shaped after Orca's `terminal close`: closing ONE session is the default, and `--panel` (its
+   * `--tab`) takes the whole panel down. Closing yourself is allowed, because "I am done, clean me
+   * up" is a legitimate last act — but the answer is sent BEFORE the kill, since the CLI making
+   * this call is a child of the very PTY being torn down and would otherwise die mid-sentence.
+   */
+  async closeAgent(agentId: string, targetId: string, opts: { panel?: boolean } = {}): Promise<MeshToolResult> {
+    if (!this.onClose) return { ok: false, error: 'close-unavailable', detail: 'no close hook (daemon not wired)' }
+    const caller = this.agents.get(agentId)
+    if (!caller) return { ok: false, error: 'not-registered', detail: 'your agent is not on the roster' }
+    const target = this.agents.get(targetId)
+    if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${targetId}` }
+    // Closing a peer is a WRITE to someone's canvas — same consent gate as sending or spawning.
+    const consent = await this.ensureConsent(agentId)
+    if (!consent.ok) return consent
+    if (!this.rateOk(agentId)) return { ok: false, error: 'rate-limited' }
+
+    const panel = opts.panel === true
+    const detail = `${this.displayName(targetId)}${panel ? ' (whole panel)' : ''}`
+    this.pushEvent({ at: Date.now(), kind: 'close', from: agentId, to: targetId, detail })
+
+    if (targetId === agentId) {
+      // Answer first, then die: the reply has to be written to a PTY that is about to stop existing.
+      setTimeout(() => this.onClose?.({ ptyId: targetId, panel }), 150)
+      return { ok: true, closed: [targetId], self: true, panel, detail: 'closing this terminal' }
+    }
+    const result = this.onClose({ ptyId: targetId, panel })
+    if (!result.ok) return { ok: false, error: result.error ?? 'close-failed' }
+    return { ok: true, closed: result.closed ?? [targetId], panel }
   }
 
   // ── timeline / audit ──────────────────────────────────────────────────────────

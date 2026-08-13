@@ -246,6 +246,23 @@ mesh.onChainAskUser = async (chainId, from, to) => {
 // Spawn agents (plan F6): a fresh PTY per requested agent, booting the harness command.
 // handlePhoneCreate emits `external-terminal` (live panel when the app is running, pending
 // panel otherwise) — the exact path mobile-created agents already take.
+/**
+ * Close a terminal on an agent's behalf. removeSession already does the whole teardown the phone
+ * uses — kill the PTY, revoke the mesh identity, drop the screen, and broadcast `session-removed`
+ * so the canvas drops the panel — so closing from the CLI is the same path, not a second one.
+ */
+mesh.onClose = ({ ptyId, panel }) => {
+  const entry = sessions.get(ptyId)
+  if (!entry) return { ok: false, error: `no session ${ptyId.slice(0, 8)}` }
+  // `panel` closes every terminal sharing that panel (a PLANO panel hosts many tabs); the default
+  // closes just this one, mirroring Orca's pane-vs-tab split.
+  const targets = panel
+    ? [...sessions.values()].filter((s) => s.panelId === entry.panelId).map((s) => s.ptyId)
+    : [ptyId]
+  for (const id of targets) removeSession(id)
+  return { ok: true, closed: targets }
+}
+
 mesh.onSpawn = (req) => {
   // The curated table wins (some harnesses need a specific invocation, e.g. `kiro-cli chat`).
   // Anything else falls back to probing the host: if the user names an agent CLI that is

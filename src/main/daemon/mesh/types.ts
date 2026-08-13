@@ -85,6 +85,8 @@ export interface MeshEvent {
     | 'link'
     | 'chain'
     | 'spawn'
+    /** An agent closed a terminal (the counterpart of 'spawn'). */
+    | 'close'
     | 'consent'
   from: string
   to?: string

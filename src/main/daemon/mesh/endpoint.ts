@@ -151,6 +151,8 @@ export class MeshEndpoint {
           prompt: typeof args.prompt === 'string' ? args.prompt : undefined,
           count: typeof args.count === 'number' ? Math.max(1, Math.floor(args.count)) : 1,
         })
+      case 'plano_close':
+        return this.bus.closeAgent(agentId, String(args.agentId ?? ''), { panel: args.panel === true })
       case 'plano_wait':
         return this.bus.waitForIdle(agentId, String(args.agentId ?? ''), {
           timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,

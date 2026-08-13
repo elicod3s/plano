@@ -49,6 +49,10 @@ Every command is a subcommand of \`plano\` and prints JSON. Read it with your JS
   back \`blocked\` (answer it, or \`plano send\` it a reply); a timeout still prints the output so
   far and exits 2. When you need a definite answer rather than "the turn ended", use
   \`plano ask\` — the peer's own \`plano reply\` resolves it, with idle-inference as the fallback.
+- **Close a terminal**: \`plano close <agentId> [--panel]\` — kills that session and removes its
+  panel from the canvas; \`--panel\` closes every terminal in that panel. This is the undo of
+  \`spawn\`: tidy up workers you created instead of leaving dead panels behind. Closing YOURSELF is
+  allowed (the answer is sent before the terminal goes).
 - **Create new agents in THIS canvas**: \`plano spawn <harness> [folder] [--prompt "<task>"]
   [--count N] [--wait]\` — fresh terminal(s) booting the harness appear in the same workspace,
   next to your panel. \`--wait\` blocks until they finish. Orca-style alias:

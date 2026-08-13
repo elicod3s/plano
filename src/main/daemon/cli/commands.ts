@@ -8,6 +8,7 @@
  */
 
 import { MeshClient, MeshCliError, type MeshResult } from './client'
+import { COMMANDS } from './spec'
 
 export interface ParsedArgs {
   key: string
@@ -51,9 +52,25 @@ function chainPayload(value: string): string | { file: string } {
   return value
 }
 
-export async function run(key: string, p: ParsedArgs, client: MeshClient): Promise<{ output: string; exitCode: number }> {
+/**
+ * Resolve an alias to its real command. The spec has advertised aliases in `plano help` since
+ * spawn shipped, but nothing ever mapped them — an agent that read the help and typed
+ * `plano worker-start` got "unknown command". Reading the table here keeps the help honest by
+ * construction: an alias exists exactly when it is documented.
+ */
+function resolveAlias(key: string): string {
+  if (!key) return key
+  for (const entry of COMMANDS) {
+    if (entry.command === key) return key
+    if (entry.aliases?.includes(key)) return entry.command
+  }
+  return key
+}
+
+export async function run(rawKey: string, p: ParsedArgs, client: MeshClient): Promise<{ output: string; exitCode: number }> {
   const { positional: pos, flags } = p
   const json = jsonMode(flags, false)
+  const key = resolveAlias(rawKey)
   switch (key) {
     case 'whoami': {
       needClient(client)
@@ -68,6 +85,13 @@ export async function run(key: string, p: ParsedArgs, client: MeshClient): Promi
       const id = pos[0]
       if (!id) throw usage('status <agentId>')
       return finish(client, 'plano_status', { agentId: id }, json, formatStatus)
+    }
+    case 'close': {
+      needClient(client)
+      const id = pos[0]
+      if (!id) throw usage('close <agentId> [--panel]')
+      // `--panel` takes down every terminal in that panel; the default closes just this session.
+      return finish(client, 'plano_close', { agentId: id, panel: flags.panel === true }, json, formatClose)
     }
     case 'inbox': {
       needClient(client)
@@ -436,6 +460,13 @@ function formatRoster(r: MeshResult): string {
     'task',
   ].join(' ')
   return `agents: ${agents.length}\n${header}\n${rows.join('\n')}`
+}
+
+function formatClose(r: MeshResult): string {
+  const closed = (r.closed as string[] | undefined) ?? []
+  const ids = closed.map((id) => id.slice(0, 8)).join(', ')
+  if (r.self) return `closing this terminal (${ids})`
+  return `closed ${closed.length} terminal${closed.length === 1 ? '' : 's'}${r.panel ? ' (whole panel)' : ''}: ${ids}`
 }
 
 function formatStatus(r: MeshResult): string {

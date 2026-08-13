@@ -419,10 +419,29 @@ async function main() {
   const ctxParsed = parseJson(cliSync(['context', targetId, '--lines', '15', '--json'], tokenA).stdout) ?? {}
   const c9 = stParsed.ok === true && typeof stParsed.state === 'string' && ctxParsed?.ok === true && (ctxParsed.tail || '').length > 0
 
+  // ---- C10: an agent can CLOSE a terminal (the undo of spawn) ----
+  // Close one of the agents spawned above and prove it is really gone: the session dies, the mesh
+  // drops it, and `status` can no longer find it.
+  const c10detail = {}
+  let c10 = false
+  const closeTarget = allSpawnedIds.find((x) => String(x) !== ptyA) || codexId
+  if (closeTarget) {
+    const closed = parseJson(cliSync(['close', String(closeTarget), '--json'], tokenA).stdout) ?? {}
+    c10detail.closedOk = closed.ok === true
+    await sleep(1200)
+    const after = parseJson(cliSync(['status', String(closeTarget), '--json'], tokenA).stdout) ?? {}
+    const rosterAfter = parseJson(cliSync(['roster', '--json'], tokenA).stdout) ?? {}
+    c10detail.goneFromStatus = after.ok !== true
+    c10detail.goneFromRoster = !(rosterAfter.agents ?? []).some((a) => String(a.id) === String(closeTarget))
+    c10 = c10detail.closedOk && c10detail.goneFromStatus && c10detail.goneFromRoster
+  } else {
+    c10detail.skipped = 'no spawned agent to close'
+  }
+
   console.log(
     'RESULT:',
     JSON.stringify({
-      ok: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9,
+      ok: c1 && c2 && c3 && c4 && c5 && c6 && c7 && c8 && c9 && c10,
       c1: { ok: c1, id: whoParsed.id?.slice(0, 8), workspace: whoParsed.workspace },
       c2: { ok: c2, agents: rosParsed.agents?.length },
       c3: { ok: c3, status: bad.status, stderr: (bad.stderr || '').trim().slice(0, 80) },
@@ -432,6 +451,7 @@ async function main() {
       c7: { ok: c7, spawnOk: sp2Parsed.ok, state: c7detail.state, timedOut: c7detail.timedOut, deltaHasPrompt: c7detail.deltaHasPrompt, deltaBytes: c7detail.deltaBytes, ids: c7detail.ids, answered: c7detail.answered, status: sp2.status, tail: c7detail.tail, stdout: (sp2.stdout || '').slice(0, 400), stderr: (sp2.stderr || '').slice(0, 200) },
       c8: { ok: c8, commands: acParsed.commands?.length },
       c9: { ok: c9, state: stParsed.state, chatBytes: (ctxParsed?.tail ?? '').length },
+      c10: { ok: c10, ...c10detail },
     }),
   )
 

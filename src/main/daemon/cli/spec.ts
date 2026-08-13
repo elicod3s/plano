@@ -109,6 +109,17 @@ export const COMMANDS: CommandSpec[] = [
     args: ['<messageId>'],
   },
   {
+    command: 'close',
+    summary: 'Close a terminal: kill its session and remove its panel from the canvas (the undo of spawn)',
+    usage: 'plano close <agentId> [--panel] [--json]',
+    args: ['<agentId>'],
+    flags: [
+      { flag: '--panel', desc: 'close EVERY terminal in that panel, not just this session' },
+      F_JSON,
+    ],
+    aliases: ['kill', 'worker-stop'],
+  },
+  {
     command: 'spawn',
     summary: 'Create new agent(s) in THIS canvas: fresh terminal(s) booting a harness, placed next to my panel',
     usage: 'plano spawn <harness> [folder] [--prompt <text>] [--count N] [--wait] [--timeout-ms <ms>] [--json]',
