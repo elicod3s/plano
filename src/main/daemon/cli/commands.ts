@@ -399,21 +399,53 @@ function formatWhoami(r: MeshResult): string {
   return lines.join('\n')
 }
 
+/** Last path segment of a cwd \u2014 the folder is what actually tells two agents apart at a glance. */
+function folderOf(cwd: unknown): string {
+  const path = String(cwd ?? '')
+  if (!path) return ''
+  const parts = path.replace(/[\\/]+$/, '').split(/[\\/]/)
+  return parts[parts.length - 1] ?? ''
+}
+
+/**
+ * The roster carried `workspace` and `cwd` all along and printed neither, so an agent looking at
+ * three peers could not tell which canvas or which project any of them belonged to. Both are
+ * columns now: the workspace id groups them, the folder says what they are working on.
+ */
 function formatRoster(r: MeshResult): string {
   const agents = (r.agents as Array<Record<string, unknown>> | undefined) ?? []
   if (agents.length === 0) return 'no agents on the roster'
   const rows = agents.map((a) => {
     const id = String(a.id ?? '')
     const short = id.length > 8 ? `${id.slice(0, 8)}\u2026` : id
-    return `${short.padEnd(9)} ${String(a.kind ?? '?').padEnd(11)} ${String(a.state ?? '?').padEnd(14)} ${String(a.currentTask ?? '').slice(0, 40)}`
+    return [
+      short.padEnd(9),
+      String(a.kind ?? '?').padEnd(11),
+      String(a.state ?? '?').padEnd(14),
+      String(a.workspace ?? '-').slice(0, 10).padEnd(11),
+      folderOf(a.cwd).slice(0, 18).padEnd(19),
+      String(a.currentTask ?? '').slice(0, 40),
+    ].join(' ')
   })
-  return `agents: ${agents.length}\n${['id'.padEnd(9), 'kind'.padEnd(11), 'state'.padEnd(14), 'task'].join(' ')}\n${rows.join('\n')}`
+  const header = [
+    'id'.padEnd(9),
+    'kind'.padEnd(11),
+    'state'.padEnd(14),
+    'workspace'.padEnd(11),
+    'folder'.padEnd(19),
+    'task',
+  ].join(' ')
+  return `agents: ${agents.length}\n${header}\n${rows.join('\n')}`
 }
 
 function formatStatus(r: MeshResult): string {
   return [
     `id: ${String(r.id ?? '')}`,
     `kind: ${String(r.kind ?? '')}`,
+    // Where it lives, so "which of these is the one editing my repo" is answerable without
+    // guessing from the task string.
+    `workspace: ${String(r.workspace ?? '(unknown)')}`,
+    `cwd: ${String(r.cwd ?? '(unknown)')}`,
     `state: ${String(r.state ?? '')} (since ${String(r.since ?? '')})`,
     `task: ${String(r.currentTask ?? '(none)')}`,
     `pending messages: ${String(r.pendingMessages ?? 0)}`,

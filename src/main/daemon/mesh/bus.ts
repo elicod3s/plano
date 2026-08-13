@@ -38,8 +38,12 @@ const CONFIRM_WINDOW_MS = 1200
 /** v3 C: ask default timeout and hard cap (10 min). */
 const ASK_DEFAULT_TIMEOUT_MS = 60_000
 const ASK_MAX_TIMEOUT_MS = 10 * 60_000
-/** v3 C: inferred reply tail cap. */
-const ASK_REPLY_MAX_CHARS = 2000
+/**
+ * v3 C: inferred reply tail cap. Raised because the cap decides how much of a peer's ANSWER the
+ * asker gets to read — a thorough reply was being cut mid-sentence at 2 KiB, which is exactly the
+ * case where the answer matters. Reads are cheap; the wait delta keeps its own, larger cap.
+ */
+const ASK_REPLY_MAX_CHARS = 8000
 /** v5 A1: wait-for-idle default timeout (5 min — every outcome answers, see A3) and cap (4 h). */
 const WAIT_DEFAULT_TIMEOUT_MS = 3 * 60_000
 const WAIT_MAX_TIMEOUT_MS = 4 * 60 * 60_000
@@ -507,6 +511,10 @@ export class MeshBus {
       ok: true,
       id: targetId,
       kind: target.kind,
+      // Where the agent lives. Both were already on the record and neither was ever reported, so
+      // "which workspace is this one in" had no answer from the CLI.
+      workspace: target.workspace,
+      cwd: target.cwd,
       state: target.state,
       currentTask: target.currentTask ?? null,
       since: target.stateSince,
@@ -655,9 +663,15 @@ export class MeshBus {
   /** Deliver text into a target PTY VISIBLY — char-by-char with jitter (~40-80 chars/s). */
   private async deliverTyped(ptyId: string, text: string): Promise<boolean> {
     if (!this.onDeliver) return false
-    for (const char of text) {
-      if (!this.onDeliver(ptyId, char)) return false
-      await sleep(13 + Math.random() * 11)
+    // Written in small BURSTS, not one character at a time. The per-character pause exists so a
+    // TUI's input handler is never flooded, but at ~18ms per char a 4000-character handoff spent
+    // over a minute just being typed — the sender blocked the whole time and the receiver looked
+    // frozen. A burst is still far below what a paste delivers, and the pause between bursts keeps
+    // the original safety: total time now scales with the message, not with its character count.
+    const BURST = 24
+    for (let i = 0; i < text.length; i += BURST) {
+      if (!this.onDeliver(ptyId, text.slice(i, i + BURST))) return false
+      if (i + BURST < text.length) await sleep(12 + Math.random() * 8)
     }
     return true
   }
@@ -745,6 +759,12 @@ export class MeshBus {
       return { ok: true, status: 'queued', id }
     }
     const baseline = this.cleanTail(to) // v3 A4: before the echo lands
+    // Anchor the turn this message is about to start, exactly as a spawn prompt does. Without it,
+    // `send` followed by `wait` on a peer that answers immediately took the "already idle" path
+    // and reported an EMPTY delta — the answer was sitting in `tail` and the caller had no reason
+    // to look there. Bursted delivery made that the common case rather than the rare one, because
+    // the exchange now finishes faster than the caller can ask about it.
+    this.spawnPrompts.set(to, { at: Date.now(), baseline })
     const delivered = (await this.deliverTyped(to, line)) && (await this.submitLine(to))
     if (!delivered) {
       message.attempts = 1
@@ -1137,23 +1157,29 @@ export class MeshBus {
     if (!baseline) return tail.slice(-maxChars)
     // Fast path: the session only appended since the baseline.
     if (tail.startsWith(baseline)) return tail.slice(baseline.length).slice(0, maxChars)
-    // A tail is now the RENDERED SCREEN (daemon/screen.ts), and a screen is not append-only — it
-    // scrolls and repaints, so the baseline stops being a prefix the moment a line leaves the top.
-    // Re-anchor on the last few non-empty lines of the baseline: whatever follows their last
-    // occurrence is what happened since. Three lines, because a TUI repeats single ones (prompt
-    // markers, box borders) and a one-line anchor would match the wrong place.
-    const anchor = baseline
-      .split('\n')
-      .filter((line) => line.trim() !== '')
-      .slice(-3)
-      .join('\n')
-    if (anchor) {
-      const at = tail.lastIndexOf(anchor)
-      if (at !== -1) return tail.slice(at + anchor.length).replace(/^\n+/, '').slice(0, maxChars)
+    // A tail is now the RENDERED SCREEN (daemon/screen.ts), and a screen is not append-only: it
+    // scrolls, repaints, and — crucially — an agent TUI writes its output ABOVE a fixed input box
+    // that stays byte-identical. Anchoring on the baseline's last lines therefore matched the
+    // bottom of the new screen and reported nothing at all.
+    //
+    // So diff by LINE against a multiset of what was already showing: walk the current screen and
+    // keep the lines the baseline cannot account for, in order. Content inserted above a stable
+    // box is kept (the box's own lines are consumed by their baseline copies), scrolled-off lines
+    // simply never appear, and repeated blanks stay balanced because the count is consumed.
+    const remaining = new Map<string, number>()
+    for (const line of baseline.split('\n')) remaining.set(line, (remaining.get(line) ?? 0) + 1)
+    const fresh: string[] = []
+    for (const line of tail.split('\n')) {
+      const left = remaining.get(line) ?? 0
+      if (left > 0) {
+        remaining.set(line, left - 1)
+        continue
+      }
+      fresh.push(line)
     }
-    // Scrolled clean past the baseline: everything visible is new to the caller. Keep the END —
-    // the most recent output is the answer, the top of the screen is history.
-    return tail.slice(-maxChars)
+    // Nothing the baseline can't explain means nothing happened — say so, rather than handing back
+    // a whole screen the caller has already seen.
+    return fresh.join('\n').trim().slice(0, maxChars)
   }
 
   // ── wait (v5 A1): block until a target finishes its turn or exits ────────────
