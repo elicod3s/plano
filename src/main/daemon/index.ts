@@ -26,19 +26,19 @@
 import { createServer, type Server, type Socket } from 'node:net'
 import { mkdirSync, writeFileSync, unlinkSync, renameSync, existsSync, openSync, writeSync, closeSync, readFileSync } from 'node:fs'
 import { randomUUID } from 'node:crypto'
-import { join, resolve } from 'node:path'
+import { isAbsolute, join, resolve } from 'node:path'
 import type { IPty } from 'node-pty'
 import { Bonjour } from 'bonjour-service'
 import type { AgentKind, AgentPhase } from '@shared/domain/agent'
 import { ProcessTreeService } from '../services/ProcessTreeService'
 import { loadPty, ptyLoadErrorMessage, setUserDataDir, spawnShell, type SpawnShellResult } from './ptySpawn'
-import { detectAgentKind, lightPhase, computeBusy, hasActiveWorkers, awaitingInput } from './agentLight'
+import { detectAgentKind, lightPhase, computeBusy, hasActiveWorkers, awaitingInput, inputEditState, inputPromptVisible } from './agentLight'
 import { normalizeTerminalText } from '../services/terminalText'
 import { writeScreen, readScreen, disposeScreen } from './screen'
 import { WebServer, type SessionView, type WorkspaceView, type WebCreateRequest } from './webServer'
 import { PendingPanelsStore } from './pendingPanels'
 import { initIdentity, revokeAgent, agentToken, setMeshPort } from './mesh/identity'
-import type { AgentState, MeshAgent } from './mesh/types'
+import type { AgentReadiness, AgentState, MeshAgent, PtyWriteReceipt } from './mesh/types'
 import { MeshBus } from './mesh/bus'
 import { MeshEndpoint } from './mesh/endpoint'
 import { cleanupMcpEntries, installAgentDocs } from './mesh/provision'
@@ -76,8 +76,17 @@ async function deliverPromptToSpawned(ptyIds: string[], prompt: string, requeste
       if (!entry || entry.exited) return
       // A beat so the harness has drawn its input box before we type into it.
       await new Promise((resolve) => setTimeout(resolve, 1200))
-      const ok = await mesh.deliverText(ptyId, prompt)
-      if (!ok) log(`mesh spawn prompt not delivered to ${ptyId}`)
+      // Spawn prompts are real mesh messages, not a privileged blind write. That gives them the
+      // same readiness gate, permission-prompt queueing, paste transaction and sender outcome as
+      // `send`/`ask`/chain, while preserving the exact newborn ptyId routing above.
+      // Park it, never refuse it. `send` declines an `unknown` harness, and a newborn still
+      // booting its MCP servers is exactly that — which is how a spawn prompt used to vanish into
+      // a log line while the user watched an agent that never greeted them.
+      const delivered = await mesh.send(requesterId, ptyId, prompt, 'queue')
+      if (!delivered.ok) {
+        const parked = mesh.queueForAgent(requesterId, ptyId, prompt)
+        log(`mesh spawn prompt parked for ${ptyId} (${String(delivered.error ?? 'unknown')}) → ${parked.ok ? 'queued' : 'LOST'}`)
+      }
     }),
   )
 }
@@ -192,16 +201,19 @@ setInterval(() => {
 // closes, and answers agents on the fixed loopback endpoint (/cli, native JSON-RPC).
 const mesh = new MeshBus(userData)
 const meshEndpoint = new MeshEndpoint(mesh)
-mesh.onDeliver = (ptyId, text) => {
+mesh.onDeliver = (ptyId, text): PtyWriteReceipt => {
   const entry = sessions.get(ptyId)
-  if (!entry || entry.exited) return false
+  if (!entry || entry.exited) return { accepted: false, bytesWritten: 0 }
   try {
     entry.pty.write(text)
-    return true
+    // node-pty has no async ack; a non-throwing write to a live IPty is its provider-level
+    // acceptance fact. Keep this separate from the later rendered-screen safety check.
+    return { accepted: true, bytesWritten: Buffer.byteLength(text, 'utf8') }
   } catch {
-    return false
+    return { accepted: false, bytesWritten: 0 }
   }
 }
+mesh.onReadinessRequest = (ptyId) => agentReadiness(ptyId)
 mesh.onEvent = (event) => {
   broadcast({ event: 'mesh', meshEvent: event })
   web?.pushMeshEvent(event)
@@ -293,7 +305,19 @@ mesh.onSpawn = (req) => {
   // The newcomer belongs to the requester's CANVAS and, unless told otherwise, to its folder.
   // A model that guesses a cwd ("C:/tmp") must not exile the panel to another workspace.
   const originSpaceId = requester?.spaceId
-  const cwd = req.cwd || requester?.cwd || undefined
+  // A RELATIVE folder is resolved against the requester's cwd. `plano spawn omp animal-cases`
+  // used to hand node-pty the bare string "animal-cases", which is not a directory from the
+  // daemon's own working directory — the spawn silently fell back to the user's home, and the
+  // roster then showed every worker sitting in C:\Users\<name> instead of the project. It only
+  // went unnoticed because the agents happened to use absolute paths in their work.
+  const requestedCwd = req.cwd?.trim() || ''
+  const base = requester?.cwd || ''
+  const resolvedCwd = requestedCwd
+    ? isAbsolute(requestedCwd) || !base
+      ? requestedCwd
+      : resolve(base, requestedCwd)
+    : base || undefined
+  const cwd = resolvedCwd && existsSync(resolvedCwd) ? resolvedCwd : base || undefined
   // Keep the EXACT ptyIds we create: the prompt is addressed to them, never guessed.
   const created: string[] = []
   for (let i = 0; i < count; i += 1) {
@@ -302,6 +326,12 @@ mesh.onSpawn = (req) => {
         folderPath: cwd,
         bootCommand: command,
         name: req.harness,
+        origin: {
+          by: mesh.agent(req.from)?.panelTitle || `agent ${req.from.slice(0, 8)}`,
+          byKind: mesh.agent(req.from)?.kind,
+          via: 'plano spawn',
+          harness: req.harness,
+        },
         cols: 100,
         rows: 30,
         originPanelId,
@@ -367,6 +397,12 @@ interface Session {
   /** Plan v3 A2: honest-busy state threaded across polls. */
   activity?: import('./agentLight').ActivityState
   busyNow?: boolean
+  /** Latest worker-process evidence used by the guarded send gate between detect ticks. */
+  workersActive?: boolean
+  /** PTY protocol fact: the foreground TUI enabled/disabled bracketed paste (DECSET ?2004). */
+  bracketedPasteEnabled?: boolean
+  /** Short raw suffix so a DECSET sequence split across onData chunks is still recognised. */
+  terminalModeTail?: string
   /** v6 C1: stale-`working` watchdog — the screen as last seen, and when it last changed. */
   staleScreen?: string
   staleSince?: number
@@ -381,6 +417,65 @@ const sessions = new Map<string, Session>()
 const clients = new Set<Socket>()
 const pendingPanels = new PendingPanelsStore(userData)
 const processTree = new ProcessTreeService()
+
+/** Track terminal mode handshakes from the raw stream; the rendered screen consumes these bytes. */
+function observeTerminalModes(entry: Session, data: string): void {
+  const scan = `${entry.terminalModeTail ?? ''}${data}`
+  const modes = scan.matchAll(/\x1b\[\?2004([hl])/g)
+  for (const match of modes) entry.bracketedPasteEnabled = match[1] === 'h'
+  entry.terminalModeTail = scan.slice(-24)
+}
+
+/**
+ * Orca-style guarded-send status, owned by the daemon so it works with the desktop closed.
+ * Permission text wins over every inferred/hook state; worker and hook evidence win over idle;
+ * a write is sendable only for a detected agent with a rendered TUI surface.
+ */
+function agentReadiness(ptyId: string): AgentReadiness {
+  const entry = sessions.get(ptyId)
+  if (!entry || entry.exited) {
+    return { state: 'unknown', inputMode: 'clean', pasteMode: 'plain', detail: 'terminal is not writable' }
+  }
+  const agent = mesh.agent(ptyId)
+  const kind = agent?.kind ?? entry.agentKind ?? entry.appKind ?? 'unknown'
+  const rendered = readScreen(ptyId) || normalizeTerminalText(entry.buffer.slice(-8).join(''))
+  const pasteMode: AgentReadiness['pasteMode'] = entry.bracketedPasteEnabled ? 'bracketed' : 'plain'
+  const edit = inputEditState(rendered, kind)
+  const base = { inputMode: edit.editing ? ('editing' as const) : ('clean' as const), pasteMode }
+  const composerReady = pasteMode === 'bracketed' && inputPromptVisible(rendered, kind)
+
+  if (awaitingInput(rendered) || (agent?.state === 'awaiting-input' && !composerReady)) {
+    return { state: 'permission-prompt', ...base, detail: 'a human must clear the permission prompt' }
+  }
+  if (kind === 'unknown') {
+    return { state: 'not-an-agent', ...base, detail: 'no supported harness is attached to the PTY' }
+  }
+  // A LIVE COMPOSER OUTRANKS "BUSY". If the TUI is showing its input line and has bracketed paste
+  // on, it will accept the text now and act on it when the current turn ends — that is what the
+  // harness's own composer is for, and it is why a human can type into Claude while it works.
+  //
+  // Orca's readiness has no `busy` state at all (`sendable | no-agent | permission |
+  // status-unavailable`): only a permission prompt is a hard boundary. Treating mid-turn as a
+  // blocker is what made a message sit in the mailbox until the peer went idle — the "it just
+  // waits" complaint. Working is not a reason to refuse; an unusable composer is.
+  const hookHeld = (hookHeldUntil.get(ptyId) ?? 0) > Date.now()
+  if (composerReady && edit.editing === false) {
+    const working = entry.workersActive || hookHeld || agent?.state === 'working'
+    return {
+      state: 'sendable',
+      ...base,
+      midTurn: working,
+      detail: working ? 'composer is live — mid-turn input is accepted' : (edit.reason ?? 'composer is live'),
+    }
+  }
+  if (entry.workersActive || hookHeld || agent?.state === 'working') {
+    return { state: 'busy', ...base, detail: hookHeld ? 'harness hook reports an active turn' : 'agent is mid-turn' }
+  }
+  if (!rendered.trim()) {
+    return { state: 'unknown', ...base, detail: 'the TUI has not rendered an input surface yet' }
+  }
+  return { state: 'sendable', ...base, detail: edit.reason }
+}
 // The first Win32_Process enumeration pays a cold PowerShell start (~5 s measured) — warm the
 // worker at boot so the first detect tick (2.5 s later) already has a populated map. Without
 // it, cold-start detection silently wedges and every session stays 'unknown'.
@@ -635,6 +730,7 @@ function createEntry(
 
   result.pty.onData((data) => {
     entry.lastOutputAt = Date.now()
+    observeTerminalModes(entry, data)
     appendBuffer(entry, data)
     entry.pendingOutput += data
     queueOutput(entry)
@@ -682,6 +778,7 @@ function startDetection(): void {
         // Plan v3 A2: busy = real work (worker processes + cleaned-content change with
         // hysteresis), NEVER "bytes flowed recently" — repainting CLIs pinned busy=true.
         const workers = entry.agentPid ? hasActiveWorkers(entry.pid, entry.agentPid, map) : false
+        entry.workersActive = workers
         const activity = computeBusy(entry.buffer, workers, entry.activity ?? null)
         entry.activity = activity.state
         entry.busyNow = activity.busy
@@ -699,12 +796,20 @@ function startDetection(): void {
 
         if (entry.agentKind) {
           mesh.setKind(entry.ptyId, entry.agentKind)
-          const cleanTail = normalizeTerminalText(entry.buffer.slice(-6).join(''))
+          // Permission is a SCREEN state, not an append-only transcript fact. A cleared prompt
+          // remains forever in the raw ring buffer; trusting it kept the agent blocked after the
+          // human had already answered. Use the daemon's rendered xterm, with raw only as startup
+          // fallback before the screen observer has produced anything.
+          const cleanTail = readScreen(entry.ptyId) || normalizeTerminalText(entry.buffer.slice(-6).join(''))
           const waiting = awaitingInput(cleanTail)
+          // A visible harness composer while bracketed paste is enabled is the TUI's positive
+          // readiness signal. It beats stale output-activity inference, but never a permission
+          // prompt, a live lifecycle hook (handled above), or an actual worker process.
+          const composerReady = Boolean(entry.bracketedPasteEnabled && inputPromptVisible(cleanTail, entry.agentKind) && !workers)
           // v4 A3/A4: a manual claim survives detect-loop activity states, but
           // awaiting-input (a blocked permission prompt) outranks EVERYTHING.
           if (!mesh.agent(entry.ptyId)?.manual || waiting) {
-            const state: AgentState = waiting ? 'awaiting-input' : activity.busy ? 'working' : 'idle'
+            const state: AgentState = waiting ? 'awaiting-input' : composerReady ? 'idle' : activity.busy ? 'working' : 'idle'
             mesh.setState(entry.ptyId, state)
           }
           // v6 C1: a `working` claim must be re-earned. Harnesses without lifecycle hooks (Pi and
@@ -739,7 +844,7 @@ function startDetection(): void {
           // (a permission prompt) outranks even a manual claim (v4 A3).
           const agent = mesh.agent(entry.ptyId)
           if (agent?.manual) {
-            const cleanTail = normalizeTerminalText(entry.buffer.slice(-6).join(''))
+            const cleanTail = readScreen(entry.ptyId) || normalizeTerminalText(entry.buffer.slice(-6).join(''))
             if (awaitingInput(cleanTail)) mesh.setState(entry.ptyId, 'awaiting-input')
           } else {
             mesh.setState(entry.ptyId, 'idle')
@@ -931,6 +1036,8 @@ function handlePhoneCreate(req: WebCreateRequest): SessionView | { error: string
     originPanelId: req.originPanelId,
     groupIndex: req.groupIndex,
     groupCount: req.groupCount,
+    // Provenance travels with the panel: a terminal an agent opened should be able to say so.
+    origin: req.origin,
   }
 
   if (clients.size > 0) {

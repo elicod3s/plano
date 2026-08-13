@@ -75,6 +75,12 @@ export interface WebCreateRequest {
   /** Mesh spawn only: the requester's workspace — the newcomer materializes on THAT canvas,
    *  never in a folder-derived (possibly invented) one. */
   originSpaceId?: string
+  /**
+   * Mesh spawn only: WHO asked for this terminal and how. Surfaced on the panel so a canvas that
+   * fills up with workers still says where each one came from — a terminal you did not open
+   * yourself should be able to explain itself.
+   */
+  origin?: { by: string; byKind?: string; via: string; harness?: string }
   /** Position within a multi-agent spawn (`count: 2` → 0 and 1) so the batch lays out as a row. */
   groupIndex?: number
   groupCount?: number

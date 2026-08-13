@@ -227,7 +227,7 @@
    * fallbacks): that one is chosen for glyph coverage, not for taste, and must not change.
    */
   --font-data: 'Geist Mono Variable', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --font-mono: 'JetBrains Mono', 'PLANO Term Symbols', 'PLANO Term Dingbats', 'Cascadia Mono',
+  --font-mono: 'PLANO Terminal Text', 'PLANO Term Symbols', 'PLANO Term Dingbats', 'Cascadia Mono',
     'Cascadia Code', Consolas, 'Courier New', ui-monospace, SFMono-Regular, Menlo, 'DejaVu Sans Mono',
     monospace;
 

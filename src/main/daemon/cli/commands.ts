@@ -104,6 +104,64 @@ export async function run(rawKey: string, p: ParsedArgs, client: MeshClient): Pr
       if (!res.ok) return { output: failText(res), exitCode: 1 }
       return { output: formatWatch(res), exitCode: res.status === 'delivered' ? 0 : 2 }
     }
+    // ── v7 orchestration: the coordinator loop ──
+    case 'run-create': {
+      needClient(client)
+      const objective = pos.join(' ')
+      if (!objective) throw usage('run-create <objective>')
+      return finish(client, 'plano_run_create', { objective }, json, (r) => `run ${String(r.runId)} — ${String(r.objective)}`)
+    }
+    case 'task-create': {
+      needClient(client)
+      const spec = pos.join(' ')
+      if (!spec) throw usage('task-create <spec> [--deps id1,id2]')
+      const deps = typeof flags.deps === 'string' ? flags.deps.split(',').map((d) => d.trim()).filter(Boolean) : []
+      return finish(client, 'plano_task_create', { spec, deps }, json, (r) =>
+        `task ${String(r.taskId)} (${String(r.status)})${deps.length ? ` after ${deps.join(', ')}` : ''}`,
+      )
+    }
+    case 'task-list': {
+      needClient(client)
+      return finish(client, 'plano_task_list', { ready: flags.ready === true }, json, formatTasks)
+    }
+    case 'dispatch': {
+      needClient(client)
+      const taskId = pos[0]
+      const to = pos[1]
+      if (!taskId || !to) throw usage('dispatch <taskId> <agentId> [--retry-of <dispatchId>]')
+      return finish(
+        client,
+        'plano_dispatch',
+        { taskId, to, retryOf: typeof flags['retry-of'] === 'string' ? flags['retry-of'] : undefined },
+        json,
+        (r) => `dispatch ${String(r.dispatchId)} → ${String(r.to)} (${String(r.status)})`,
+      )
+    }
+    case 'worker-done': {
+      needClient(client)
+      // The dispatch id is optional: a worker usually has exactly one active attempt.
+      const dispatchId = pos[0] && pos[0].startsWith('disp_') ? pos[0] : undefined
+      const outcome = flags.outcome === 'failed' ? 'failed' : 'succeeded'
+      const summary = typeof flags.summary === 'string' ? flags.summary : pos.slice(dispatchId ? 1 : 0).join(' ')
+      const files = typeof flags['files-modified'] === 'string' ? flags['files-modified'].split(',').map((f) => f.trim()) : undefined
+      return finish(client, 'plano_worker_done', { dispatchId, outcome, summary, files }, json, (r) =>
+        `reported ${String(r.outcome)} for task ${String(r.taskId)} — task is now ${String(r.taskStatus)}${r.circuitBroken ? ' (circuit breaker: no more attempts)' : ''}`,
+      )
+    }
+    case 'check': {
+      needClient(client)
+      const types = typeof flags.types === 'string' ? flags.types.split(',').map((t) => t.trim()).filter(Boolean) : undefined
+      const wait = flags.wait === true
+      const timeoutMs = num(flags, 'timeout-ms', 900_000)
+      const res = await client.call(
+        'plano_check',
+        { types, wait, timeoutMs, ack: typeof flags.ack === 'string' ? flags.ack : undefined },
+        { timeoutMs: wait ? timeoutMs + 30_000 : 30_000, keepalive: wait },
+      )
+      if (json) return { output: JSON.stringify(res, null, 2), exitCode: 0 }
+      if (!res.ok) return { output: failText(res), exitCode: 1 }
+      return { output: formatCheck(res), exitCode: 0 }
+    }
     case 'inbox': {
       needClient(client)
       return finish(client, 'plano_inbox', {}, json, formatInbox)
@@ -161,10 +219,19 @@ export async function run(rawKey: string, p: ParsedArgs, client: MeshClient): Pr
       const res = await client.call('plano_ask', { to, text, timeoutMs }, { timeoutMs: timeoutMs + 30_000, keepalive: true })
       if (json) return { output: JSON.stringify(res, null, 2), exitCode: 0 }
       if (!res.ok) return { output: failText(res), exitCode: 1 }
-      return {
-        output: `${res.inferred ? 'inferred reply' : 'reply'} from ${to}${res.timeout ? ' (timed out)' : ''}:\n${String(res.reply ?? '')}`,
-        exitCode: 0,
+      // Three honest outcomes, never a manufactured one: they answered, they cannot take input
+      // yet (queued), or they have not answered yet (still pending).
+      if (res.status === 'queued') {
+        return { output: `queued for ${to}: ${String(res.detail ?? 'not ready yet')}`, exitCode: 0 }
       }
+      if (res.answered === false || res.timeout) {
+        const context = String(res.contextTail ?? '').trim()
+        return {
+          output: `${String(res.detail ?? `${to} has not answered yet — still pending.`)}${context ? `\n\n--- what they are doing (context, NOT an answer) ---\n${context}` : ''}`,
+          exitCode: 2,
+        }
+      }
+      return { output: `reply from ${to}:\n${String(res.reply ?? '')}`, exitCode: 0 }
     }
     case 'reply': {
       needClient(client)
@@ -490,11 +557,17 @@ function formatRoster(r: MeshResult): string {
 function formatSend(r: MeshResult, to: string): string {
   const status = String(r.status ?? 'delivered')
   const lines: string[] = []
-  if (r.autoQueued) {
-    lines.push(`queued for ${to}: they are mid-turn, so it will be typed in the moment they are free`)
+  if (status === 'queued') {
+    if (r.humanActionRequired) {
+      lines.push(`queued for ${to}: they are on a permission prompt; PLANO wrote 0 bytes and a human must clear it`)
+    } else {
+      lines.push(`queued for ${to}: the TUI is not sendable yet, so PLANO wrote 0 bytes and will retry when ready`)
+    }
     lines.push(`follow it with: plano watch ${String(r.id ?? '')}`)
   } else {
-    lines.push(`sent to ${to}: ${status}${r.confirmed ? ' (confirmed)' : ''}`)
+    lines.push(
+      `sent to ${to}: ${status}${r.confirmed ? ' (confirmed)' : ''}; accepted=${String(r.accepted === true)}, bytesWritten=${String(r.bytesWritten ?? 0)}`,
+    )
   }
   if (r.truncated) lines.push('WARNING: the message was longer than the limit and was cut — send the rest as a second message')
   return lines.join('\n')
@@ -502,11 +575,35 @@ function formatSend(r: MeshResult, to: string): string {
 
 function formatWatch(r: MeshResult): string {
   const status = String(r.status ?? 'unknown')
-  if (status === 'delivered') return `delivered${r.confirmed ? ' and confirmed (they reacted)' : ' (written, no reaction observed yet)'}`
+  if (status === 'delivered') {
+    return `delivered; accepted=${String(r.accepted === true)}, bytesWritten=${String(r.bytesWritten ?? 0)}${r.confirmed ? ' (they reacted)' : ' (no reaction observed yet)'}`
+  }
   if (status === 'expired') return 'EXPIRED — never delivered; re-send it'
   if (status === 'undeliverable') return `undeliverable: ${String(r.reason ?? 'write failed')}`
   if (r.timedOut) return 'still queued — the target has not been free yet (watch again, or plano interrupt them)'
   return status
+}
+
+function formatTasks(r: MeshResult): string {
+  const tasks = (r.tasks as Array<Record<string, unknown>> | undefined) ?? []
+  if (tasks.length === 0) return 'no tasks yet — create one with: plano task-create "<spec>"'
+  const rows = tasks.map((t) => {
+    const deps = (t.deps as string[] | undefined) ?? []
+    const disp = (t.dispatches as Array<Record<string, unknown>> | undefined) ?? []
+    const where = disp.length > 0 ? ` · ${disp.length} attempt${disp.length === 1 ? '' : 's'}` : ''
+    return `${String(t.id).padEnd(14)} ${String(t.status).padEnd(11)} ${deps.length ? `after ${deps.join(',')} ` : ''}${String(t.spec).slice(0, 70)}${where}`
+  })
+  const header = ['id'.padEnd(14), 'status'.padEnd(11), 'spec'].join(' ')
+  return `${tasks.length} task${tasks.length === 1 ? '' : 's'}\n${header}\n${rows.join('\n')}`
+}
+
+/** A timeout must never read as a failure — that is how a healthy worker gets declared dead. */
+function formatCheck(r: MeshResult): string {
+  if (r.checkpoint) return 'nothing waiting yet — checkpoint, not a failure. Keep waiting (the worker is still yours).'
+  const msgs = (r.messages as Array<Record<string, unknown>> | undefined) ?? []
+  const lines = msgs.map((m) => `[${String(m.kind)}] from ${String(m.from).slice(0, 8)}: ${String(m.text).slice(0, 160)}`)
+  const body = lines.join('\n')
+  return `${msgs.length} message${msgs.length === 1 ? '' : 's'}\n${body}\n\nack with: plano check --ack ${String(r.deliveryId)}`
 }
 
 function formatClose(r: MeshResult): string {

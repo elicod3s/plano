@@ -70,6 +70,11 @@ const SIGS: Signature[] = [
     cmd: /(^|[\\/\s])pi(\.exe)?(\s|$)|@earendil-works[\\/]pi-coding-agent|[\\/]pi-coding-agent[\\/]/i,
   },
   {
+    id: 'grok',
+    names: /^(grok(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])grok(\.exe)?(\s|$)|[\\\/]\.grok[\\\/]bin[\\\/]grok(\.exe)?/i,
+  },
+  {
     id: 'hermes',
     names: /^(hermes(\.exe|\.cmd)?|python(3|w)?(\.exe)?|uv(\.exe)?)$/i,
     cmd: /(^|[\\/\s])hermes(\.exe|\.cmd)?(\s|$)|hermes_cli|(?:^|[\\/])hermes-agent[\\/]|python(?:3|w)?(?:[\\/]|\s+)-m\s+hermes_cli/i,
@@ -140,6 +145,80 @@ const AWAITING_INPUT_RE =
 /** True when the cleaned tail (last ~400 chars) shows an awaiting-input prompt. */
 export function awaitingInput(tail: string): boolean {
   return AWAITING_INPUT_RE.test(tail.slice(-400))
+}
+
+/**
+ * Composer states where Enter is not a trustworthy submit. Keep the harness wording in one
+ * table: these are UI contracts, not generic terminal prose, and each entry needs evidence before
+ * it is broadened. A match never authorizes typing; it only asks the guarded delivery path to
+ * escape the state and re-check readiness first.
+ */
+const INPUT_EDIT_STATE_HINTS: ReadonlyArray<{
+  kinds: ReadonlyArray<AgentKind>
+  pattern: RegExp
+  why: string
+}> = [
+  {
+    kinds: ['codex'],
+    // Codex after an interrupted/queued composer: the real incident left the mesh line here.
+    pattern: /esc again to edit previous message/i,
+    why: 'Codex edit-previous-message state',
+  },
+  {
+    kinds: ['claude-code', 'pi', 'omp', 'gemini-cli', 'opencode', 'cursor', 'kiro-cli', 'aider', 'grok', 'hermes'],
+    // Variants use the shorter form while a prior turn is available for editing.
+    pattern: /esc(?:ape)?(?: again)? to (?:edit|revise)(?: the)? previous message/i,
+    why: 'shared edit-previous-message hint',
+  },
+]
+
+export interface InputEditState {
+  editing: boolean
+  reason?: string
+}
+
+/** Inspect only the rendered tail; raw repaint frames create false edit hints. */
+export function inputEditState(tail: string, kind: AgentKind | 'unknown'): InputEditState {
+  const recent = tail.slice(-1200)
+  for (const hint of INPUT_EDIT_STATE_HINTS) {
+    if (kind !== 'unknown' && !hint.kinds.includes(kind)) continue
+    if (hint.pattern.test(recent)) return { editing: true, reason: hint.why }
+  }
+  return { editing: false }
+}
+
+/**
+ * Live composer markers, by harness. Keep these narrow: arbitrary transcript text can start with
+ * `>`, while a marker in the last rendered input region plus DECSET ?2004 is positive evidence
+ * that the TUI has reopened its composer. This is shared by readiness and post-submit checking so
+ * they cannot disagree about where the input box is.
+ */
+const INPUT_PROMPT_MARKERS: Partial<Record<AgentKind, RegExp>> = {
+  'claude-code': /^[\s│┃╎┆┊┋╏╭╰┌└]*❯\s?/,
+  codex: /^[\s│┃╎┆┊┋╏╭╰┌└]*›\s?/,
+  pi: /^[\s│┃╎┆┊┋╏╭╰┌└]*[>›]\s?/,
+  omp: /^[\s│┃╎┆┊┋╏╭╰┌└]*[>›]\s?/,
+  'gemini-cli': /^[\s│┃╎┆┊┋╏╭╰┌└]*>\s?/,
+  opencode: /^[\s│┃╎┆┊┋╏╭╰┌└]*>\s?/,
+  cursor: /^[\s│┃╎┆┊┋╏╭╰┌└]*>\s?/,
+  'kiro-cli': /^[\s│┃╎┆┊┋╏╭╰┌└]*>\s?/,
+  aider: /^[\s│┃╎┆┊┋╏╭╰┌└]*>\s?/,
+  grok: /^[\s│┃╎┆┊┋╏╭╰┌└]*>\s?/,
+  hermes: /^[\s│┃╎┆┊┋╏╭╰┌└]*>\s?/,
+}
+const GENERIC_INPUT_PROMPT = /^[\s│┃╎┆┊┋╏╭╰┌└]*[›❯>]\s?/
+
+/** Index of the last rendered composer row, or -1 when no supported prompt is visible. */
+export function inputPromptRowIndex(rows: readonly string[], kind: AgentKind | 'unknown'): number {
+  const marker = kind === 'unknown' ? GENERIC_INPUT_PROMPT : (INPUT_PROMPT_MARKERS[kind] ?? GENERIC_INPUT_PROMPT)
+  for (let i = rows.length - 1; i >= 0; i -= 1) {
+    if (marker.test(rows[i])) return i
+  }
+  return -1
+}
+
+export function inputPromptVisible(tail: string, kind: AgentKind | 'unknown'): boolean {
+  return inputPromptRowIndex(tail.split('\n').slice(-14), kind) >= 0
 }
 
 const HOST_SHELL_RE = /^(cmd|conhost|powershell|pwsh|windowsterminal|explorer)(\.exe)?$/i

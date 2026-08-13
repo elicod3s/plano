@@ -9,7 +9,8 @@
  *
  * The fix layers three bundled fonts under custom family names, consulted in this order via the font
  * stack in xtermTheme.ts / theme.css — each fills exactly what the previous one lacks:
- *   1. JetBrains Mono (full, unsubsetted) — box drawing (Claude's ╭──╮ input box), block elements
+ *   1. "PLANO Terminal Text" (JetBrains Mono, full/unsubsetted) — ALL ordinary text plus box drawing
+ *      (Claude's ╭──╮ input box), block elements
  *      (progress bars █▉▊), geometric shapes (●○◆), arrows, ✓✗. Same typeface + advance width as the
  *      terminal text, so lines tile seamlessly and columns never drift.
  *   2. "PLANO Term Symbols" (Cascadia Code PL) — Braille spinners (⠋⠙⠹) and Powerline glyphs, plus broad
@@ -20,32 +21,34 @@
  * coverage, never blanks a glyph. All three fonts are OFL/permissively licensed and safe to bundle.
  */
 
-/* 1 — full JetBrains Mono for the symbol blocks Fontsource's subsets omit. Same family name as the body
- * text, so terminal/editor use it automatically; scoped to the ranges JetBrains Mono actually covers. */
+/* 1 — one self-contained face for the whole terminal line. A distinct family avoids Fontsource's
+ * language-subset @font-face selection racing the xterm glyph atlas: paths, ASCII punctuation and
+ * uppercase/lowercase now always resolve from these exact full files before any fallback is tried. */
 @font-face {
-  font-family: 'JetBrains Mono';
+  font-family: 'PLANO Terminal Text';
   font-style: normal;
   font-weight: 400;
   font-display: swap;
   src: url(../assets/fonts/JetBrainsMono-Regular.woff2) format('woff2');
-  unicode-range: U+2190-21FF, U+2300-23FF, U+2500-27BF;
 }
 @font-face {
-  font-family: 'JetBrains Mono';
+  font-family: 'PLANO Terminal Text';
   font-style: normal;
   font-weight: 600;
   font-display: swap;
   src: url(../assets/fonts/JetBrainsMono-SemiBold.woff2) format('woff2');
-  unicode-range: U+2190-21FF, U+2300-23FF, U+2500-27BF;
 }
 
-/* 2 — Cascadia Code PL (variable): Braille + Powerline + broad symbols. */
+/* 2 — Cascadia Code PL (variable): ONLY Braille + Powerline private-use blocks. Without this
+ * unicode-range Chromium may provision Cascadia for ordinary glyphs during primary-font loading,
+ * baking mixed letterforms into xterm's atlas until the next full refresh. */
 @font-face {
   font-family: 'PLANO Term Symbols';
   font-style: normal;
   font-weight: 100 900;
   font-display: swap;
   src: url(../assets/fonts/CascadiaCodePL.woff2) format('woff2');
+  unicode-range: U+2800-28FF, U+E0A0-E0D7, U+E200-E2FF;
 }
 
 /* 3 — DejaVu Sans Mono (subset U+2600–27BF): the star/asterisk dingbats Claude Code uses. */

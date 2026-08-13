@@ -37,14 +37,18 @@ window.addEventListener('unhandledrejection', (e) =>
 /** Last-resort boundary: turns a render crash into a readable panel instead of a black screen. */
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { error: Error | null }
+  { error: Error | null; componentStack: string }
 > {
-  state = { error: null as Error | null }
+  state = { error: null as Error | null, componentStack: '' }
   static getDerivedStateFromError(error: Error) {
     return { error }
   }
   componentDidCatch(error: Error, info: React.ErrorInfo) {
     console.error('PLANO_RENDER_CRASH:', error.message, error.stack, info.componentStack)
+    // Put the COMPONENT stack on screen, not only in a console nobody has open. A crash report is
+    // a screenshot: if the panel shows only the minified JS frames it identifies the error code
+    // and nothing else, and diagnosing it becomes a blind hunt through the source.
+    this.setState({ componentStack: info.componentStack ?? '' })
   }
   render() {
     if (this.state.error) {
@@ -66,6 +70,14 @@ class ErrorBoundary extends React.Component<
             {'\n\n'}
             {this.state.error.stack}
           </pre>
+          {this.state.componentStack && (
+            <>
+              <h2 style={{ color: '#fbbf24', fontSize: 13, margin: '18px 0 6px' }}>
+                Component stack — where it happened
+              </h2>
+              <pre style={{ whiteSpace: 'pre-wrap', opacity: 0.85 }}>{this.state.componentStack}</pre>
+            </>
+          )}
         </div>
       )
     }

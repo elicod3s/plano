@@ -22,6 +22,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useToastStore, type Toast } from '@/stores/useToastStore'
 import { useSettingsStore } from '@/stores/useSettingsStore'
+import { useUiStore } from '@/stores/useUiStore'
 import { AgentLogo } from '@/panels/terminal/AgentLogo'
 import { Icon } from '@/design-system/Icon'
 import { cn } from '@/lib/cn'
@@ -34,6 +35,13 @@ const AWAITING_TINT = '#fbbf24'
 export function Toasts() {
   const toasts = useToastStore((s) => s.toasts)
   const reduced = useSettingsStore((s) => s.settings.appearance.reduceMotion)
+  // Focus mode fills the canvas from this exact same y (FocusStage: top-[68px]), so a card parked
+  // here lands on the focused panel's top-right corner — over its controls and its content. An
+  // "awaiting" toast never expires, so it sat there indefinitely and the panel could not be read
+  // "behind" it. Nothing can dodge a panel that occupies the whole stage, so the toast changes
+  // SHAPE instead of position: a compact pill that states who needs you, expanding to the full
+  // card on hover. Same information, a tenth of the occlusion.
+  const focusMode = useUiStore((s) => !!s.focusedPanelId)
 
   const visible = toasts.slice(0, MAX_VISIBLE)
   const hidden = Math.max(0, toasts.length - MAX_VISIBLE)
@@ -42,11 +50,14 @@ export function Toasts() {
 
   return (
     <div
-      className="pointer-events-none fixed right-6 z-[var(--z-toast)] flex w-[300px] max-w-[calc(100vw-48px)] flex-col items-stretch gap-2"
+      className={cn(
+        'pointer-events-none fixed right-6 z-[var(--z-toast)] flex max-w-[calc(100vw-48px)] flex-col gap-2',
+        focusMode ? 'items-end' : 'w-[300px] items-stretch',
+      )}
       style={{ top: STACK_TOP }}
     >
       {visible.map((t) => (
-        <ToastCard key={t.id} toast={t} reduced={reduced} />
+        <ToastCard key={t.id} toast={t} reduced={reduced} compact={focusMode} />
       ))}
       {hidden > 0 && (
         <div className="pointer-events-none flex justify-end pr-1">
@@ -59,7 +70,11 @@ export function Toasts() {
   )
 }
 
-function ToastCard({ toast, reduced }: { toast: Toast; reduced: boolean }) {
+function ToastCard({ toast, reduced, compact }: { toast: Toast; reduced: boolean; compact?: boolean }) {
+  // Collapsed only until you look at it: hovering restores the full card in place, so the compact
+  // form costs no information — it just stops occupying the screen while you are not reading it.
+  const [peek, setPeek] = useState(false)
+  const collapsed = !!compact && !peek
   const [leaving, setLeaving] = useState(false)
   const [gone, setGone] = useState(false)
   const [drained, setDrained] = useState(false)
@@ -109,13 +124,35 @@ function ToastCard({ toast, reduced }: { toast: Toast; reduced: boolean }) {
         const dy = e.changedTouches[0].clientY - start
         if (dy < -24) dismiss() // swipe up to dismiss
       }}
+      onMouseEnter={() => compact && setPeek(true)}
+      onMouseLeave={() => compact && setPeek(false)}
       className={cn(
-        'app-no-drag surface-layer surface-layer--popover pointer-events-auto relative cursor-pointer overflow-hidden rounded-[16px]',
+        'app-no-drag surface-layer surface-layer--popover pointer-events-auto relative cursor-pointer overflow-hidden',
+        collapsed ? 'rounded-pill' : 'w-[300px] rounded-[16px]',
+        !reduced && 'transition-[width,border-radius] duration-200 ease-settle',
         !gone && 'animate-toast-in',
         leaving && 'animate-toast-out',
         gone && 'hidden',
       )}
     >
+      {collapsed ? (
+        <div className="flex items-center gap-2 py-1.5 pl-1.5 pr-3">
+          <span
+            className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full border"
+            style={{
+              color: accent,
+              background: `color-mix(in srgb, ${accent} 8%, transparent)`,
+              borderColor: `color-mix(in srgb, ${accent} 22%, transparent)`,
+            }}
+          >
+            {toast.kind === 'info' ? <Icon name="Smartphone" size={11} /> : <AgentLogo kind={agentKind} size={12} color={accent} />}
+          </span>
+          <span className="max-w-[190px] truncate text-[12px] font-medium leading-none text-text-1">{toast.title}</span>
+          {awaiting && !reduced && (
+            <span className="mesh-waiting-dot shrink-0 rounded-full" style={{ width: 5, height: 5, background: AWAITING_TINT }} />
+          )}
+        </div>
+      ) : (
       <div className="flex items-center gap-2.5 px-3 py-2.5">
         {/* Identity: the harness's own brand mark inside a circle tinted with its accent — never
             a system emoji, and never a generic dot that makes every agent look alike. */}
@@ -175,8 +212,9 @@ function ToastCard({ toast, reduced }: { toast: Toast; reduced: boolean }) {
           )}
         </div>
       </div>
+      )}
 
-      {ttlMs > 0 && (
+      {!collapsed && ttlMs > 0 && (
         <div className="h-[2px] w-full bg-[rgba(255,255,255,0.04)]">
           <div
             className="h-full"

@@ -155,7 +155,7 @@ export function materializeExternalTerminal(e: ExternalTerminalEvent): void {
     rect: placeExternalPanel(e),
     z: Date.now() % 1000 + 10,
     title: e.name && e.name !== 'Terminal' ? e.name : 'Terminal',
-    props: { tabs: [tab], activeTabId: tab.id, terminalNumber: undefined },
+    props: { tabs: [tab], activeTabId: tab.id, terminalNumber: undefined, origin: e.origin },
   }
   const spaces = useSpacesStore.getState().spaces
   const next = spaces.map((s) =>

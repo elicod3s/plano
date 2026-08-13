@@ -9,6 +9,29 @@ import type { AgentKind } from '@shared/domain/agent'
 /** v3 B: honest agent state — busy was a byte-window lie; state is meaningful. */
 export type AgentState = 'idle' | 'working' | 'awaiting-input' | 'error' | 'exited'
 
+/** Guard result sampled immediately before a mesh write. */
+export type AgentReadinessState = 'sendable' | 'busy' | 'permission-prompt' | 'not-an-agent' | 'unknown'
+
+export interface AgentReadiness {
+  state: AgentReadinessState
+  /** A known TUI composer mode that must be escaped before a prompt is pasted. */
+  inputMode: 'clean' | 'editing'
+  /**
+   * Sendable BECAUSE the composer is live, while the agent is still mid-turn. Delivery is allowed
+   * (the harness queues the input itself), but the caller must NOT read this as "the turn ended".
+   */
+  midTurn?: boolean
+  /** Bracketed only after the PTY emitted DECSET ?2004h; plain is still one atomic write. */
+  pasteMode: 'bracketed' | 'plain'
+  detail?: string
+}
+
+/** A provider-level write receipt: accepted bytes, not a screen-derived guess. */
+export interface PtyWriteReceipt {
+  accepted: boolean
+  bytesWritten: number
+}
+
 /** One live agent (a PTY that may or may not run a detected harness yet). */
 export interface MeshAgent {
   /** Stable identity = ptyId (plan F2). */
@@ -71,6 +94,16 @@ export interface MeshMessage {
   blockedNotified?: boolean
   /** v6 A3: absolute creation time; `at` slides while the target is busy, this never does. */
   bornAt?: number
+  /**
+   * v7: what KIND of message this is, so a coordinator can wait for the two that matter
+   * (`worker_done`, `escalation`) and ignore ordinary chatter. Untyped mail is `message`.
+   */
+  kind?: 'message' | 'status' | 'worker_done' | 'escalation' | 'question' | 'heartbeat'
+  /** v7 B2: the batch this message was handed out in; cleared when that batch is acknowledged. */
+  deliveryId?: string
+  /** Guarded delivery receipt, persisted so `plano watch` can report the write as a fact. */
+  accepted?: boolean
+  bytesWritten?: number
 }
 
 /** Timeline event (auditable in the AgentManager). */

@@ -13,6 +13,7 @@ import {
 } from '@shared/domain/snapping'
 import { usePanelStore } from '@/stores/usePanelStore'
 import { useSelectionStore } from '@/stores/useSelectionStore'
+import { PanelOrigin } from './PanelOrigin'
 import { useCanvasFocusStore } from '@/stores/useCanvasFocusStore'
 import { useMeshArrival } from '@/stores/useMeshLinks'
 import { useUiStore } from '@/stores/useUiStore'
@@ -705,6 +706,14 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
                 </span>
               </span>
             )}
+
+          {/* Provenance: this terminal was opened BY an agent, not by the user. A quiet mark
+              rather than a badge — it is a fact about the panel's history, not its state, so it
+              should be findable without ever competing with the live status dot beside it. The
+              hover card carries the whole story. */}
+          {panel.type === 'terminal' && (panel.props as TerminalProps).origin && (
+            <PanelOrigin origin={(panel.props as TerminalProps).origin!} dim={!isFront} />
+          )}
 
           {agentActive ? (
             <AgentTitle verdict={verdict} prompt={agentPrompt} accent={agentAccent} />

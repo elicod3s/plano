@@ -112,6 +112,40 @@ export class MeshEndpoint {
           args.direct === true,
         )
       }
+      // ── v7 orchestration ──
+      case 'plano_run_create':
+        return this.bus.runCreate(agentId, String(args.objective ?? ''))
+      case 'plano_task_create':
+        return this.bus.taskCreate(
+          agentId,
+          String(args.spec ?? ''),
+          Array.isArray(args.deps) ? args.deps.map(String) : [],
+          typeof args.parent === 'string' ? args.parent : undefined,
+        )
+      case 'plano_task_list':
+        return this.bus.taskList(agentId, { ready: args.ready === true })
+      case 'plano_dispatch':
+        return this.bus.dispatchTask(
+          agentId,
+          String(args.taskId ?? ''),
+          String(args.to ?? ''),
+          typeof args.retryOf === 'string' ? args.retryOf : undefined,
+        )
+      case 'plano_worker_done':
+        return this.bus.workerDone(
+          agentId,
+          typeof args.dispatchId === 'string' ? args.dispatchId : undefined,
+          args.outcome === 'failed' ? 'failed' : 'succeeded',
+          typeof args.summary === 'string' ? args.summary : undefined,
+          Array.isArray(args.files) ? args.files.map(String) : undefined,
+        )
+      case 'plano_check':
+        return this.bus.check(agentId, {
+          types: Array.isArray(args.types) ? args.types.map(String) : undefined,
+          wait: args.wait === true,
+          timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : undefined,
+          ack: typeof args.ack === 'string' ? args.ack : undefined,
+        })
       case 'plano_watch':
         return this.bus.watchMessage(
           agentId,

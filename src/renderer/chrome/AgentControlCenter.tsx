@@ -17,7 +17,8 @@ import { cn } from '@/lib/cn'
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
 
 /** The active workspace folder, or null when none is picked. */
-const useWorkspaceFolder = (): string | null => useWorkspaceStore((s) => s.folderPath)
+// (The former `useWorkspaceFolder` hook lived here for a single caller — a click handler, where a
+// hook is illegal. Handlers read `useWorkspaceStore.getState()` instead; components subscribe.)
 
 /** Wait until a terminal tab has a live PTY (poll the runtime store). */
 async function waitForPty(termId: string, timeoutMs: number): Promise<string | null> {
@@ -201,7 +202,10 @@ export function AgentControlCenter() {
       setFanoutMsg('Select at least one agent and type a message.')
       return
     }
-    const folder = useWorkspaceFolder()
+    // Read the store directly: this runs in a CLICK HANDLER, not during render. Calling a hook
+    // here made React count fewer hooks on the next render and take the whole renderer down with
+    // "Minified React error #300" — the app died the moment anyone used fan-out.
+    const folder = useWorkspaceStore.getState().folderPath
     if (!folder) {
       setFanoutMsg('The active workspace has no folder.')
       return

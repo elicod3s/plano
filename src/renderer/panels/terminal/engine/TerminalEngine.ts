@@ -30,6 +30,7 @@ import {
   effectiveFontSize,
   parseOsc7Cwd,
   resolveShell,
+  snapFontSizeToWholeCell,
   snapRenderScale,
   isEmojiPresentationWide,
 } from './render'
@@ -57,6 +58,34 @@ let liveWebglTerminals = 0
 // jitter of the zoom animation while still catching any real layout change (a cell is ~8x20px).
 const FIT_DEBOUNCE_MS = 140
 const FIT_RESIZE_EPSILON = 1.5
+
+// The glyph advance a font stack has AT a given size, measured the way xterm's CharSizeService
+// measures it. Feeds snapFontSizeToWholeCell so the pitch xterm floors into the cell grid and the
+// advance the glyph is actually drawn with are the same whole device pixel.
+// Measured only once the PRIMARY face of the stack is really available: during `font-display: swap`
+// the canvas measures the FALLBACK instead (Consolas advances 0.55em where JetBrains Mono advances
+// 0.60em), and a size snapped to the fallback's metrics lands the grid on the wrong pitch for the
+// font actually drawn. `document.fonts.status === 'loaded'` is NOT that guarantee: a face nobody has
+// requested yet is not "pending", so status reads 'loaded' while the terminal face is still absent.
+// Returns 0 when it cannot measure honestly — callers then keep xterm's own metrics.
+let measureCtx: CanvasRenderingContext2D | null | undefined
+function advanceAt(fontFamily: string, px: number): number {
+  try {
+    if (typeof document === 'undefined' || !document.fonts || !(px > 0)) return 0
+    const primary = fontFamily.split(',')[0].trim().replace(/^['"]|['"]$/g, '')
+    // 'W' as the test string: the default ('BESbswy') reports false for symbol-only faces.
+    if (primary && !document.fonts.check(`100px '${primary}'`, 'W')) return 0
+    if (measureCtx === undefined) measureCtx = document.createElement('canvas').getContext('2d')
+    if (!measureCtx) return 0
+    // Byte-for-byte the same measurement xterm's CharSizeService makes (no weight, single 'W').
+    measureCtx.font = `${px}px ${fontFamily}`
+    const width = measureCtx.measureText('W').width
+    // A monospace advance is ~0.5–0.7em; anything outside that is a bad measurement, not a font.
+    return width > px * 0.3 && width < px * 1.2 ? width : 0
+  } catch {
+    return 0 // no 2D context (headless / GPU loss) — keep xterm's own metrics
+  }
+}
 
 /**
  * A live terminal session that OUTLIVES React. The xterm `Terminal` instance, its addons, the PTY
@@ -133,11 +162,24 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   const baseFontSize = (): number =>
     effectiveFontSize(useSettingsStore.getState().settings.terminal, fontOverride())
 
-  // Rasterize at fontSize = ROUND(base × renderScale) (integer → no fractional cell → no grid drift
-  // / re-raster flicker), then derive the box counter-scale from that rounded font (effScale =
-  // roundedFont / base) so box + cell stay proportional and the grid fills the container with no clip.
-  const scaledFontFor = (scale: number): number => Math.max(1, Math.round(baseFontSize() * scale))
-  const effScaleFor = (scale: number): number => scaledFontFor(scale) / baseFontSize()
+  // Rasterize at the nearest size whose ADVANCE is a whole device pixel (see snapFontSizeToWholeCell).
+  // Rounding the font size itself is not enough: an integer size still measures a fractional advance
+  // (13px JetBrains Mono → 7.7999px), and xterm FLOORS that into the cell pitch, so every glyph is
+  // drawn 0.8px wider than the cell it is placed in.
+  const fontStack = (): string =>
+    useSettingsStore.getState().settings.terminal.fontFamily || TERMINAL_FONT
+  const scaledFontFor = (scale: number): number => {
+    const family = fontStack()
+    return snapFontSizeToWholeCell(
+      Math.max(1, baseFontSize() * scale),
+      window.devicePixelRatio || 1,
+      (px) => advanceAt(family, px),
+    )
+  }
+  // The render box counter-scale follows the RENDER SCALE only, never the pixel snap: folding the
+  // snap in here would counter-scale the box by a fractional factor (0.9748…) and push the whole
+  // canvas back off the device-pixel grid — the very thing the snap exists to prevent.
+  const effScaleFor = (scale: number): number => scale
 
   // Cached effective on-screen scale; the mouse-fix divides the live world zoom by THIS each pointer
   // event, so caching keeps that hot path to one store read + a divide. Refreshed only when the
@@ -185,9 +227,19 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     customGlyphs: false,
     rescaleOverlappingGlyphs: true, // wide/CJK/Powerline glyphs don't bleed into neighbors
     smoothScrollDuration: 0, // smooth scroll fights the zoom scroll-anchor — keep 0
-    // Every theme owns one continuous, opaque terminal surface. Transparency makes xterm's
-    // viewport and its unrendered area show through as a second rectangle below the rows.
-    allowTransparency: false,
+    // TRUE only to get GRAYSCALE glyph antialiasing. xterm builds its glyph atlas on a 2D canvas
+    // created with `alpha: allowTransparency`; with alpha:false that canvas is opaque, so Chromium
+    // rasterizes every glyph with LCD SUBPIXEL antialiasing and bakes red/blue fringes into the
+    // atlas — which xterm then colour-keys to alpha, so the fringes survive onto the real background.
+    // Measured on one row of a normal path at 100% zoom: mean |R−B| across ink pixels was 55/255 and
+    // 78% of ink pixels were strongly fringed. Subpixel AA is only correct for text painted straight
+    // onto the physical grid; this canvas is composited through the world layer's transform, so every
+    // letter picks up a different colour cast — the "chueco, nada centrado" look. The selection made
+    // it "snap straight" purely because its lighter background washes the fringes out (measured:
+    // 55 → 39), NOT because the glyphs moved (per-glyph centroid shift ≤ 0.07px).
+    // The surface stays opaque: every theme's background/ANSI colours are fully opaque, and the WebGL
+    // rectangle renderer paints them — this flag only tells xterm the glyph raster may carry alpha.
+    allowTransparency: true,
   })
   const fit = new FitAddon()
   term.loadAddon(fit)
@@ -536,11 +588,18 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     const fam = useSettingsStore.getState().settings.terminal.fontFamily || TERMINAL_FONT
     term.options.fontFamily = 'monospace'
     term.options.fontFamily = fam
+    // Re-snap the size too: the size chosen at construction used whatever face was loaded THEN (a
+    // fallback, mid-`font-display: swap`), so its advance ratio — and therefore the whole-pixel size
+    // derived from it — belongs to the wrong font. Now the real face is loaded, so this lands the
+    // cell pitch on the grid for the font actually being drawn.
+    applyFontSize()
     requestFit()
   }
   if (typeof document !== 'undefined' && document.fonts) {
     const px = ts0.fontSize > 0 ? ts0.fontSize : 13
-    void document.fonts.load(`${px}px "JetBrains Mono"`).then(remeasureAndFit).catch(() => {})
+    // Wait for the exact full terminal face, not Fontsource's separate JetBrains subsets. The
+    // latter can report ready while xterm is still holding fallback glyphs in its atlas.
+    void document.fonts.load(`${px}px "PLANO Terminal Text"`).then(remeasureAndFit).catch(() => {})
     void document.fonts.ready.then(remeasureAndFit)
   }
 

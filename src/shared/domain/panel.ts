@@ -61,6 +61,11 @@ export interface TerminalProps {
   bootCommand?: string
   /** Per-panel color theme override (shared by all tabs); falls back to the global terminal theme. */
   theme?: TerminalThemeId
+  /**
+   * Provenance for a terminal PLANO opened on an agent's behalf: who asked and through which
+   * command. Persisted, so a canvas you come back to still explains where each worker came from.
+   */
+  origin?: { by: string; byKind?: string; via: string; harness?: string }
   /** Local dev-server URLs (localhost:PORT) this panel has already auto-opened. Persisted so a
    *  workspace reopen — or a resumed agent redrawing old output that mentions the URL — never
    *  re-opens the same one. Capped to the most-recent few. */

@@ -129,6 +129,59 @@ export const COMMANDS: CommandSpec[] = [
     aliases: ['kill', 'worker-stop'],
   },
   {
+    command: 'run-create',
+    summary: 'Open a Run: the durable namespace + inbox this coordinator supervises work in',
+    usage: 'plano run-create <objective> [--json]',
+    args: ['<objective...>'],
+    flags: [F_JSON],
+  },
+  {
+    command: 'task-create',
+    summary: 'Add a work item to my Run; --deps makes it wait for other tasks (a real DAG)',
+    usage: 'plano task-create <spec> [--deps <id,id>] [--json]',
+    args: ['<spec...>'],
+    flags: [{ flag: '--deps', arg: '<ids>', desc: 'comma-separated task ids that must complete first' }, F_JSON],
+  },
+  {
+    command: 'task-list',
+    summary: 'Every task in my Run with status, dependencies and attempts; --ready shows what can start now',
+    usage: 'plano task-list [--ready] [--json]',
+    args: [],
+    flags: [{ flag: '--ready', desc: 'only tasks whose dependencies are all completed' }, F_JSON],
+  },
+  {
+    command: 'dispatch',
+    summary: 'Assign one attempt of a task to an agent and inject the contract it owes back',
+    usage: 'plano dispatch <taskId> <agentId> [--retry-of <dispatchId>] [--json]',
+    args: ['<taskId>', '<agentId>'],
+    flags: [{ flag: '--retry-of', arg: '<id>', desc: 'this attempt replaces a failed one' }, F_JSON],
+  },
+  {
+    command: 'worker-done',
+    summary: 'Report MY dispatched task as finished — the only way a task settles itself',
+    usage: 'plano worker-done [<dispatchId>] --outcome succeeded|failed [--summary <text>] [--files-modified <paths>] [--json]',
+    args: ['[dispatchId]'],
+    flags: [
+      { flag: '--outcome', arg: '<succeeded|failed>', desc: 'REQUIRED on failure — never report failure only in prose' },
+      { flag: '--summary', arg: '<text>', desc: 'what changed, what remains' },
+      { flag: '--files-modified', arg: '<paths>', desc: 'comma-separated paths you touched' },
+      F_JSON,
+    ],
+  },
+  {
+    command: 'check',
+    summary: 'My coordinator inbox as a batch that REPLAYS until acknowledged; --wait blocks instead of polling',
+    usage: 'plano check [--wait] [--types worker_done,escalation,question] [--ack <deliveryId>] [--timeout-ms <ms>] [--json]',
+    args: [],
+    flags: [
+      { flag: '--wait', desc: 'block until something arrives (a timeout is a checkpoint, NOT a failure)' },
+      { flag: '--types', arg: '<list>', desc: 'only wake for these message kinds' },
+      { flag: '--ack', arg: '<deliveryId>', desc: 'retire the batch you just processed' },
+      F_TIMEOUT,
+      F_JSON,
+    ],
+  },
+  {
     command: 'spawn',
     summary: 'Create new agent(s) in THIS canvas: fresh terminal(s) booting a harness, placed next to my panel',
     usage: 'plano spawn <harness> [folder] [--prompt <text>] [--count N] [--wait] [--timeout-ms <ms>] [--json]',
@@ -327,17 +380,45 @@ export function helpText(forKey?: string): string {
     const flags = (spec.flags ?? []).map((f) => `  ${f.flag}${f.arg ? ` ${f.arg}` : ''}\t${f.desc}`).join('\n')
     return `${spec.command} — ${spec.summary}\n\nusage: ${spec.usage}\n${flags ? `\nflags:\n${flags}\n` : ''}`
   }
-  const groups = [
-    'identity', 'whoami', 'roster', 'status', 'find', 'declare',
-    'messaging', 'send', 'ask', 'reply', 'cancel', 'inbox', 'ack', 'broadcast',
-    'orchestration', 'spawn', 'worktree create', 'wait', 'claim', 'handoff', 'chain', 'chain-payload', 'chains', 'cancel-chain',
-    'context', 'context', 'timeline',
-    'control', 'set-model', 'interrupt', 'compact',
-    'meta', 'agent-context', 'help', 'version',
+  /**
+   * The listing is DERIVED from COMMANDS, never hand-maintained beside it.
+   *
+   * It used to be a flat array walked two at a time, mixing section names with command names: it
+   * printed pairs like "whoami  identity", it had an odd length so the final iteration read
+   * `undefined` and crashed `plano help` outright, and any command added to COMMANDS without also
+   * being typed into that array stayed invisible — which is exactly what happened to `watch` and
+   * `close`. Sections list names; anything in COMMANDS that no section claims is still printed
+   * under "more", so a new command can never be undiscoverable.
+   */
+  const sections: Array<[string, string[]]> = [
+    ['identity', ['whoami', 'roster', 'status', 'find', 'declare']],
+    ['messaging', ['send', 'ask', 'reply', 'cancel', 'inbox', 'ack', 'watch', 'broadcast']],
+    ['orchestration', ['run-create', 'task-create', 'task-list', 'dispatch', 'worker-done', 'check', 'spawn', 'worktree create', 'wait', 'close', 'claim', 'handoff', 'chain', 'chain-payload', 'chains', 'cancel-chain']],
+    ['reading', ['context', 'timeline']],
+    ['control', ['set-model', 'interrupt', 'compact']],
+    ['meta', ['agent-context', 'help', 'version']],
   ]
+  const known = new Set<string>()
   const lines: string[] = []
-  for (let i = 0; i < groups.length; i += 2) {
-    lines.push(`${groups[i + 1].padEnd(14)} ${groups[i]}`)
+  for (const [label, names] of sections) {
+    const present = names.filter((n) => COMMANDS.some((c) => c.command === n))
+    if (present.length === 0) continue
+    present.forEach((n) => known.add(n))
+    lines.push('')
+    lines.push(`${label}:`)
+    for (const name of present) {
+      const spec = COMMANDS.find((c) => c.command === name)
+      lines.push(`  ${name.padEnd(16)} ${spec ? spec.summary : ''}`)
+    }
   }
-  return `plano — PLANO mesh CLI: orchestrate agents from any terminal (v5)\n\nCommands:\n${lines.join('\n')}\n\nRun 'plano help <command>' for details. Add --json for machine output; exit code 2 means a wait timed out.`
+  const orphans = COMMANDS.filter((c) => !known.has(c.command))
+  if (orphans.length > 0) {
+    lines.push('')
+    lines.push('more:')
+    for (const spec of orphans) lines.push(`  ${spec.command.padEnd(16)} ${spec.summary}`)
+  }
+  const body = lines.join('\n')
+  const footer =
+    "Run 'plano help <command>' for details. Add --json for machine output; exit code 2 means a wait timed out."
+  return `plano — PLANO mesh CLI: orchestrate agents from any terminal\n${body}\n\n${footer}\n`
 }

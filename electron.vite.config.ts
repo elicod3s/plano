@@ -57,6 +57,14 @@ export default defineConfig({
     plugins: [react()],
     build: {
       rollupOptions: { input: { index: resolve('src/renderer/index.html') } },
+      // Keep function/class names through minification.
+      //
+      // A user's crash report read `at Nh … at cj … at bj` and React's own component stack was
+      // just as mangled, so a real "PLANO crashed on render" told us the error CODE and nothing
+      // about WHERE. The cost is a few KB of bundle; the benefit is that the next crash names the
+      // component that caused it instead of starting another blind hunt.
+      minify: 'esbuild',
     },
+    esbuild: { keepNames: true },
   },
 })

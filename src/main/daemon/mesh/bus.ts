@@ -10,9 +10,23 @@ import { HARNESS_CONTROL, MODEL_FAMILIES, MODEL_SYNTAX_RE } from '@shared/domain
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { MailboxStore } from './mailbox'
+import { OrchestrationStore, MAX_TASK_FAILURES, type WorkerOutcome } from './orchestration'
 import { resolveAgent, meshUrl, newMeshId } from './identity'
 import { normalizeTerminalText } from '../../services/terminalText'
-import type { MeshAgent, MeshEvent, MeshMessage, MeshToolResult, AgentState, MeshLink, MeshChain, ChainWhen, ChainFailure } from './types'
+import { inputPromptRowIndex } from '../agentLight'
+import type {
+  AgentReadiness,
+  MeshAgent,
+  MeshEvent,
+  MeshMessage,
+  MeshToolResult,
+  AgentState,
+  MeshLink,
+  MeshChain,
+  ChainWhen,
+  ChainFailure,
+  PtyWriteReceipt,
+} from './types'
 
 const MAX_TIMELINE = 200
 const MAX_BROADCAST_TARGETS = 12
@@ -41,11 +55,19 @@ const MAX_QUEUE_LIFE_MS = 60 * 60_000
 /** v6 B1: `plano watch <messageId>` default budget and cap. */
 const WATCH_DEFAULT_TIMEOUT_MS = 5 * 60_000
 const WATCH_MAX_TIMEOUT_MS = 60 * 60_000
-/**
- * v6: pause between the last typed burst and the Enter that submits it. A TUI re-rendering its
- * input box drops an Enter that arrives mid-repaint.
- */
-const SUBMIT_SETTLE_MS = 90
+/** v7 B3: coordinator rolling wait — generous, because supervised work runs for tens of minutes. */
+const CHECK_DEFAULT_TIMEOUT_MS = 15 * 60_000
+const CHECK_MAX_TIMEOUT_MS = 60 * 60_000
+/** One Delivery hands out at most this many messages, like Orca's 50. */
+const CHECK_BATCH_MAX = 50
+const BRACKETED_PASTE_BEGIN = '\x1b[200~'
+const BRACKETED_PASTE_END = '\x1b[201~'
+/** ConPTY can accept a paste write before the TUI has rendered its paste-end marker. */
+const POST_PASTE_SUBMIT_MS = process.platform === 'win32' ? 1500 : 500
+/** Bounded recovery/verification timings; none can turn a mesh call into an open-ended wait. */
+const EDIT_RECOVERY_ATTEMPTS = 3
+const ACCEPTANCE_VERIFY_ATTEMPTS = 3
+const ACCEPTANCE_VERIFY_MS = 320
 /** v6 C3: how long a peer may sit on a permission prompt before its senders are told. */
 const BLOCKED_NOTICE_MS = 10 * 60_000
 /** v3 A3: delivery attempts before a message becomes undeliverable. */
@@ -118,6 +140,12 @@ interface IdleWaiter {
   baseline: string
 }
 
+interface PromptDeliveryReceipt extends PtyWriteReceipt {
+  submitted: boolean
+  reason?: AgentReadiness['state'] | 'input-editing' | 'input-still-parked' | 'write-failed'
+  recoveredEditing?: boolean
+}
+
 /** v3 B: currentTask snapshot — single line, bounded. */
 function shortTask(text: string): string {
   const t = String(text).replace(/[\r\n]+/g, ' ').trim()
@@ -165,8 +193,12 @@ export class MeshBus {
   private agents = new Map<string, MeshAgent>()
   private timeline: MeshEvent[] = []
   readonly mailboxes: MailboxStore
-  /** Delivery hook for visible typing (plan F5) — wired by the daemon to writeSession. */
-  onDeliver: ((ptyId: string, text: string) => boolean) | null = null
+  /** v7: Run / Task / Dispatch — the layer above the wire (see orchestration.ts). */
+  readonly orch: OrchestrationStore
+  /** Provider-level PTY write — returns accepted bytes, never a screen-derived inference. */
+  onDeliver: ((ptyId: string, text: string) => PtyWriteReceipt) | null = null
+  /** Guard sampled immediately before every mesh write; daemon-owned so the app may be closed. */
+  onReadinessRequest: ((ptyId: string) => AgentReadiness) | null = null
   /** v3 A4: raw tail hook — wired by the daemon to the session buffer, for delivery confirmation. */
   onTailRequest: ((ptyId: string) => string) | null = null
   /** Redacted context hook (plan F4) — wired by the daemon to the app's AgentContextService. */
@@ -220,6 +252,11 @@ export class MeshBus {
    * answer instead of a guess built from echo tricks.
    */
   private watchers = new Map<string, Array<(result: MeshToolResult) => void>>()
+  /** Recent terminal outcomes keep `watch` factual even when it starts after fast delivery. */
+  private messageOutcomes = new Map<string, MeshMessage>()
+
+  /** One asynchronous mailbox drain per receiver; paste + delayed Enter is a transaction. */
+  private drainingMailboxes = new Set<string>()
 
   /** v3 E: persistent relations between pairs, keyed by ordered pair. */
   private links = new Map<string, MeshLink>()
@@ -297,6 +334,7 @@ export class MeshBus {
   constructor(userData: string) {
     this.userData = userData
     this.mailboxes = new MailboxStore(userData)
+    this.orch = new OrchestrationStore(userData)
     this.loadConsent(userData)
     this.loadChains() // v4 B4: chains survive daemon restarts
     // v3 A3: drain on a timer too — a mailbox must never hang just because the target
@@ -393,6 +431,7 @@ export class MeshBus {
       message.status = 'undeliverable'
       message.reason = 'peer-exited'
       this.pushEvent({ at: Date.now(), kind: 'msg-undeliverable', from: message.from, to: ptyId, detail: 'peer-exited' })
+      this.resolveWatchers(message.id, message)
       // Tell the SENDER, don't just log it. A timeline entry is only found by an agent that
       // already suspects something went wrong — the one in the field ran `plano inbox` (its own,
       // empty) and `plano status <dead id>` (not-found) and concluded its work had vanished. The
@@ -581,6 +620,12 @@ export class MeshBus {
   }
 
   private drainMailbox(agentId: string): void {
+    if (this.drainingMailboxes.has(agentId)) return
+    this.drainingMailboxes.add(agentId)
+    void this.drainMailboxNow(agentId).finally(() => this.drainingMailboxes.delete(agentId))
+  }
+
+  private async drainMailboxNow(agentId: string): Promise<void> {
     const now = Date.now()
     const target = this.agents.get(agentId)
     // v6 C3: a peer parked on a permission prompt is not going to read anything until a human
@@ -596,10 +641,32 @@ export class MeshBus {
         )
       }
     }
-    // Queue mode means "deliver when idle" — never type into a mid-turn agent. The
-    // timer drain retries on the next tick; the idle transition drains immediately.
-    if (target?.busy) return
     const messages = this.mailboxes.load(agentId)
+    // Readiness is an explicit step, not an inference from `busy`. Permission wins and causes no
+    // PTY bytes at all; every sender is told immediately that only a human can unblock delivery.
+    const readiness = this.agentReadiness(agentId)
+    if (readiness.state === 'permission-prompt') {
+      for (const message of messages) {
+        if (message.acked) continue
+        this.notifySender(
+          message,
+          'is WAITING to be delivered',
+          `${this.displayName(agentId)} is on a permission prompt — a human must clear it before PLANO will write anything.`,
+          'blocked',
+        )
+      }
+      return
+    }
+    // Busy/not-yet-rendered/no-agent are retryable readiness states. The timer or next state
+    // transition calls us again; they never consume a delivery attempt because no write occurred.
+    if (readiness.state !== 'sendable') return
+    // The daemon's explicit TUI probe can prove the composer reopened before the coarse process
+    // poll updates the roster. Record that boundary now so waits and the next queued turn share
+    // the same truth as guarded delivery.
+    // Only when the composer proves the TURN ended — not merely that it can accept input. Since a
+    // live composer now makes a mid-turn agent sendable, flipping to idle here would have reported
+    // every working agent as finished the moment it could receive mail.
+    if (target?.state === 'working' && !readiness.midTurn) this.setState(agentId, 'idle')
     for (const message of messages) {
       if (message.acked) continue
       // v6 A3: expiry measures REACHABLE time, not wall-clock. The old rule (10 min since the
@@ -628,12 +695,24 @@ export class MeshBus {
       // Baseline BEFORE the write: the anchor below marks where this turn starts, and a tail read
       // taken after the echo landed would already contain the message itself.
       const preBaseline = this.cleanTail(message.to)
-      const delivered = this.onDeliver && this.onDeliver(message.to, this.messageLine(message)) && this.onDeliver(message.to, '\r')
-      if (delivered) {
+      const delivered = await this.deliverPrompt(message.to, this.messageLine(message), readiness)
+      message.accepted = delivered.accepted
+      message.bytesWritten = delivered.bytesWritten
+      if (delivered.accepted && delivered.submitted) {
+        // Accepted paste + accepted Enter is a factual turn start. A sub-poll response can finish
+        // before activity detection ever samples it; without this transition, send --wait waits
+        // for a future turn even though the answer is already on screen.
+        this.setState(agentId, 'working')
         message.status = 'delivered'
         message.acked = true
         this.mailboxes.remove(agentId, message.id)
-        this.pushEvent({ at: Date.now(), kind: 'msg-delivered', from: message.from, to: message.to })
+        this.pushEvent({
+          at: Date.now(),
+          kind: 'msg-delivered',
+          from: message.from,
+          to: message.to,
+          detail: `accepted bytes=${delivered.bytesWritten} #${message.id}`,
+        })
         // v6 B2: the queued line just started a turn in the target — anchor it, so a `wait` that
         // the sender fires now reports THAT turn instead of the peer's next unrelated one.
         this.spawnPrompts.set(message.to, { at: Date.now(), baseline: preBaseline })
@@ -643,6 +722,36 @@ export class MeshBus {
         // blocked waiting; the timeline carries the final word).
         void this.confirmAsync(message)
         return // one at a time; re-drain on next idle transition or timer tick
+      }
+      // A paste was accepted but its separate Enter could not be proven. Never paste it again —
+      // that would duplicate the handoff. End with an explicit partial failure instead.
+      if (delivered.bytesWritten > 0) {
+        message.status = 'undeliverable'
+        message.reason = delivered.reason ?? 'partial-submit-failed'
+        message.acked = true
+        this.mailboxes.remove(agentId, message.id)
+        this.pushEvent({
+          at: Date.now(),
+          kind: 'msg-undeliverable',
+          from: message.from,
+          to: message.to,
+          detail: `${message.reason} #${message.id}`,
+        })
+        this.notifySender(
+          message,
+          'could NOT be submitted',
+          `the PTY accepted ${delivered.bytesWritten} bytes but the prompt did not leave the input box; PLANO did not paste it twice.`,
+        )
+        this.resolveWatchers(message.id, message)
+        return
+      }
+      if (
+        delivered.reason === 'busy' ||
+        delivered.reason === 'permission-prompt' ||
+        delivered.reason === 'not-an-agent' ||
+        delivered.reason === 'unknown'
+      ) {
+        return
       }
       // v3 A3: retry with backoff (next tick), cap → undeliverable with a reason.
       message.attempts = (message.attempts ?? 0) + 1
@@ -715,8 +824,123 @@ export class MeshBus {
     return Math.max(0, Date.now() - oldest)
   }
 
+  /**
+   * v7 B3: wake every coordinator blocked on `plano check --wait`.
+   *
+   * The alternative is what agents do today: sleep, poll `roster`, guess. A rolling long-poll that
+   * only wakes on the message types you asked for replaces the whole polling loop with one call.
+   */
+  private checkWaiters = new Map<string, Array<() => void>>()
+
+  private resolveCheckWaiters(agentId: string): void {
+    const waiting = this.checkWaiters.get(agentId)
+    if (!waiting || waiting.length === 0) return
+    this.checkWaiters.delete(agentId)
+    for (const wake of waiting) wake()
+  }
+
+  /**
+   * The coordinator's inbox, as a batch that REPLAYS until acknowledged.
+   *
+   * Delivery is at-least-once on purpose: a coordinator that dies mid-batch has lost nothing,
+   * because the same batch comes back until it says `--ack <deliveryId>`. Today a message typed
+   * into a terminal that then crashed was simply gone.
+   *
+   * A timeout is a CHECKPOINT, not a verdict — long tasks run for tens of minutes, and reading a
+   * timeout as death is exactly how a session declares a healthy worker dead.
+   */
+  async check(
+    agentId: string,
+    opts: { types?: string[]; wait?: boolean; timeoutMs?: number; ack?: string } = {},
+  ): Promise<MeshToolResult> {
+    if (!this.agents.has(agentId)) return { ok: false, error: 'not-registered' }
+    if (opts.ack) {
+      // Acknowledging retires exactly the batch that was handed out.
+      for (const message of this.mailboxes.load(agentId)) {
+        if (message.deliveryId === opts.ack) this.mailboxes.remove(agentId, message.id)
+      }
+    }
+    const wanted = (opts.types ?? []).filter(Boolean)
+    const matches = (): MeshMessage[] => {
+      const box = this.mailboxes.load(agentId).filter((m) => !m.acked)
+      return wanted.length > 0 ? box.filter((m) => wanted.includes(m.kind ?? 'message')) : box
+    }
+    let batch = matches()
+    if (batch.length === 0 && opts.wait) {
+      const ms = Math.max(1000, Math.min(opts.timeoutMs ?? CHECK_DEFAULT_TIMEOUT_MS, CHECK_MAX_TIMEOUT_MS))
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          const list = (this.checkWaiters.get(agentId) ?? []).filter((fn) => fn !== wake)
+          if (list.length > 0) this.checkWaiters.set(agentId, list)
+          else this.checkWaiters.delete(agentId)
+          resolve()
+        }, ms)
+        const wake = (): void => {
+          clearTimeout(timer)
+          resolve()
+        }
+        const list = this.checkWaiters.get(agentId) ?? []
+        list.push(wake)
+        this.checkWaiters.set(agentId, list)
+      })
+      batch = matches()
+    }
+    if (batch.length === 0) {
+      return { ok: true, count: 0, checkpoint: true, detail: 'nothing waiting — this is a checkpoint, not a failure' }
+    }
+    const deliveryId = `dlv_${Math.random().toString(36).slice(2, 10)}`
+    const capped = batch.slice(0, CHECK_BATCH_MAX)
+    for (const m of capped) m.deliveryId = deliveryId
+    return {
+      ok: true,
+      deliveryId,
+      count: capped.length,
+      messages: capped.map((m) => ({ id: m.id, from: m.from, kind: m.kind ?? 'message', at: m.at, text: m.text })),
+      detail: `ack with: plano check --ack ${deliveryId}`,
+    }
+  }
+
+  /**
+   * Park a message in an agent's mailbox WITHOUT the harness check — for the spawn prompt.
+   *
+   * A newborn can spend minutes booting (MCP servers, model handshakes) and its harness stays
+   * `unknown` until detection catches up. `send` rightly refuses an unknown target, so the spawn
+   * prompt was refused and dropped with nothing but a log line: the user asked for an agent that
+   * greets them and got one that sat there, its transcript showing only boot noise. The task must
+   * outlive the boot — the ordinary drain delivers it the moment the composer opens.
+   */
+  queueForAgent(from: string, to: string, text: string): MeshToolResult {
+    const target = this.agents.get(to)
+    if (!target) return { ok: false, error: 'not-found' }
+    const id = newMeshId()
+    this.mailboxes.push(to, {
+      id,
+      at: Date.now(),
+      bornAt: Date.now(),
+      from,
+      to,
+      text,
+      mode: 'queue',
+      ttl: DEFAULT_TTL_MS,
+      hops: 0,
+      status: 'queued',
+      acked: false,
+    })
+    target.currentTask = shortTask(text)
+    this.pushEvent({ at: Date.now(), kind: 'msg-queued', from, to, detail: 'spawn prompt parked until the newborn can receive it' })
+    this.drainMailbox(to)
+    return { ok: true, status: 'queued', id }
+  }
+
   /** v6 B1: hand every waiter on this message its final answer. */
   private resolveWatchers(messageId: string, message: MeshMessage): void {
+    this.messageOutcomes.delete(messageId)
+    this.messageOutcomes.set(messageId, { ...message })
+    while (this.messageOutcomes.size > 500) {
+      const oldest = this.messageOutcomes.keys().next().value as string | undefined
+      if (!oldest) break
+      this.messageOutcomes.delete(oldest)
+    }
     const waiting = this.watchers.get(messageId)
     if (!waiting || waiting.length === 0) return
     this.watchers.delete(messageId)
@@ -725,6 +949,8 @@ export class MeshBus {
       id: messageId,
       status: message.status,
       confirmed: message.confirmed ?? false,
+      accepted: message.accepted ?? false,
+      bytesWritten: message.bytesWritten ?? 0,
       reason: message.reason ?? null,
       to: message.to,
       at: Date.now(),
@@ -742,8 +968,21 @@ export class MeshBus {
   async watchMessage(agentId: string, messageId: string, timeoutMs = WATCH_DEFAULT_TIMEOUT_MS): Promise<MeshToolResult> {
     if (!this.agents.has(agentId)) return { ok: false, error: 'not-registered' }
     if (!messageId) return { ok: false, error: 'missing-id' }
-    // Already finished? Every terminal outcome is on the timeline, so answer from there without
-    // making the caller wait for something that has already happened.
+    const recorded = this.messageOutcomes.get(messageId)
+    if (recorded) {
+      return {
+        ok: true,
+        id: messageId,
+        status: recorded.status,
+        confirmed: recorded.confirmed ?? false,
+        accepted: recorded.accepted ?? false,
+        bytesWritten: recorded.bytesWritten ?? 0,
+        reason: recorded.reason ?? null,
+        to: recorded.to,
+        already: true,
+      }
+    }
+    // Compatibility for outcomes written by an older daemon before the receipt registry existed.
     const done = [...this.timeline]
       .reverse()
       .find((e) => e.detail?.includes(`#${messageId}`) && (e.kind === 'msg-delivered' || e.kind === 'msg-undeliverable' || e.kind === 'msg-expired'))
@@ -820,6 +1059,7 @@ export class MeshBus {
       const baseline = this.cleanTail(message.to)
       const confirmed = await this.observeTailChange(message.to, baseline, message.text.length)
       message.confirmed = confirmed
+      this.resolveWatchers(message.id, message)
       this.pushEvent({
         at: Date.now(),
         kind: 'msg-delivered',
@@ -841,38 +1081,181 @@ export class MeshBus {
     return kind.charAt(0).toUpperCase() + kind.slice(1)
   }
 
-  /** Deliver text into a target PTY VISIBLY — char-by-char with jitter (~40-80 chars/s). */
-  private async deliverTyped(ptyId: string, text: string): Promise<boolean> {
-    if (!this.onDeliver) return false
-    // Written in small BURSTS, not one character at a time. The per-character pause exists so a
-    // TUI's input handler is never flooded, but at ~18ms per char a 4000-character handoff spent
-    // over a minute just being typed — the sender blocked the whole time and the receiver looked
-    // frozen. A burst is still far below what a paste delivers, and the pause between bursts keeps
-    // the original safety: total time now scales with the message, not with its character count.
-    const BURST = 24
-    for (let i = 0; i < text.length; i += BURST) {
-      if (!this.onDeliver(ptyId, text.slice(i, i + BURST))) return false
-      if (i + BURST < text.length) await sleep(12 + Math.random() * 8)
+  private agentReadiness(ptyId: string): AgentReadiness {
+    try {
+      return (
+        this.onReadinessRequest?.(ptyId) ?? {
+          state: 'unknown',
+          inputMode: 'clean',
+          pasteMode: 'plain',
+          detail: 'readiness probe unavailable',
+        }
+      )
+    } catch {
+      return { state: 'unknown', inputMode: 'clean', pasteMode: 'plain', detail: 'readiness probe failed' }
     }
-    return true
   }
 
-  /** Public visible delivery (used by the daemon for spawn prompts, plan F6). */
+  private writePty(ptyId: string, text: string): PtyWriteReceipt {
+    if (!this.onDeliver) return { accepted: false, bytesWritten: 0 }
+    try {
+      return this.onDeliver(ptyId, text)
+    } catch {
+      return { accepted: false, bytesWritten: 0 }
+    }
+  }
+
+  /** A prompt must not be able to smuggle its own paste-end or another terminal control sequence. */
+  private sanitizePasteText(text: string): string {
+    return text.replace(/\x1b/g, '<ESC>')
+  }
+
+  /** Escape a known edit-previous-message state, checking the guard again after every byte. */
+  private async recoverEditingState(
+    ptyId: string,
+    initial: AgentReadiness,
+  ): Promise<{ readiness: AgentReadiness; recovered: boolean }> {
+    let readiness = initial
+    let recovered = false
+    for (let attempt = 0; attempt < EDIT_RECOVERY_ATTEMPTS && readiness.inputMode === 'editing'; attempt += 1) {
+      if (readiness.state !== 'sendable') return { readiness, recovered }
+      const escaped = this.writePty(ptyId, '\x1b')
+      if (!escaped.accepted) {
+        return {
+          readiness: { ...readiness, state: 'unknown', detail: 'could not leave the input editing state' },
+          recovered,
+        }
+      }
+      recovered = true
+      await sleep(180)
+      readiness = this.agentReadiness(ptyId)
+    }
+    return { readiness, recovered }
+  }
+
   /**
-   * Type a line into an agent and SUBMIT it — same contract as `send` (plan v3 A1), because the
-   * spawn-with-prompt path (`plano_spawn_agent(prompt)`) goes through here. It used to type the
-   * text with a bare '\n' and never submit, so a freshly created agent got its task written into
-   * its input box and just sat there — the exact bug A1 fixed for `send`, still alive on the path
-   * that matters most for "open two Codex and tell them to do X".
+   * Guarded prompt transaction: explicit readiness → atomic paste → delayed, separately guarded
+   * Enter → rendered-input safety check. `accepted/bytesWritten` come only from the PTY provider;
+   * screen inspection can downgrade a stuck submit but can never manufacture acceptance.
    */
+  private async deliverPrompt(
+    ptyId: string,
+    text: string,
+    sampled?: AgentReadiness,
+  ): Promise<PromptDeliveryReceipt> {
+    let readiness = sampled ?? this.agentReadiness(ptyId)
+    if (readiness.state !== 'sendable') {
+      return { accepted: false, bytesWritten: 0, submitted: false, reason: readiness.state }
+    }
+
+    let recoveredEditing = false
+    if (readiness.inputMode === 'editing') {
+      const recovered = await this.recoverEditingState(ptyId, readiness)
+      readiness = recovered.readiness
+      recoveredEditing = recovered.recovered
+      if (readiness.state !== 'sendable' || readiness.inputMode === 'editing') {
+        return {
+          accepted: false,
+          bytesWritten: 0,
+          submitted: false,
+          reason: readiness.inputMode === 'editing' ? 'input-editing' : readiness.state,
+          recoveredEditing,
+        }
+      }
+    }
+
+    // Re-sample immediately before the write. This closes the race where a permission prompt
+    // appears after the earlier idle observation but before node-pty receives the first byte.
+    readiness = this.agentReadiness(ptyId)
+    if (readiness.state !== 'sendable') {
+      return { accepted: false, bytesWritten: 0, submitted: false, reason: readiness.state, recoveredEditing }
+    }
+    const clean = this.sanitizePasteText(text)
+    const payload =
+      readiness.pasteMode === 'bracketed'
+        ? `${BRACKETED_PASTE_BEGIN}${clean}${BRACKETED_PASTE_END}`
+        : clean
+    const paste = this.writePty(ptyId, payload)
+    if (!paste.accepted) {
+      return { accepted: false, bytesWritten: 0, submitted: false, reason: 'write-failed', recoveredEditing }
+    }
+
+    // Why: paste-end and Enter in one PTY write is the concrete failure. ConPTY in particular can
+    // acknowledge the payload while the TUI is still repainting its composer.
+    await sleep(POST_PASTE_SUBMIT_MS)
+    let bytesWritten = paste.bytesWritten
+    for (let attempt = 0; attempt < ACCEPTANCE_VERIFY_ATTEMPTS; attempt += 1) {
+      const submitGuard = this.agentReadiness(ptyId)
+      // The paste echo can make heuristic activity look busy; only permission/no-agent/unknown
+      // invalidates phase two. The agent was proven idle immediately before phase one.
+      if (
+        submitGuard.state === 'permission-prompt' ||
+        submitGuard.state === 'not-an-agent' ||
+        submitGuard.state === 'unknown'
+      ) {
+        await this.clearParkedInput(ptyId, text)
+        return {
+          accepted: true,
+          bytesWritten,
+          submitted: false,
+          reason: submitGuard.state,
+          recoveredEditing,
+        }
+      }
+      if (submitGuard.inputMode === 'editing') {
+        const recovered = await this.recoverEditingState(ptyId, { ...submitGuard, state: 'sendable' })
+        recoveredEditing = recoveredEditing || recovered.recovered
+      }
+      const submit = this.writePty(ptyId, '\r')
+      if (!submit.accepted) {
+        await this.clearParkedInput(ptyId, text)
+        return { accepted: true, bytesWritten, submitted: false, reason: 'write-failed', recoveredEditing }
+      }
+      bytesWritten += submit.bytesWritten
+      await sleep(ACCEPTANCE_VERIFY_MS)
+      if (!this.stillInInputBox(ptyId, text)) {
+        return { accepted: true, bytesWritten, submitted: true, recoveredEditing }
+      }
+      if (attempt + 1 < ACCEPTANCE_VERIFY_ATTEMPTS) await sleep(180)
+    }
+
+    await this.clearParkedInput(ptyId, text)
+    return { accepted: true, bytesWritten, submitted: false, reason: 'input-still-parked', recoveredEditing }
+  }
+
+  /**
+   * Never strand a failed handoff in the composer. Escape exits modal/edit state; Ctrl+U clears
+   * the editable line in the supported TUIs without sending Ctrl+C (which could kill a harness).
+   */
+  private async clearParkedInput(ptyId: string, text: string): Promise<void> {
+    const guard = this.agentReadiness(ptyId)
+    if (guard.state === 'permission-prompt' || guard.state === 'not-an-agent' || guard.state === 'unknown') return
+    this.writePty(ptyId, '\x1b')
+    await sleep(120)
+    this.writePty(ptyId, '\x15')
+    await sleep(180)
+    // A second Escape is bounded and harmless at an empty prompt; it closes editors that require
+    // the observed "esc again" sequence before Ctrl+U reaches the composer.
+    if (this.stillInInputBox(ptyId, text)) this.writePty(ptyId, '\x1b')
+  }
+
+  /** Public guarded delivery retained for callers outside the message bus. */
   async deliverText(ptyId: string, text: string): Promise<boolean> {
     let normalized = String(text).replace(/[\r\n]+/g, ' ').trim()
     if (!normalized) return false
     if (normalized.length > MAX_MESSAGE_LEN) normalized = `${normalized.slice(0, MAX_MESSAGE_LEN - 3)}…`
-    // Mark where this turn begins so a wait that arrives late still reports it (see spawnPrompts).
+    const deadline = Date.now() + 25_000
+    let readiness = this.agentReadiness(ptyId)
+    // Explicit TUI-ready wait: useful for a booting harness, bounded so a missing signal answers.
+    while (readiness.state !== 'sendable' && Date.now() < deadline) {
+      if (readiness.state === 'permission-prompt') return false
+      await sleep(150)
+      readiness = this.agentReadiness(ptyId)
+    }
+    if (readiness.state !== 'sendable') return false
     this.spawnPrompts.set(ptyId, { at: Date.now(), baseline: this.cleanTail(ptyId) })
-    if (!(await this.deliverTyped(ptyId, normalized))) return false
-    return this.submitLine(ptyId)
+    const delivered = await this.deliverPrompt(ptyId, normalized, readiness)
+    return delivered.accepted && delivered.submitted
   }
 
   /** Send a message to another agent (plan F5). mode 'type' types it into their terminal
@@ -899,10 +1282,17 @@ export class MeshBus {
     // ones that didn't simply stopped talking. The message is never lost either way, so the
     // useful answer is "it will land when they are free", not "no". `direct` keeps the old
     // refusal for the rare caller that genuinely wants type-or-nothing.
-    const autoQueued = mode === 'type' && target.busy && !direct
+    const readiness = this.agentReadiness(to)
+    const permissionQueued = readiness.state === 'permission-prompt'
+    const retryableNotReady =
+      readiness.state === 'busy' || readiness.state === 'unknown' || readiness.state === 'not-an-agent'
+    const autoQueued = mode === 'type' && (permissionQueued || (retryableNotReady && !direct))
     if (autoQueued) mode = 'queue'
-    if (mode === 'type' && target.busy) {
+    if (mode === 'type' && readiness.state === 'busy') {
       return { ok: false, error: 'working', detail: 'target is mid-turn — use queue mode or ask the user to interrupt' }
+    }
+    if (mode === 'type' && readiness.state !== 'sendable') {
+      return { ok: false, error: 'not-ready', readiness: readiness.state, detail: readiness.detail }
     }
     if (typeof text !== 'string' || text.length === 0) return { ok: false, error: 'empty' }
     if (text.length > MAX_MESSAGE_LEN) return { ok: false, error: 'too-large' }
@@ -944,12 +1334,30 @@ export class MeshBus {
     if (truncated) normalized = `${normalized.slice(0, MAX_MESSAGE_LEN - 3)}\u2026`
     const line = `[plano \u2190 ${this.displayName(agentId)}] ${normalized}`
 
-    if (mode === 'queue' && target.busy) {
+    if (mode === 'queue' && readiness.state !== 'sendable') {
       this.mailboxes.push(to, message)
       target.currentTask = shortTask(text) // v3 B: the target has work coming
       this.touchLink(agentId, to, 'active')
-      this.pushEvent({ at: Date.now(), kind: 'msg-queued', from: agentId, to })
-      return { ok: true, status: 'queued', id, autoQueued, truncated }
+      this.pushEvent({ at: Date.now(), kind: 'msg-queued', from: agentId, to, detail: readiness.state })
+      if (permissionQueued) {
+        this.notifySender(
+          message,
+          'is WAITING to be delivered',
+          `${this.displayName(to)} is on a permission prompt — a human must clear it before PLANO writes anything.`,
+          'blocked',
+        )
+      }
+      return {
+        ok: true,
+        status: 'queued',
+        id,
+        autoQueued,
+        truncated,
+        accepted: false,
+        bytesWritten: 0,
+        readiness: readiness.state,
+        humanActionRequired: permissionQueued,
+      }
     }
     const baseline = this.cleanTail(to) // v3 A4: before the echo lands
     // Anchor the turn this message is about to start, exactly as a spawn prompt does. Without it,
@@ -958,27 +1366,75 @@ export class MeshBus {
     // to look there. Bursted delivery made that the common case rather than the rare one, because
     // the exchange now finishes faster than the caller can ask about it.
     this.spawnPrompts.set(to, { at: Date.now(), baseline })
-    const delivered = (await this.deliverTyped(to, line)) && (await this.submitLine(to))
-    if (!delivered) {
+    const delivered = await this.deliverPrompt(to, line, readiness)
+    message.accepted = delivered.accepted
+    message.bytesWritten = delivered.bytesWritten
+    if (!delivered.accepted || !delivered.submitted) {
+      // A readiness race before the first byte is safe to queue. A partial paste is not: pasting
+      // it twice would duplicate work, so answer with the exact partial-submit failure instead.
+      if (delivered.bytesWritten > 0) {
+        message.status = 'undeliverable'
+        message.reason = delivered.reason ?? 'partial-submit-failed'
+        this.pushEvent({
+          at: Date.now(),
+          kind: 'msg-undeliverable',
+          from: agentId,
+          to,
+          detail: `${message.reason} #${id}`,
+        })
+        this.resolveWatchers(id, message)
+        return {
+          ok: false,
+          error: 'partial-submit-failed',
+          status: message.status,
+          reason: message.reason,
+          id,
+          accepted: true,
+          bytesWritten: delivered.bytesWritten,
+          truncated,
+        }
+      }
       message.attempts = 1
       this.mailboxes.push(to, message)
       target.currentTask = shortTask(text)
-      this.pushEvent({ at: Date.now(), kind: 'msg-queued', from: agentId, to, detail: 'write failed, queued' })
-      return { ok: true, status: 'queued', id }
+      this.pushEvent({ at: Date.now(), kind: 'msg-queued', from: agentId, to, detail: `${delivered.reason ?? 'write failed'}, queued` })
+      return {
+        ok: true,
+        status: 'queued',
+        id,
+        accepted: false,
+        bytesWritten: 0,
+        readiness: delivered.reason,
+      }
     }
+    // Provider acceptance plus the separate submitted Enter is the turn-start edge. Recording it
+    // closes the fast-agent race where an entire answer lands between two process-tree polls.
+    this.setState(to, 'working')
     target.currentTask = shortTask(text) // v3 B: the target's task is this message
     // v3 E: the relation is live (grouped counter, pulse direction emitter → receiver).
     this.touchLink(agentId, to, 'active')
     // v3 A4: distinguish written (bytes in the PTY) from accepted (receiver output beyond
     // the typed echo). The sender gets the honest status either way.
     const confirmed = await this.observeTailChange(to, baseline, normalized.length)
+    // If the TUI has already reopened its bracketed-paste composer, record the matching turn-end
+    // edge before returning. Otherwise the regular detector/harness hook owns completion.
+    if (this.agentReadiness(to).state === 'sendable') this.setState(to, 'idle')
     message.confirmed = confirmed
     message.status = confirmed ? 'delivered' : 'written-but-unconfirmed'
     this.pushEvent({ at: Date.now(), kind: 'msg-delivered', from: agentId, to, detail: `${confirmed ? 'confirmed' : 'written-but-unconfirmed'} #${id}` })
     this.resolveWatchers(id, message)
     // v6 A4: truncation is REPORTED. A 4000-char cut used to happen silently, losing exactly the
     // tail of a long contract where the specifics live; the sender can now split and re-send.
-    return { ok: true, status: message.status, confirmed, id, truncated }
+    return {
+      ok: true,
+      status: message.status,
+      confirmed,
+      id,
+      truncated,
+      accepted: true,
+      bytesWritten: delivered.bytesWritten,
+      recoveredEditing: delivered.recoveredEditing ?? false,
+    }
   }
 
   /**
@@ -1041,16 +1497,25 @@ export class MeshBus {
     return matches.length === 1 ? matches[0] : null
   }
 
-  /** Write a single Enter ('\r') to submit the typed line — exactly once per message. */
-  private async submitLine(ptyId: string): Promise<boolean> {
-    if (!this.onDeliver) return false
-    // Let the TUI finish ingesting the last burst before the Enter. Bursted delivery (v6) hands a
-    // harness 24 characters at a time, and a submit that lands while it is still re-rendering its
-    // input box is swallowed: the message sits in the box, unsent, and the sender waits on a turn
-    // that never starts. This was intermittent — exactly the kind of "sometimes they stop talking"
-    // the mesh must not have.
-    await sleep(SUBMIT_SETTLE_MS)
-    return this.onDeliver(ptyId, '\r')
+  /**
+   * Is our line still sitting in the peer's INPUT BOX rather than sent?
+   *
+   * After a real submit these TUIs re-render the message as a transcript entry, so "the text is on
+   * screen" proves nothing. The input box does: it is the line carrying the prompt marker. If our
+   * text is still on that line, the Enter did not take — the harness was in an editing/paste state
+   * ("esc again to edit previous message"), swallowed it, and both sides then waited forever.
+   */
+  private stillInInputBox(ptyId: string, line: string): boolean {
+    const probe = line.slice(-45).trim()
+    if (probe.length < 8) return false
+    const screen = this.cleanTail(ptyId)
+    if (!screen) return false
+    const rows = screen.split('\n').slice(-14)
+    const kind = this.agents.get(ptyId)?.kind ?? 'unknown'
+    const promptRow = inputPromptRowIndex(rows, kind)
+    if (promptRow < 0) return false
+    const inputRegion = rows.slice(promptRow).join('\n')
+    return inputRegion.includes(probe) || /\[Pasted Content\s+\d+\s+chars?\]/i.test(inputRegion)
   }
 
   /** Normalized one-line form of a queued message (banner + text, same as live delivery). */
@@ -1181,8 +1646,10 @@ export class MeshBus {
     if (!consent.ok) return consent
     const command = control.setModel.replace('{model}', modelId)
     const baseline = this.cleanTail(targetId)
-    const delivered = (await this.deliverTyped(targetId, command)) && (await this.submitLine(targetId))
-    if (!delivered) return { ok: false, error: 'write-failed', detail: `could not type into ${targetId}` }
+    const delivered = await this.deliverPrompt(targetId, command)
+    if (!delivered.accepted || !delivered.submitted) {
+      return { ok: false, error: delivered.reason ?? 'write-failed', detail: `could not submit into ${targetId}` }
+    }
     this.pushEvent({ at: Date.now(), kind: 'control', from: agentId, to: targetId, detail: `set_model ${modelId}` })
     // Verify by tail: the harness echoes the active model after /model.
     const found = await this.waitForTailContains(targetId, modelId, 4000, baseline)
@@ -1209,7 +1676,7 @@ export class MeshBus {
     if (!consent.ok) return consent
     let ok = true
     for (const key of control.interrupt) {
-      if (!this.onDeliver?.(targetId, key)) ok = false
+      if (!this.writePty(targetId, key).accepted) ok = false
     }
     this.pushEvent({ at: Date.now(), kind: 'control', from: agentId, to: targetId, detail: 'interrupt' })
     return ok ? { ok: true, status: 'interrupt-sent' } : { ok: false, error: 'write-failed' }
@@ -1232,8 +1699,10 @@ export class MeshBus {
     const consent = await this.ensureConsent(agentId)
     if (!consent.ok) return consent
     const baseline = this.cleanTail(targetId)
-    const delivered = (await this.deliverTyped(targetId, control.compact)) && (await this.submitLine(targetId))
-    if (!delivered) return { ok: false, error: 'write-failed', detail: `could not type into ${targetId}` }
+    const delivered = await this.deliverPrompt(targetId, control.compact)
+    if (!delivered.accepted || !delivered.submitted) {
+      return { ok: false, error: delivered.reason ?? 'write-failed', detail: `could not submit into ${targetId}` }
+    }
     this.pushEvent({ at: Date.now(), kind: 'control', from: agentId, to: targetId, detail: 'compact' })
     const found = await this.waitForTailContains(targetId, 'compact', 4000, baseline)
     return found ? { ok: true, status: 'verified' } : { ok: false, error: 'verification-failed', detail: 'no compaction evidence in the target output' }
@@ -1292,45 +1761,50 @@ export class MeshBus {
     }
     if (typeof text !== 'string' || text.length === 0) return { ok: false, error: 'empty' }
     if (text.length > MAX_MESSAGE_LEN) return { ok: false, error: 'too-large' }
-    if (!this.rateOk(agentId)) return { ok: false, error: 'rate-limited', detail: 'too many messages in a short window' }
-    const consent = await this.ensureConsent(agentId)
-    if (!consent.ok) return consent
-
     const corr = Math.random().toString(16).slice(2, 7)
     const ms = Math.max(1000, Math.min(timeoutMs || ASK_DEFAULT_TIMEOUT_MS, ASK_MAX_TIMEOUT_MS))
-    // v6 A4: one busy rule for the whole mesh. `send` refused a mid-turn target while `ask` typed
-    // into it anyway — the same act with two contracts, and the ask path was corrupting the input
-    // of an agent that was still thinking. A busy peer gets the ask QUEUED (the correlation id
-    // rides along in the line, so the peer's `plano reply` still resolves it).
-    if (target.busy) {
-      const queued = await this.send(agentId, to, `${text} [reply with: plano reply ${corr} <summary>]`, 'queue')
-      if (!queued.ok) return queued
-      // The ask still WAITS. Returning `queued` here (the first cut of this change) turned `ask`
-      // into fire-and-forget the moment a peer happened to be mid-turn: the caller got a status
-      // instead of an answer, no correlation was registered, and the peer's `plano reply` had
-      // nothing to resolve — so the answer never arrived anywhere. Register the correlation and
-      // fall through to the same promise the direct path uses; the only difference is WHEN the
-      // question reaches their terminal.
-      this.pushEvent({ at: Date.now(), kind: 'ask', from: agentId, to, detail: `queued #${corr}` })
-      this.touchLink(agentId, to, 'waiting', corr, true)
-      return this.awaitAskReply(agentId, to, corr, this.cleanTail(to), ms, queued.id ? String(queued.id) : undefined)
-    }
     const baseline = this.cleanTail(to)
-    let normalized = String(text).replace(/[\r\n]+/g, ' ').trim()
-    if (normalized.length > MAX_MESSAGE_LEN) normalized = `${normalized.slice(0, MAX_MESSAGE_LEN - 3)}\u2026`
-    const line = `[plano \u2190 ${this.displayName(agentId)} #${corr}] ${normalized}`
-
-    const delivered = (await this.deliverTyped(to, line)) && (await this.submitLine(to))
-    if (!delivered) {
-      return { ok: false, error: 'write-failed', detail: `could not type into ${to}` }
-    }
+    // Ask is a send plus an obligation, not a second terminal transport. Routing it through send
+    // guarantees the same readiness/permission/paste contract and preserves the correlation while
+    // a busy or blocked peer keeps the question queued.
+    const sent = await this.send(
+      agentId,
+      to,
+      `${text} [reply with: plano reply ${corr} <summary>]`,
+      'type',
+    )
+    if (!sent.ok) return sent
     target.currentTask = shortTask(text)
-    this.pushEvent({ at: Date.now(), kind: 'msg-sent', from: agentId, to, detail: `ask #${corr}` })
+    this.pushEvent({
+      at: Date.now(),
+      kind: 'ask',
+      from: agentId,
+      to,
+      detail: `${sent.status === 'queued' ? 'queued' : 'sent'} #${corr}`,
+    })
     // v3 E: the asker waits → the relation is 'waiting' (breathing dot at B). v4 A4:
     // an ask OPENS the relation (counts toward the grouping counter).
     this.touchLink(agentId, to, 'waiting', corr, true)
 
-    return this.awaitAskReply(agentId, to, corr, baseline, ms)
+    // A question that could not even be TYPED yet must not burn the caller's whole budget on
+    // keepalives. A freshly spawned agent can spend minutes booting MCP servers; blocking on it
+    // gave `{"_keepalive":true} [Timeout: 180s]` and no information, which is indistinguishable
+    // from the mesh being broken. Answer immediately with the correlation and the message id: the
+    // question stays queued and lands the moment its composer opens, and the caller decides
+    // whether to wait (`plano watch <id>`) or get on with something else.
+    if (sent.status === 'queued') {
+      return {
+        ok: true,
+        status: 'queued',
+        correlationId: corr,
+        id: sent.id ?? null,
+        to,
+        detail:
+          `${this.displayName(to)} cannot take input yet (${String(sent.readiness ?? 'not ready')}) — your question is queued and will be typed in the moment its composer opens. ` +
+          `Follow it with: plano watch ${String(sent.id ?? '')} · then read the answer with: plano context ${to.slice(0, 8)}`,
+      }
+    }
+    return this.awaitAskReply(agentId, to, corr, baseline, ms, undefined)
   }
 
   /**
@@ -1353,13 +1827,22 @@ export class MeshBus {
         if (!ask || ask.settled) return
         ask.settled = true
         this.pendingAsks.delete(corr)
+        // NEVER manufacture an answer. This used to return the transcript delta as `reply`, so a
+        // peer that was still booting handed the asker its MCP connection errors dressed up as the
+        // answer to "hola" — worse than no answer, because it looks like one. A timeout means the
+        // question is still PENDING: say that, hand back the correlation so it can be resumed, and
+        // offer the transcript separately and clearly labelled as context, not as a reply.
         const tail = this.cleanTail(to)
         resolve({
           ok: true,
           correlationId: corr,
-          reply: this.tailDelta(ask.baseline, tail),
-          inferred: true,
+          status: 'pending',
           timeout: true,
+          answered: false,
+          contextTail: this.tailDelta(ask.baseline, tail).slice(-800),
+          detail:
+            `${this.displayName(to)} has not answered yet — the question is still pending, not lost. ` +
+            `Read what they are doing with: plano context ${to.slice(0, 8)} · or wait again for the same question.`,
           ...(messageId ? { id: messageId, queued: true } : null),
         })
         // v3 E: timed out → the relation flashes failed and leaves.
@@ -1492,6 +1975,11 @@ export class MeshBus {
     const since = typeof opts.since === 'number' && opts.since > 0 ? opts.since : (fresh?.at ?? Date.now())
     const baseline = typeof opts.since === 'number' && opts.since > 0 ? this.cleanTail(targetId) : (fresh?.baseline ?? this.cleanTail(targetId))
     const startedAt = Date.now()
+    // A newborn can be detected as a harness before its TUI has rendered. Its spawn prompt is
+    // then intentionally queued by guarded send. That terminal may look idle, but its requested
+    // turn has not even started; returning alreadyIdle here is the same silent-loss bug in a
+    // different costume. Stay attached until the queued prompt is accepted and the turn ends.
+    const pendingAtStart = this.mailboxes.load(targetId).some((message) => !message.acked)
     if (target.state === 'exited') {
       return { ok: true, id: targetId, state: 'exited', exitCode: target.exitCode ?? null, delta: '', durationMs: 0 }
     }
@@ -1499,7 +1987,7 @@ export class MeshBus {
     // the send → wait race with a fast peer. It must still have been quiet for quietMs: a
     // booting harness goes briefly idle between its own paint bursts, and that gap is not a
     // finished turn. When it is too fresh, the waiter below confirms the rest of the window.
-    const doneBefore = target.state === 'idle' && target.stateSince >= since
+    const doneBefore = !pendingAtStart && target.state === 'idle' && target.stateSince >= since
     if (doneBefore && Date.now() - target.stateSince >= quietMs) {
       return {
         ok: true,
@@ -1517,7 +2005,7 @@ export class MeshBus {
     // already in the transcript" case. Answer it straight away, with the transcript, unless the
     // caller explicitly asked for the next turn (`nextTurn`) or anchored the wait itself.
     const anchored = (typeof opts.since === 'number' && opts.since > 0) || !!fresh
-    if (!anchored && !opts.nextTurn && target.state === 'idle' && Date.now() - target.stateSince >= quietMs) {
+    if (!anchored && !pendingAtStart && !opts.nextTurn && target.state === 'idle' && Date.now() - target.stateSince >= quietMs) {
       return {
         ok: true,
         id: targetId,
@@ -1928,18 +2416,26 @@ export class MeshBus {
       this.pushEvent({ at: Date.now(), kind: 'chain', from: chain.from, to: chain.to, detail: `failed ${chain.failReason} #${chain.id.slice(0, 8)}` })
       return
     }
-    const line = `[plano \u2192 ${this.displayName(chain.to)} \u26d3] ${payload.text}`
-    const delivered = (await this.deliverTyped(chain.to, line)) && (await this.submitLine(chain.to))
-    if (!delivered) {
+    // A chain is not a privileged PTY shortcut. Send it through the same readiness gate and
+    // atomic-paste transaction; a busy/permission target queues it and the arming agent receives
+    // the normal tracked outcome instead of a silent failed Enter.
+    const delivered = await this.send(chain.from, chain.to, `[chain ${chain.id.slice(0, 8)}] ${payload.text}`, 'type')
+    if (!delivered.ok) {
       chain.status = 'failed'
-      chain.failReason = 'write-failed'
+      chain.failReason = String(delivered.error ?? 'write-failed')
       this.persistChains()
-      this.pushEvent({ at: Date.now(), kind: 'chain', from: chain.from, to: chain.to, detail: `failed write-failed #${chain.id.slice(0, 8)}` })
+      this.pushEvent({ at: Date.now(), kind: 'chain', from: chain.from, to: chain.to, detail: `failed ${chain.failReason} #${chain.id.slice(0, 8)}` })
       return
     }
     // v4 A4: the fired chain pulses solid then rests (chained flag already cleared).
     this.touchLink(chain.from, chain.to, 'active')
-    this.pushEvent({ at: Date.now(), kind: 'chain', from: chain.from, to: chain.to, detail: `fired #${chain.id.slice(0, 8)} (${chain.payload.source})` })
+    this.pushEvent({
+      at: Date.now(),
+      kind: 'chain',
+      from: chain.from,
+      to: chain.to,
+      detail: `${delivered.status === 'queued' ? 'queued' : 'fired'} #${chain.id.slice(0, 8)} (${chain.payload.source})`,
+    })
   }
 
   /** Resolve the exact bytes to deliver. Empty/whitespace payload NEVER fires. */
@@ -2067,6 +2563,136 @@ export class MeshBus {
     const result = this.onClose({ ptyId: targetId, panel })
     if (!result.ok) return { ok: false, error: result.error ?? 'close-failed' }
     return { ok: true, closed: result.closed ?? [targetId], panel }
+  }
+
+  // ── orchestration (v7): Run / Task / Dispatch ─────────────────────────────────
+
+  /**
+   * Create (or reuse) the coordinator's Run. A Run is a namespace and an inbox, never a scheduler:
+   * it decides nothing about placement, it only makes the work addressable and durable.
+   */
+  runCreate(agentId: string, objective: string): MeshToolResult {
+    if (!this.agents.has(agentId)) return { ok: false, error: 'not-registered' }
+    const run = this.orch.createRun(agentId, String(objective || 'unnamed run'))
+    this.pushEvent({ at: Date.now(), kind: 'chain', from: agentId, detail: `run ${run.id}: ${run.objective}` })
+    return { ok: true, runId: run.id, objective: run.objective }
+  }
+
+  /** Add a work item. `deps` makes it a DAG: the task stays `pending` until every dep completes. */
+  taskCreate(agentId: string, spec: string, deps: string[], parent?: string): MeshToolResult {
+    if (!this.agents.has(agentId)) return { ok: false, error: 'not-registered' }
+    if (!spec.trim()) return { ok: false, error: 'empty-spec' }
+    const run = this.orch.runFor(agentId) ?? this.orch.createRun(agentId, 'unnamed run')
+    const task = this.orch.createTask(run.id, spec, deps, parent)
+    return { ok: true, taskId: task.id, runId: run.id, status: task.status, deps: task.deps }
+  }
+
+  taskList(agentId: string, opts: { ready?: boolean } = {}): MeshToolResult {
+    const run = this.orch.runFor(agentId)
+    const tasks = opts.ready ? this.orch.readyTasks(run?.id) : this.orch.tasks(run?.id)
+    return {
+      ok: true,
+      runId: run?.id ?? null,
+      tasks: tasks.map((t) => ({
+        id: t.id,
+        spec: t.spec.slice(0, 160),
+        status: t.status,
+        deps: t.deps,
+        failures: t.failures,
+        dispatches: this.orch.dispatchesFor(t.id).map((d) => ({ id: d.id, agent: d.agentId, state: d.state, outcome: d.outcome ?? null })),
+      })),
+    }
+  }
+
+  /**
+   * Assign one attempt of a task to an agent and TELL that agent what it owes.
+   *
+   * The preamble is the contract: without it a worker has no idea it is being supervised, and the
+   * coordinator ends up polling a roster to guess. It is delivered through the ordinary guarded
+   * send, so it inherits readiness, paste and the sender-outcome machinery.
+   */
+  async dispatchTask(agentId: string, taskId: string, to: string, retryOf?: string): Promise<MeshToolResult> {
+    if (!this.agents.has(agentId)) return { ok: false, error: 'not-registered' }
+    const target = this.findAgent(to)
+    if (!target) return { ok: false, error: 'not-found', detail: `no agent with id ${to}` }
+    const task = this.orch.task(taskId)
+    if (!task) return { ok: false, error: 'not-found', detail: `no task ${taskId}` }
+    const created = this.orch.createDispatch(taskId, target.id, retryOf)
+    if ('error' in created) return { ok: false, error: 'dispatch-refused', detail: created.error }
+    const preamble =
+      `[plano dispatch] You are working task ${task.id} (dispatch ${created.id}). TASK: ${task.spec} ` +
+      `When you finish you MUST report exactly once: ` +
+      `plano worker-done ${created.id} --outcome succeeded|failed --summary "<what changed>" ` +
+      `Use --outcome failed if it did not work; never report failure only in prose. ` +
+      `If you are blocked and need the coordinator, use: plano ask ${agentId} "<question>"`
+    // A bare shell has no harness to read a preamble, and that is NOT a failed attempt: the
+    // dispatch still exists for tracking and the coordinator sends the prompt itself. Settling it
+    // as failed (the first cut) burned an attempt against the circuit breaker for a target that
+    // had not even been asked yet.
+    if (target.kind === 'unknown') {
+      this.pushEvent({ at: Date.now(), kind: 'chain', from: agentId, to: target.id, detail: `dispatch ${created.id} (tracking only)` })
+      return {
+        ok: true,
+        dispatchId: created.id,
+        taskId: task.id,
+        to: target.id,
+        injected: false,
+        detail: 'target is a plain shell — dispatch created for tracking; send the prompt yourself, then it reports with plano worker-done',
+      }
+    }
+    const sent = await this.send(agentId, target.id, preamble, 'type')
+    if (!sent.ok) {
+      this.orch.settle(created.id, 'failed', 'preamble could not be delivered')
+      return { ok: false, error: 'undeliverable', detail: String(sent.error ?? 'send failed') }
+    }
+    this.pushEvent({ at: Date.now(), kind: 'chain', from: agentId, to: target.id, detail: `dispatch ${created.id} → ${task.id}` })
+    return { ok: true, dispatchId: created.id, taskId: task.id, to: target.id, status: sent.status ?? 'delivered' }
+  }
+
+  /**
+   * A worker settles its own attempt. This is the ONLY self-service completion path in the mesh:
+   * an outcome, stated once, by the agent that did the work. Everything else — idle TUIs, quiet
+   * terminals, heartbeats — proves the worker is alive, never that it is done.
+   */
+  workerDone(agentId: string, dispatchId: string | undefined, outcome: WorkerOutcome, summary?: string, files?: string[]): MeshToolResult {
+    const dispatch = dispatchId ? this.orch.dispatch(dispatchId) : this.orch.activeDispatchFor(agentId)
+    if (!dispatch) return { ok: false, error: 'no-dispatch', detail: 'you have no active dispatch — nothing to report' }
+    if (dispatch.agentId !== agentId) {
+      return { ok: false, error: 'not-yours', detail: 'a dispatch can only be settled by the agent executing it' }
+    }
+    const settled = this.orch.settle(dispatch.id, outcome, summary, files)
+    if (!settled.ok) return { ok: false, error: 'settle-failed', detail: settled.error }
+    const task = settled.task
+    // Tell the coordinator in its own mailbox, typed, so a rolling `check --wait` wakes on it.
+    const run = this.orch.run(dispatch.runId)
+    if (run && run.coordinator !== agentId) {
+      this.mailboxes.push(run.coordinator, {
+        id: `wdone-${dispatch.id}`,
+        at: Date.now(),
+        from: agentId,
+        to: run.coordinator,
+        text: `[worker_done ${outcome}] task ${dispatch.taskId}: ${summary ?? '(no summary)'}${files?.length ? ` · files: ${files.join(', ')}` : ''}`,
+        mode: 'queue',
+        ttl: DEFAULT_TTL_MS,
+        bornAt: Date.now(),
+        hops: 0,
+        status: 'queued',
+        acked: false,
+        kind: 'worker_done',
+      })
+      this.drainMailbox(run.coordinator)
+      this.resolveCheckWaiters(run.coordinator)
+    }
+    this.pushEvent({ at: Date.now(), kind: 'chain', from: agentId, detail: `worker_done ${outcome} ${dispatch.id}` })
+    return {
+      ok: true,
+      dispatchId: dispatch.id,
+      taskId: dispatch.taskId,
+      outcome,
+      taskStatus: task?.status ?? 'unknown',
+      attempts: task?.failures ?? 0,
+      circuitBroken: (task?.failures ?? 0) >= MAX_TASK_FAILURES,
+    }
   }
 
   // ── timeline / audit ──────────────────────────────────────────────────────────

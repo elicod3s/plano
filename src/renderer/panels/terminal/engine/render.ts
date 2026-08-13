@@ -31,6 +31,54 @@ export function snapRenderScale(zoom: number): number {
  *  layout gap right after term.element is re-parented into a new container (Deska's attach retry). */
 export const FIT_RETRY_FRAMES = 5
 
+// ── Whole-device-pixel cell pitch ────────────────────────────────────────────────────────────────
+// xterm builds its cell grid from the font's MEASURED advance and then FLOORS it:
+//   device.char.width = Math.floor(charSizeService.width × devicePixelRatio)
+// JetBrains Mono advances 0.6em, so the requested 13px font measures 7.7999px and is placed on a
+// 7px pitch — a 0.8px (10%) deficit on EVERY cell. The glyph is still rasterized at its natural
+// 7.8px advance, so each letter's ink runs 0.8px into its neighbour's cell and each letter lands on
+// a different sub-pixel phase of the grid. Measured on a real row: 78% of ink pixels carried a
+// strong LCD colour fringe and the per-glyph ink centroid scattered ±0.30px — exactly the "letters
+// nudged by a fraction of a pixel" look.
+// Fix: render at the nearest size whose advance IS a whole device pixel (13 → 13.34, advance 8.0),
+// so the pitch xterm floors to and the advance the glyph is drawn with are the same number.
+/** Largest deviation from the requested size we will accept to land on the grid (px). */
+const MAX_SNAP_DELTA = 1
+const SNAP_STEP = 0.02
+const SNAP_MAX_STEPS = 24 // 24 × 0.02px of headroom — far more than the quantisation error needs
+
+/**
+ * `measureAdvance(px)` MUST measure exactly the way xterm's CharSizeService does
+ * (`ctx.font = \`${px}px ${family}\``, then `measureText('W').width`) — anything else measures a
+ * different number than the one that will be floored into the cell.
+ */
+export function snapFontSizeToWholeCell(
+  size: number,
+  dpr: number,
+  measureAdvance: (px: number) => number,
+): number {
+  const fallback = Math.max(1, Math.round(size))
+  if (!(size > 0) || !(dpr > 0)) return fallback
+  const advance = measureAdvance(size)
+  if (!(advance > 0)) return fallback // font not loaded yet / no 2D context → xterm's own metrics
+  const target = Math.max(1, Math.round(advance * dpr))
+  if (Math.floor(advance * dpr) === target) return size // already whole — leave the size alone
+
+  // Converge by MEASUREMENT, not by scaling the ratio: a glyph advance is not linear in font size
+  // (Chromium quantises advances at small sizes), so the arithmetic guess lands just short. Measured:
+  // aiming a 13px/0.6em font at an 8px advance produced 7.99798, which floor() took straight back to
+  // 7 — the snap silently did nothing. Stepping up until the measured advance really floors to the
+  // whole pixel is the only version that holds for every font/size/dpr combination.
+  let px = size * (target / advance)
+  for (let i = 0; i < SNAP_MAX_STEPS; i += 1) {
+    const floored = Math.floor(measureAdvance(px) * dpr)
+    if (floored === target) return Math.abs(px - size) > MAX_SNAP_DELTA ? fallback : px
+    if (floored > target) break // overshot a whole pixel — keep the user's size instead
+    px += SNAP_STEP
+  }
+  return fallback
+}
+
 // Font-size zoom bounds for the in-terminal Ctrl +/− (kept legible at both ends).
 export const MIN_FONT_SIZE = 6
 export const MAX_FONT_SIZE = 40

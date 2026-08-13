@@ -108,6 +108,8 @@ export interface ExternalTerminalEvent {
   rows?: number
   /** Mesh spawn: panel of the agent that requested this one (placement anchor + size source). */
   originPanelId?: string
+  /** Who opened this terminal and how (mesh spawn only) — surfaced on the panel as provenance. */
+  origin?: { by: string; byKind?: string; via: string; harness?: string }
   /** Index/size of the spawn batch, so `count: 2` lays out as a tidy row next to the origin. */
   groupIndex?: number
   groupCount?: number
