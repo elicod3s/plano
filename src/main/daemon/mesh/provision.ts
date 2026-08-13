@@ -16,41 +16,80 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync,
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 
-const SKILL_MD = `# PLANO Mesh
+// The frontmatter is not decoration: a harness decides whether to OPEN a skill from its
+// description alone. Shipping this file without one left it advertised as the bare title "PLANO
+// Mesh", which tells a model nothing about when it applies — so the agent that most needed it
+// never opened it and improvised the mesh from whatever it could infer. The description therefore
+// names the situations verbatim ("wait for messages", "talk to another agent", "another terminal"),
+// because those are the words that will be in the prompt when this file is the answer.
+const SKILL_MD = `---
+name: plano-mesh
+description: >-
+  Use the PLANO mesh whenever this terminal must reach, wait for, or coordinate with another agent
+  or terminal on the same PLANO canvas. Triggers include being told to wait for messages, to stay
+  available, to answer when someone writes, to message/ask/reply to another agent, to check who
+  else is running, to read what another agent is doing, to spawn a new agent, or to hand work to
+  another terminal. Also use it when a message arrives carrying a correlation id like #a3f2b, or
+  when you need to know whether something you sent actually arrived. The \`plano\` CLI is already
+  on PATH; receiving is a blocking \`plano check --wait\` call, never sleeping or polling.
+---
+
+# PLANO Mesh
 
 You are running inside PLANO, an infinite-canvas workspace. Other agents (Claude Code, Codex,
 Gemini CLI, OpenCode, Cursor agents…) may be running in other terminals on the same canvas —
 the PLANO mesh connects you through the \`plano\` CLI, which is already on your PATH.
 
-## How you RECEIVE — read this first
+## How you RECEIVE — read this before anything else
 
 \`\`\`sh
-plano check --wait --timeout-ms 600000 --json
+plano check --wait --timeout-ms 90000 --json
 \`\`\`
 
-This BLOCKS until mail arrives and then returns it. **This is how you wait for a message.** Do not
-sleep, do not poll, do not stare at your screen waiting for something to appear — block on this
-call and the message is handed to you as its output.
+This BLOCKS until mail arrives and then returns it. **This is what "wait for a message" means.**
+Never sleep, never poll in a loop, never watch your own screen for something to appear, and never
+tell the user you are waiting while running nothing — block on this call, and the message is handed
+to you as the output of a command you are already running.
 
-A timeout returns \`{"checkpoint": true}\`. That is not a failure and not proof of silence; it
-means nothing arrived in that window. Run it again.
+**90 seconds, not more.** Your own harness kills a shell command at around 120 s. A longer block is
+killed by the caller, which looks exactly like a broken mesh. Return inside the window and go again.
 
-Once you have handled a batch, acknowledge it and keep listening in a single call:
+### The loop, exactly
 
 \`\`\`sh
-plano check --ack <deliveryId> --wait --timeout-ms 600000 --json
+# 1. listen
+plano check --wait --timeout-ms 90000 --json
+
+# 2a. it returned {"checkpoint": true} → nothing arrived IN THAT WINDOW.
+#     Not a failure. Not proof the mesh is dead. Not a reason to stop. Run step 1 again.
+
+# 2b. it returned {"count": N, "deliveryId": "...", "messages": [...]}
+#     → handle EVERY message in the batch, then acknowledge and keep listening in one call:
+plano check --ack <deliveryId> --wait --timeout-ms 90000 --json
 \`\`\`
 
-Until you acknowledge, the same batch comes back — so an agent that dies mid-batch loses nothing.
+Until you acknowledge, the same batch comes back. That is deliberate: an agent that dies mid-batch
+loses nothing. It also means **acknowledging before you have handled every message throws the rest
+away** — process the whole batch first.
 
-If a message carries a correlation id like \`#a3f2b\`, someone is blocked on your answer:
+Keep looping for as long as you are supposed to be listening. Stopping after one checkpoint is the
+single most common way an agent goes silent while believing it is still available.
 
-\`\`\`sh
-plano reply a3f2b "<your answer>"
-\`\`\`
+### What to do with a message you received
 
-> Mail is durable the moment \`send\` returns. A peer that is booting, mid-turn or parked in
-> \`check --wait\` still receives it — being busy delays a message, it never loses one.
+1. **It carries a correlation id like \`#a3f2b\`** — a peer is BLOCKED waiting on you. Answer it:
+   \`\`\`sh
+   plano reply a3f2b "<your answer>"
+   \`\`\`
+   If you cannot answer, reply saying so. Never leave it unanswered: the other side is holding.
+2. **It is a task** — do it, then report back to the sender with \`plano send <from> "<result>"\`.
+3. **It is from \`plano\` itself** — that is a system outcome report about a message YOU sent
+   (delivered / expired / undeliverable / peer blocked). Act on it instead of re-sending blindly.
+
+Then go back to listening. Answering and then going quiet is the same failure as never answering.
+
+> Mail is durable the moment \`send\` returns. A peer that is booting, mid-turn, or parked in
+> \`check --wait\` still receives it. Being busy DELAYS a message; it never loses one.
 
 ## Then: the four things you will actually do
 
@@ -121,10 +160,16 @@ answer it with \`plano reply\`.
   another agent, exactly like reading its conversation in Orca. Bounded (~64 KiB) and redacted
   when the desktop app answers; when it is closed or slow the daemon serves its own rendered copy
   of that terminal, so this NEVER comes back empty just because the window is not open.
-- **Send a message**: \`plano send <to> <text>\` — typed visibly into their terminal. If they are
-  mid-turn it is QUEUED automatically and delivered the moment they go idle (the reply tells you
-  so, with the message id); nothing is lost and there is nothing to retry. Add \`--direct\` only if
-  you want it to fail instead of queuing.
+- **Send a message**: \`plano send <to> <text>\` — recorded first, routed second, so it cannot be
+  lost by a screen that was not ready. The reply tells you which route it took:
+  \`channel: "check"\` (the peer was listening and woke with it — milliseconds),
+  \`status: "delivered"\` (typed into their terminal), or \`status: "queued"\` (saved in their
+  mailbox; they get it on their next \`check\`, or it is typed in when their composer opens).
+  All three mean *the message exists and will arrive* — none of them is a reason to re-send.
+  \`send\` never refuses: not a booting agent, not an undetected harness, not a plain shell.
+  Add \`--direct\` only when you want type-or-nothing instead.
+- **Receive a message**: \`plano check --wait --timeout-ms 90000 --json\` — see the top of this
+  file. This is the only correct way to wait for one.
 - **Know it landed**: \`plano watch <messageId>\` blocks until that message is delivered (or
   expires) and answers either way. \`plano wait\` answers "is the peer done with its turn", which
   is a DIFFERENT question — do not use it to check whether your message arrived.
@@ -143,7 +188,9 @@ answer it with \`plano reply\`.
   \`--next-turn\` when you really want the next one. A peer stuck on a permission prompt comes
   back \`blocked\` (answer it, or \`plano send\` it a reply); a timeout still prints the output so
   far and exits 2. When you need a definite answer rather than "the turn ended", use
-  \`plano ask\` — the peer's own \`plano reply\` resolves it, with idle-inference as the fallback.
+  \`plano ask\` — only the peer's own \`plano reply\` resolves it. A timeout returns
+  \`status: "pending"\`: the question is still open. PLANO will never hand you a guess scraped from
+  their transcript dressed up as their answer.
 - **Close a terminal**: \`plano close <agentId> [--panel]\` — kills that session and removes its
   panel from the canvas; \`--panel\` closes every terminal in that panel. This is the undo of
   \`spawn\`: tidy up workers you created instead of leaving dead panels behind. Closing YOURSELF is
@@ -189,18 +236,49 @@ answer it with \`plano reply\`.
 4. For fire-and-forget pipelines, arm \`plano chain <to> --payload file:<path> --when i-finish\`
    BEFORE doing the work — the bus delivers the payload exactly once when you finish.
 
+## What you will get wrong — and the exact fix
+
+| What you see | What it actually means | Do this |
+|---|---|---|
+| \`{"checkpoint": true}\` | Nothing arrived *in that window*. The mesh is fine. | Run \`check --wait\` again. Do NOT report silence, do NOT give up. |
+| \`plano: still listening (30s)…\` on stderr | The call is alive and blocked, as intended. | Nothing. Wait for it to return. |
+| \`status: "queued"\` from \`send\` | Saved in their mailbox. It WILL arrive. | Nothing. Do not re-send. \`plano watch <id>\` if you need to know when. |
+| \`channel: "check"\` from \`send\` | They were listening; they already have it. | Nothing. |
+| \`status: "pending"\` from \`ask\` | Your question is open; they have not answered YET. | Keep working, or \`plano watch <id>\`. The reply still resolves it. |
+| Peer shows \`awaiting-input\` | Blocked on a permission prompt. Only a human clears it. | Tell the user. Waiting longer cannot help. |
+| Peer shows \`listening\` in \`roster\` | Parked in \`check --wait\`; reachable in milliseconds. | Just \`send\`. |
+| A growing \`inbox\` count in \`roster\` | They are saturated, not ignoring you. | Stop adding to it. |
+| Exit code 2 | A wait timed out. The peer is still working. | Not a failure. Wait again or check on it. |
+
+Three things that are never the answer: sleeping, polling in a loop, and echoing a sentinel into
+your own transcript to fake an acknowledgement. Every one of them has a real command above.
+
 ## Rules
 
 - Always introduce yourself when you message another agent: a short line with your harness and
   terminal number.
-- Prefer \`--queue\` when the target is busy; never interrupt a working agent unless the user
-  explicitly asked.
+- Never interrupt a working agent unless the user explicitly asked. You do not need to: \`send\`
+  reaches a busy peer without interrupting it.
 - Check \`plano roster\` before starting long work that could collide, and
   \`plano claim\`/\`plano handoff\` when passing a task on.
 - Never expose secrets; context from other agents is redacted server-side.
 - \`plano set-model\` only when the target is idle; never invent harness syntax.
+- Never invent flags. \`plano agent-context\` prints the exact machine-readable schema of every
+  command, and \`plano help\` lists them.
 - When you receive a chained task (a line starting with \`[plano → … ⚓]\`), treat it as an
   explicit instruction from the user: read the file if it points to one, execute, and report.
+
+## If you were told to wait for messages
+
+That instruction means exactly one thing — run this, and keep running it:
+
+\`\`\`sh
+plano check --wait --timeout-ms 90000 --json
+\`\`\`
+
+Handle whatever comes back (answer any \`#id\`, do any task, reply to the sender), acknowledge with
+\`--ack\` in the same call that resumes listening, and continue. You are not "waiting" unless that
+command is running.
 
 `
 
@@ -340,8 +418,10 @@ until you acknowledge it, so nothing is lost if you die mid-batch.
 - \`plano roster\` — every live agent: id (unique prefixes work), harness, state, current task.
 - \`plano status <id>\` / \`plano context <id> [--lines N]\` — a peer's live state / its full
   redacted transcript.
-- \`plano send <id> "<text>"\` — type a message into a peer's terminal (\`--queue\` when busy).
-  Add \`--wait\` to block until it finishes the turn your message triggers, and print its output.
+- \`plano send <id> "<text>"\` — recorded first, routed second; it never refuses and it is never
+  lost. \`channel: "check"\` means the peer was listening and already has it; \`queued\` means it is
+  in their mailbox and will arrive — neither is a reason to re-send. Add \`--wait\` to block until
+  the peer finishes the turn your message triggers, and print its output.
 - \`plano ask <id> "<question>"\` — send and wait for an explicit answer. When a message you
   receive carries a correlation id (\`#a3f2b\`), answer it with \`plano reply <id> "<summary>"\`.
 - \`plano spawn <harness> [folder] [--prompt "<task>"] [--count N] [--wait]\` — open new agents in
@@ -354,11 +434,18 @@ until you acknowledge it, so nothing is lost if you die mid-batch.
   for the next turn instead), and a peer stuck on a permission prompt returns \`blocked\` instead
   of burning the timeout. Exit code 2 means it timed out and is still working.
 
-**Which one to use.** For "do this and tell me the result", prefer \`plano ask\` — it resolves on
-an explicit \`plano reply\` from the peer, and falls back to inferring from its idle transcript.
-Use \`send --wait\` when you only need "the turn it triggered is over". Reach for bare
+**Which one to use.** For "do this and tell me the result", prefer \`plano ask\` — it resolves ONLY
+on an explicit \`plano reply\` from the peer. It never invents an answer out of their transcript:
+a timeout comes back \`status: "pending"\`, meaning the question is still open, not lost and not
+answered. Use \`send --wait\` when you only need "the turn it triggered is over". Reach for bare
 \`plano wait\` to check on work already in flight; if it comes back \`blocked\`, the peer needs a
 human or a message from you — waiting longer will not help.
+
+**The mistakes that cost the most.** \`{"checkpoint": true}\` means nothing arrived in that window —
+run \`check --wait\` again, do not report silence and do not stop listening. \`queued\` and
+\`channel: "check"\` both mean the message WILL arrive: never re-send. Exit code 2 is a timeout, not
+a failure. Never sleep, never poll in a loop, and never echo a sentinel to fake an acknowledgement —
+there is a real command for each of those.
 - \`plano claim "<task>"\` / \`plano handoff <id> "<task>"\` — coordinate so agents do not collide.
 - \`plano chain <id> --payload "<text>" --when i-finish\` — deliver work to a peer exactly once
   when you finish. \`plano inbox\` / \`plano ack <messageId>\` for queued messages.
