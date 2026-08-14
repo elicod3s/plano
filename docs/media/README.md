@@ -1,8 +1,16 @@
 # Shot list
 
-Six screenshots. Real agents, real work — nothing staged. Each one has a fixed filename; drop the
-file in this folder, then open `README.md` at the repo root, find the matching `MEDIA SLOT`
-comment and uncomment the one line inside it. Nothing else to edit.
+Four of the six are **done** and live in the README. Two remain; drop the file in this folder with
+the exact name and uncomment its `MEDIA SLOT` line in the root `README.md`.
+
+| Shot | File | State |
+|---|---|---|
+| Hero — the whole canvas | `hero-canvas.png` | ✅ |
+| A canvas, not tabs | `canvas.png` | ✅ |
+| Orchestration tree | `orchestration-tree.png` | ✅ |
+| Agents talking (mesh overlay) | `mesh.png` | ✅ |
+| Terminal → agent morph | `agent-mode.png` | ⬜ one panel close up, agent running, panel tinted |
+| PLANO Mobile | `mobile.png` | ⬜ optional — phone with a live agent, desktop app closed |
 
 ## How to shoot (applies to every shot)
 

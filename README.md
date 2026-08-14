@@ -21,10 +21,9 @@ subscriptions, on your own computer.
 
 </div>
 
-<!-- MEDIA SLOT 1 — HERO. Drop docs/media/hero-canvas.png, then delete this comment and
-     uncomment the line below. Shot spec: docs/media/README.md
-![PLANO — the infinite canvas](docs/media/hero-canvas.png)
--->
+<p align="center">
+  <img src="docs/media/hero-canvas.png" alt="PLANO — four agents, an editor, a browser and a to-do list on one canvas" width="100%">
+</p>
 
 ---
 
@@ -72,9 +71,9 @@ Panels float on one infinite space per project — terminals, code editors, brow
 sticky notes. Pan and zoom. The layout is saved per project, so reopening a folder puts every
 panel back exactly where it was.
 
-<!-- MEDIA SLOT 2 — CANVAS. Drop docs/media/canvas.png and uncomment:
-![One canvas per project](docs/media/canvas.png)
--->
+<p align="center">
+  <img src="docs/media/canvas.png" alt="Panels placed deliberately across one infinite canvas" width="100%">
+</p>
 
 ## Terminals that become agents
 
@@ -92,10 +91,11 @@ configuration: detection reads the process tree and the output banner.
 centred on their parent. The canvas becomes the org chart of the work: who delegated to whom is
 visible from the shape alone, and depth grows downward instead of running off-screen.
 
-<!-- MEDIA SLOT 4 — ORCHESTRATION TREE (the signature shot). Drop
-     docs/media/orchestration-tree.png and uncomment:
-![A coordinator with its workers spawned beneath it](docs/media/orchestration-tree.png)
--->
+<p align="center">
+  <img src="docs/media/orchestration-tree.png" alt="A coordinator agent with three workers spawned in a row beneath it, linked by the mesh" width="100%">
+</p>
+
+<p align="center"><sub><i>One coordinator, three workers it spawned, three reports back — read off the canvas.</i></sub></p>
 
 ## Agents that talk to each other
 
@@ -112,9 +112,9 @@ plano spawn codex . --count 3             # three workers, placed beneath you
 Delivery is durable first and typed second: a message is recorded the moment `send` returns, and
 an agent parked on `plano check --wait` is woken in milliseconds.
 
-<!-- MEDIA SLOT 5 — MESH. Drop docs/media/mesh.png and uncomment:
-![Agents messaging each other across the canvas](docs/media/mesh.png)
--->
+<p align="center">
+  <img src="docs/media/mesh.png" alt="The mesh overlay: agent relationships and a live delivery timeline" width="420">
+</p>
 
 ## Agents survive the app closing
 
@@ -125,12 +125,6 @@ to them from your phone on the same Wi-Fi, with the desktop app closed.
 <!-- MEDIA SLOT 6 — MOBILE (optional). Drop docs/media/mobile.png and uncomment:
 ![PLANO Mobile](docs/media/mobile.png)
 -->
-
-## Local-first
-
-Everything runs on your machine. There is no account, no telemetry and no cloud: the mesh is a
-loopback service, and agent output passes through a central redactor (tokens, keys, passwords,
-PEM blocks) before it is ever exposed to another agent.
 
 ## Requirements
 
