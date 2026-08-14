@@ -2,14 +2,14 @@
 
 # PLANO
 
-### The IDE for orchestrating AI agents — on one infinite canvas, entirely on your machine
+### The IDE where your AI agents work together — whichever model, whichever CLI
 
-Stop juggling a dozen terminal tabs and chat windows. Run **many AI agents at once**, see all of
-them at the same time, let them spawn and delegate to each other, and watch the work take shape
-as a map you can actually read.
+Claude Code hands work to Codex. Codex asks Gemini. Gemini spawns three Pi agents and waits for
+all three. **Different vendors, different models, different CLIs — one conversation**, on one
+infinite canvas, where you can see all of them at once.
 
 **No account. No cloud. No telemetry.** PLANO drives the AI CLIs you already have, with your own
-subscriptions, on your own computer.
+subscriptions, on your own machine.
 
 [![Download](https://img.shields.io/badge/Download-Windows%20·%20macOS-111111?style=for-the-badge&logo=github&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
 [![Latest release](https://img.shields.io/github/v/release/zqkra/plano?style=for-the-badge&label=version&color=2b2b2b)](https://github.com/zqkra/plano/releases)
@@ -39,7 +39,27 @@ Requires Windows 10 1809+ (for ConPTY) or macOS 12+.
 
 ---
 
-## Why orchestrate on a canvas
+## One mesh, any harness
+
+Every AI CLI you open joins the same mesh — Claude Code, Codex, Gemini, Oh My Pi, Grok, Cursor,
+OpenCode, Aider, Kiro. They reach each other through one command surface, and **none of them has
+to know what the other one is**:
+
+```sh
+plano roster                          # everyone running, whatever they are
+plano send  <agent> "review this"     # Claude → Codex, Gemini → Pi, any direction
+plano ask   <agent> "which approach?" # blocks until they actually answer
+plano spawn codex . --count 3         # a Pi agent opening three Codex agents is normal here
+```
+
+There is no adapter per vendor and no lowest common denominator. An agent participates because it
+can run a command — that is the entire requirement. The one that spawned the others is not special
+either: any of them can spawn, ask, delegate and wait on any other.
+
+That is what turns a pile of terminals into something closer to a **team**: work arrives, gets
+split, comes back, and you watch it happen instead of shuttling context between tabs yourself.
+
+## Why a canvas
 
 One agent is a chat window. Five agents is a mess — tabs you cannot see at once, work you cannot
 place, and no way to tell who is waiting on whom. PLANO gives that swarm a **shape**:
@@ -49,6 +69,7 @@ place, and no way to tell who is waiting on whom. PLANO gives that swarm a **sha
 | See every agent at once | ✗ one at a time | ✗ one thread at a time | ✓ all of them, side by side |
 | Who delegated to whom | invisible | invisible | ✓ children open **beneath** their parent |
 | Agents talk to each other | ✗ | ✗ | ✓ `send` · `ask` · `reply` · `spawn` |
+| Across vendors | ✗ | ✗ one vendor per thread | ✓ Claude ↔ Codex ↔ Gemini ↔ Pi |
 | Survives closing the app | ✗ | n/a | ✓ detached host, reattach on reopen |
 | Your models, your subscriptions | ✓ | ✗ their inference | ✓ your CLIs, your keys |
 | Where your code goes | your machine | **their servers** | ✓ **your machine, always** |
@@ -97,20 +118,18 @@ visible from the shape alone, and depth grows downward instead of running off-sc
 
 <p align="center"><sub><i>One coordinator, three workers it spawned, three reports back — read off the canvas.</i></sub></p>
 
-## Agents that talk to each other
+## Messages that cannot quietly go missing
 
-Every AI CLI in any terminal joins one mesh. The `plano` CLI — already on each agent's PATH —
-lets them message, ask, delegate and wait on each other:
+A team only works if the messages arrive, so delivery is durable first and typed second:
 
-```sh
-plano roster                              # who is running, where, and what they are doing
-plano send <agent> "review the migration" # durable: never lost, never refused
-plano check --wait                        # block until mail arrives — no polling, no sleeping
-plano spawn codex . --count 3             # three workers, placed beneath you
-```
-
-Delivery is durable first and typed second: a message is recorded the moment `send` returns, and
-an agent parked on `plano check --wait` is woken in milliseconds.
+- **`send` never refuses.** The message is recorded before it is routed, so a peer that is booting,
+  mid-turn, or busy still gets it. There is nothing to retry.
+- **Waiting is a command, not a state.** An agent listens by blocking on `plano check --wait`;
+  when mail arrives it is woken in milliseconds, with the message as that command's own output.
+  No polling, no sleeping, no watching the screen.
+- **A timeout is a checkpoint, never silence.** It says so in words, so an agent does not conclude
+  the mesh is dead and stop listening.
+- **A batch replays until acknowledged**, so an agent that dies mid-task loses nothing.
 
 <p align="center">
   <img src="docs/media/mesh.png" alt="The mesh overlay: agent relationships and a live delivery timeline" width="420">
