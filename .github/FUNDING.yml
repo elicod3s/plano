@@ -1,12 +1,13 @@
 # Puts a "Sponsor" button at the top of the repo, next to Star and Fork.
 #
-# The `github:` entry only renders once GitHub Sponsors is actually enabled on the account
-# (Settings → Sponsors → complete the profile, identity and bank verification). Until then GitHub
-# ignores it, so this file is safe to ship early.
+# Ko-fi is the live one: it takes PayPal as well as cards, needs no account on the donor's side,
+# and keeps 0% on one-off donations.
 #
-# To add a one-off tipping link that needs no GitHub account on the donor's side, uncomment one:
-#   ko_fi: <username>            # 0% on one-off donations
-#   buy_me_a_coffee: <username>  # ~5%
-#   custom: ['https://…']        # anything else (Polar, PayPal, …)
+# `github:` renders only once GitHub Sponsors is actually enabled on the account (Settings →
+# Sponsors → profile, identity and bank verification, which runs through Stripe Connect and is
+# therefore country-limited). It is listed first so it takes over as the primary link the moment
+# that approval lands — recurring sponsorships convert better than one-off tips — without anyone
+# having to remember to edit this file. Until then GitHub ignores the entry and shows Ko-fi.
 
 github: [zqkra]
+ko_fi: zqkra
