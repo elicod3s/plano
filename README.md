@@ -11,10 +11,14 @@ infinite canvas, where you can see all of them at once.
 **No account. No cloud. No telemetry.** PLANO drives the AI CLIs you already have, with your own
 subscriptions, on your own machine.
 
-[![Download](https://img.shields.io/badge/Download-Windows%20·%20macOS-111111?style=for-the-badge&logo=github&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
-[![Latest release](https://img.shields.io/github/v/release/zqkra/plano?style=for-the-badge&label=version&color=2b2b2b)](https://github.com/zqkra/plano/releases)
-[![License](https://img.shields.io/github/license/zqkra/plano?style=for-the-badge&color=2b2b2b)](LICENSE)
+[![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
+[![Download for macOS](https://img.shields.io/badge/Download-macOS-111111?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
 [![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/zqkra)
+
+[![Latest release](https://img.shields.io/github/v/release/zqkra/plano?label=latest&color=2b2b2b)](https://github.com/zqkra/plano/releases)
+[![License](https://img.shields.io/github/license/zqkra/plano?color=2b2b2b)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/zqkra/plano?color=2b2b2b)](https://github.com/zqkra/plano/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/zqkra/plano/total?label=downloads&color=2b2b2b)](https://github.com/zqkra/plano/releases)
 
 ![Platform](https://img.shields.io/badge/Windows%2010%201809%2B-informational?style=flat-square&color=3a3a3a)
 ![Platform](https://img.shields.io/badge/macOS%2012%2B-informational?style=flat-square&color=3a3a3a)
@@ -56,6 +60,37 @@ plano spawn codex . --count 3         # a Pi agent opening three Codex agents is
 There is no adapter per vendor and no lowest common denominator. An agent participates because it
 can run a command — that is the entire requirement. The one that spawned the others is not special
 either: any of them can spawn, ask, delegate and wait on any other.
+
+```mermaid
+flowchart TD
+    You([you]) -->|one prompt| C
+
+    C["Coordinator — Claude Code"]
+    W1["Worker — Pi"]
+    W2["Worker — Codex"]
+    W3["Worker — Gemini"]
+    S1["Sub-worker — Oh My Pi"]
+
+    C -->|plano spawn --count 3| W1
+    C --> W2
+    C --> W3
+    W2 -->|plano spawn| S1
+
+    W1 -.->|plano send · report| C
+    W2 -.->|plano ask · which approach?| C
+    W3 -.->|plano send · report| C
+
+    classDef coord fill:#241a15,stroke:#d97757,stroke-width:2px,color:#f5f4f1
+    classDef work fill:#161b24,stroke:#4f8cf7,stroke-width:1.5px,color:#f5f4f1
+    classDef sub fill:#241c12,stroke:#f97316,stroke-width:1.5px,color:#f5f4f1
+    class C coord
+    class W1,W2,W3 work
+    class S1 sub
+```
+
+Solid arrows are work going out, dashed ones are answers coming back. Every arrow is one `plano`
+command, and every box is a real terminal on the canvas — placed exactly where the diagram puts it,
+because that is how PLANO lays spawned agents out.
 
 That is what turns a pile of terminals into something closer to a **team**: work arrives, gets
 split, comes back, and you watch it happen instead of shuttling context between tabs yourself.
@@ -145,6 +180,29 @@ to them from your phone on the same Wi-Fi, with the desktop app closed.
 <!-- MEDIA SLOT 6 — MOBILE (optional). Drop docs/media/mobile.png and uncomment:
 ![PLANO Mobile](docs/media/mobile.png)
 -->
+
+## Everything on the canvas
+
+| Panel | What it is |
+|---|---|
+| **Terminal** | Real PTY (ConPTY on Windows). Tabs inside one panel, per-terminal font zoom, themes, and a git badge showing branch + state for its live directory. |
+| **Agent** | Any terminal running an AI CLI. Detected automatically, tinted with that agent's accent, and joined to the mesh. |
+| **Files** | File tree with an inline code editor (CodeMirror 6, lazy per language) and an image viewer. Create, rename, delete to trash. |
+| **Browser** | Electron `<webview>` that transforms with the canvas — a real browser panel, not a screenshot. |
+| **Markdown** | Typographic renderer with GFM and fenced code. |
+| **Sticky note · Text · Region** | Annotations that live on the canvas ground, behind the panels. |
+| **To-do · Pomodoro** | Small utilities that persist with the workspace. |
+
+| Beyond the panels | |
+|---|---|
+| **Workspaces (spaces)** | Several canvases per project, each with its own layout and colour. |
+| **Docking** | Drag one panel onto another to merge them into a split group, VS Code style. |
+| **Snapping** | Lego-style align and flush-stick, plus tile zones at the window edges. |
+| **Command palette** | `Ctrl+K` for every command; `Alt+<letter>` to create a panel. |
+| **Mesh overlay** | `Ctrl+Shift+A` — every running agent, their relationships, and a live delivery timeline. |
+| **PLANO Mobile** | View, talk to, create and kill agents from your phone on the same Wi-Fi, with the desktop app closed. |
+| **Voice (Odla)** | Local speech control — the model runs on your machine, nothing is uploaded. |
+| **Session restore** | Terminals reattach after a restart, and agent conversations can be resumed. |
 
 ## Requirements
 
