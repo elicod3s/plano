@@ -2,7 +2,7 @@
  * Auto-update via GitHub Releases (electron-updater).
  *
  * Flow: on launch (after a short grace period) and then every 4h, the service checks the public
- * `zqkra/plano-releases` repo (baked into `resources/app-update.yml` at pack time). A newer
+ * `zqkra/plano` repo (baked into `resources/app-update.yml` at pack time). A newer
  * version is downloaded in the background; the renderer shows progress and, once downloaded,
  * offers "Restart to update" (electron-updater also installs automatically on normal quit).
  *

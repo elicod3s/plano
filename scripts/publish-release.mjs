@@ -1,5 +1,12 @@
 /**
- * Publish a PLANO release to the PUBLIC auto-update repo (zqkra/plano-releases).
+ * Publish a PLANO release to the public source repo (zqkra/plano).
+ *
+ * Releases used to live in a separate artifact repo (zqkra/plano-releases) because the source was
+ * private. It is public now, so the split has no reason to exist and actively confuses anyone
+ * arriving from a link: one repo to star, one repo to read, one place to download. The repo here
+ * MUST match `build.publish.repo` in package.json — electron-builder bakes that into
+ * `resources/app-update.yml` at pack time, and that baked value is the feed an installed app polls
+ * forever. A build published somewhere its own app-update.yml does not point at is invisible.
  *
  * Every installed build checks this repo for `latest.yml` (Windows) / `latest-mac.yml` (macOS)
  * via electron-updater — no tokens needed on clients because the repo is public. Run this after
@@ -19,7 +26,7 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, basename } from 'node:path'
 
-const REPO = 'zqkra/plano-releases'
+const REPO = 'zqkra/plano'
 const ROOT = join(import.meta.dirname, '..')
 const RELEASE_DIR = join(ROOT, 'release')
 

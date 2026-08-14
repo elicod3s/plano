@@ -194,10 +194,28 @@ async function main() {
     '+String.fromCharCode(27)+' +
     "'[0m'" +
     '+String.fromCharCode(13)+String.fromCharCode(10))"'
+  // STATUS=1 replays the user's REAL Claude Code status line, byte for byte — captured by running
+  // their ~/.claude/statusline.js with a synthetic payload. Emoji segments, SGR 1 (bold) and
+  // SGR 2 (DIM) separators, and colours. Reported symptom: the emoji render fine while the text on
+  // that row comes out tiny and illegible. Written to a file rather than squeezed through a shell
+  // one-liner so not a single byte depends on quoting or codepage.
+  const statusFile = join(PROJECT, 'plano-status-sample.js')
+  const E = 'E'
+  const statusJs =
+    `const c = String.fromCodePoint\nconst ${E} = '\\x1b'\n` +
+    `process.stdout.write(\n` +
+    `  c(128193) + ' ' + ${E} + '[36m' + ${E} + '[1m' + 'Plano' + ${E} + '[0m' + ${E} + '[2m' + ' \\u2502 ' + ${E} + '[0m' +\n` +
+    `  c(129302) + ' ' + ${E} + '[35m' + 'Opus 5' + ${E} + '[0m' + ${E} + '[2m' + ' \\u2502 ' + ${E} + '[0m' +\n` +
+    `  c(127807) + ' ' + ${E} + '[32m' + 'mac-build-odla' + ${E} + '[0m' + ${E} + '[33m' + ' \\u25cf' + ${E} + '[0m' + ${E} + '[2m' + ' \\u2502 ' + ${E} + '[0m' +\n` +
+    `  c(128176) + ' ' + ${E} + '[2m' + '$0.4200' + ${E} + '[0m' + '\\r\\n')\n`
+  writeFileSync(statusFile, statusJs, 'utf8')
+  const STATUS_SAMPLE = `node "${statusFile.replace(/\\/g, '/')}"`
   // Deterministic sample: the exact shape of the user's screenshot (label + aligned path column).
-  const SAMPLE = process.env.BOLD
-    ? BOLD_SAMPLE
-    : 'echo Claude Code  C:\\Users\\Administrator\\Desktop\\FINAL_1080p.mp4'
+  const SAMPLE = process.env.STATUS
+    ? STATUS_SAMPLE
+    : process.env.BOLD
+      ? BOLD_SAMPLE
+      : 'echo Claude Code  C:\\Users\\Administrator\\Desktop\\FINAL_1080p.mp4'
   await ev(`(() => { window.plano.terminal.write(window.__pty, ${JSON.stringify(SAMPLE + '\r')}); return true })()`)
   await sleep(1800)
   // CLI art sample: box drawing, Braille spinner, Claude's star marks, blocks, checks. Must still

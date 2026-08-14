@@ -53,3 +53,6 @@ release-*/
 dev-server.err
 Plano mac version/
 Plano mac version.zip
+
+# Reverse-engineering notes on other apps — never publish
+docs/research/deska/

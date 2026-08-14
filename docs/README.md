@@ -51,15 +51,6 @@ Este índice es el punto de entrada para la documentación activa del proyecto. 
 
 - [Handoff técnico de Odla](engineering/voice/ODLA_VOICE_HANDOFF.md)
 
-## Investigación externa
-
-Los documentos de esta sección analizan Deska y no son especificaciones de PLANO.
-
-- [Referencia de terminales](research/deska/DESKA_TERMINAL_REFERENCE.md)
-- [Descubrimiento de API](research/deska/DESKA_API_DISCOVERY.md)
-- [Auditoría de seguridad](research/deska/DESKA_SECURITY_AUDIT.md)
-- [Prueba de concepto histórica](research/deska/CVE-DESKA-2024-001-POC.md)
-
 ## Archivo
 
 - [Prompt histórico de UI](archive/PROMPT_UI_PLANO.md)

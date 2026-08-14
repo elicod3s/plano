@@ -39,9 +39,9 @@ npm run dev       # launch PLANO with HMR
 
 ## Auto-updates (GitHub Releases)
 
-Installed PLANO builds self-update from the **public** artifact repo
-[`zqkra/plano-releases`](https://github.com/zqkra/plano-releases) (binaries only — source stays
-private). On launch and every 4h the app checks the latest release, downloads the new installer
+Installed PLANO builds self-update from this repo's
+[Releases](https://github.com/zqkra/plano/releases). One repo: the code you are reading and the
+installer you download. On launch and every 4h the app checks the latest release, downloads the new installer
 in the background (progress shown bottom-center), and installs on **Restart** or on quit. No
 tokens needed on client machines because the repo is public.
 

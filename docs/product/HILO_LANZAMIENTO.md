@@ -1,435 +1,251 @@
-# HILO DE LANZAMIENTO — pega esto, sube esto
+# Qué publicar, en orden
 
-Nada de estrategia aquí. Esto es el hilo tal como queda en X.
+Habla como tú. No pongas cohetes, no pongas “introducing”, no pongas el link en el primer tweet.
 
-**Cuándo:** martes o miércoles, 9:30–10:00 AM ET (15:30–16:00 CEST).
-
-**Cómo se publica:**
-1. Tweet 1 = post nuevo (no es un reply).
-2. A los 10 segundos: Reply A y Reply B debajo del Tweet 1.
-3. A los 30–60 segundos: Tweets 2 → 6 como hilo (cada uno es reply del anterior).
-4. No numeres. No pongas link en el Tweet 1 ni en los Tweets 2–6.
-
-**Archivos que tienes que tener en disco antes de abrir X:**
-
-```
-clips/
-  01-mesh.mp4          ← Tweet 1
-  02-morph.mp4         ← Tweet 2
-  03-spawn.mp4         ← Tweet 3
-  04-survive.mp4       ← Tweet 4
-  05-phone.mp4         ← Tweet 5
-  06-wide.mp4          ← Tweet 6
-```
-
-Todos: 1920×1080, 60 fps, **sin audio** (o audio que no importe). Del `01-mesh.mp4` exporta también `01-mesh-square.mp4` a 1080×1080 y sube **ese** en el Tweet 1.
+Publica un martes o miércoles a las 15:30 (hora España) / 9:30 AM en Nueva York.
 
 ---
 
-## TWEET 1 — el ancla (post nuevo)
+## 1. El tweet grande (el primero)
 
-**Subes:** `clips/01-mesh-square.mp4`
+Abre X → tweet nuevo.
 
-**El vídeo es esto, segundo a segundo:**
-
-| Tiempo | Qué se ve |
-|---|---|
-| 0:00 | Dos paneles grandes ya en cuadro. Una curva bezier **ya dibujada** entre ellos. Un pulso luminoso **ya a mitad de camino**. No hay fade-in. No hay escritorio vacío. |
-| 0:00–0:02 | El pulso viaja del panel izquierdo al derecho. |
-| 0:02–0:03 | Punto respirando en el extremo del receptor. |
-| 0:03–0:06 | El pulso vuelve (la respuesta). |
-| 0:06–0:09 | La línea se desvanece. |
-| 0:09–0:12 | Hold. Nada más se mueve. |
-
-Si el pulso no está en movimiento en el frame 0, no subas este archivo.
-
-**Pegas esto (93 caracteres). Cero link. Cero emoji:**
+**Escribe esto:**
 
 ```
-You can watch your AI agents talk to each other.
+i shipped this.
 
-A line draws itself. A pulse runs along it.
+you can see your AI agents talking to each other. it runs on your computer. no account, no cloud, i don't have a server.
+
+windows and mac. free.
 ```
 
-Así se ve el composer:
+**Sube este vídeo:** dos ventanas de agentes. Entre ellas hay una línea. Un puntito corre por la línea (eso es el mensaje). El vídeo empieza YA con la línea y el puntito en movimiento. 12 segundos. Sin música.
+
+No pongas el link aquí. No digas “no API”: Claude y Codex siguen usando *su* cuenta. Lo que es cierto es que PLANO no tiene nube, ni registro, ni servidor tuyo.
+
+---
+
+## 2. Justo debajo, primera respuesta
+
+Dale a responder tu propio tweet. Sin vídeo.
 
 ```
-You can watch your AI agents talk to each other.
+windows + mac, free, no account
 
-A line draws itself. A pulse runs along it.
-
-[vídeo 01-mesh-square.mp4]
+https://github.com/zqkra/plano
 ```
 
 ---
 
-## REPLY A — debajo del Tweet 1, inmediato
+## 3. Otra respuesta (solo si sabes el Twitter del streamer)
 
-**Subes:** nada. Solo texto.
-
-**Pegas:**
+Sin vídeo. Cambia `@persona` por su usuario.
 
 ```
-Windows + macOS. Free. No account.
-
-https://github.com/zqkra/plano-releases
-
-v0.2.26. Built in about 3 months, one person.
+hey @persona — saw you draw this on stream. spent 3 months making it. wanted you to see it first. thanks for the idea
 ```
 
-Así se ve:
-
-```
-↩ Replying to @TU_CUENTA
-
-Windows + macOS. Free. No account.
-
-https://github.com/zqkra/plano-releases
-
-v0.2.26. Built in about 3 months, one person.
-```
+Si no tienes el usuario, sáltate este.
 
 ---
 
-## REPLY B — debajo del Tweet 1, justo después de A
+## 4. Siguiente tweet del hilo (responde al primero)
 
-**Subes:** nada.
-
-**Solo si tienes el handle real.** Si no, no publiques este reply.
-
-**Pegas** (cambia `<STREAMER_HANDLE>`):
+**Escribe esto:**
 
 ```
-hey <STREAMER_HANDLE> — I saw you sketch this on stream. spent the last 3 months turning that picture into a real desktop app.
+typed claude in a normal terminal and the window just changed
 
-agents talk to each other and you can see the messages as lines between the windows. wanted you to see it first. thanks for putting the image in my head.
+i didn't click anything
 ```
+
+**Sube este vídeo:** una terminal normal. Escribes `claude` y le das a enter. La ventana se pinta sola y le sale el logo. 6 segundos.
 
 ---
 
-## TWEET 2 — reply del Tweet 1
+## 5. Siguiente tweet
 
-**Subes:** `clips/02-morph.mp4`
-
-**El vídeo es esto:**
-
-| Tiempo | Qué se ve |
-|---|---|
-| 0:00 | Un solo panel. Terminal normal. Prompt ya dice `claud`. |
-| 0:00–0:01 | Escribes `e` y pulsas Enter. |
-| 0:01–0:02 | El panel muta: borde se tiñe, aparece el logo del agente, el borde respira. |
-| 0:02–0:06 | Hold sobre el panel ya convertido. |
-
-**Pegas (86 caracteres):**
+**Escribe esto:**
 
 ```
-Type claude in a normal terminal.
+asked one of them to get help
 
-The window changes. No settings. No AI-mode button.
+three more windows showed up and started talking
 ```
 
-Así se ve:
-
-```
-↩ Replying to @TU_CUENTA
-
-Type claude in a normal terminal.
-
-The window changes. No settings. No AI-mode button.
-
-[vídeo 02-morph.mp4]
-```
+**Sube este vídeo:** un agente. El texto ya está escrito (no se te ve tecleando un rollo). Le das a enter. Salen 3 ventanas. Se conectan con líneas. 8 segundos.
 
 ---
 
-## TWEET 3 — reply del Tweet 2
+## 6. Siguiente tweet
 
-**Subes:** `clips/03-spawn.mp4`
-
-**El vídeo es esto:**
-
-| Tiempo | Qué se ve |
-|---|---|
-| 0:00 | Un agente vivo a la izquierda. Canvas vacío a la derecha. El prompt **ya está escrito**, grande: `spawn two reviewers and wait`. |
-| 0:00–0:01 | Enter. |
-| 0:01–0:04 | Nacen tres paneles. |
-| 0:04–0:07 | Se dibujan las curvas. Sale un pulso. |
-| 0:07–0:10 | Hold. |
-
-No se ve escribir el prompt. Si el agente tarda, jump-cut.
-
-**Pegas (75 caracteres):**
+**Escribe esto:**
 
 ```
-One prompt. Three windows open themselves.
+closed the app. they kept going
 
-The lines show up on their own.
+opened it later and it was the same conversation
 ```
 
-Así se ve:
-
-```
-↩ Replying to @TU_CUENTA
-
-One prompt. Three windows open themselves.
-
-The lines show up on their own.
-
-[vídeo 03-spawn.mp4]
-```
+**Sube este vídeo:** el agente está escribiendo → cierras PLANO → lo vuelves a abrir → está en el mismo sitio, mismo texto. 8 segundos.
 
 ---
 
-## TWEET 4 — reply del Tweet 3
+## 7. Siguiente tweet
 
-**Subes:** `clips/04-survive.mp4`
-
-**El vídeo es esto:**
-
-| Tiempo | Qué se ve |
-|---|---|
-| 0:00–0:03 | Un agente emitiendo texto. Se ve el scroll. |
-| 0:03–0:04 | Cierras PLANO (Alt+F4 / Cmd+Q). Se ve el close. |
-| 0:04–0:05 | Escritorio. 1 segundo. |
-| 0:05–0:10 | Reabres. El mismo panel, el mismo scroll, el mismo texto a medias. |
-
-**Pegas (87 caracteres):**
+**Escribe esto:**
 
 ```
-Close the app. The agents keep working.
+same agents on my phone
 
-Open it again. Same scroll. Same conversation.
+laptop can be closed
 ```
 
-Así se ve:
-
-```
-↩ Replying to @TU_CUENTA
-
-Close the app. The agents keep working.
-
-Open it again. Same scroll. Same conversation.
-
-[vídeo 04-survive.mp4]
-```
+**Sube este vídeo:** el ordenador con PLANO cerrado. El móvil, en la misma wifi, hablando con un agente. 8 segundos. Que no se vea el QR ni números raros.
 
 ---
 
-## TWEET 5 — reply del Tweet 4
+## 8. Último tweet del hilo
 
-**Subes:** `clips/05-phone.mp4`
-
-**El vídeo es esto:**
-
-| Tiempo | Qué se ve |
-|---|---|
-| 0:00–0:02 | Split o corte: PC con PLANO cerrado. |
-| 0:02–0:05 | Teléfono real (no emulador). Lista de agentes. Escribes una línea. Envío. |
-| 0:05–0:08 | El agente responde en el teléfono. |
-
-No sale QR, no sale IP, no sale “connecting…”.
-
-**Pegas (61 caracteres):**
+**Escribe esto:**
 
 ```
-Same agents, from your phone.
+it's called plano. windows and mac. free
 
-The desktop app can be closed.
+if you already run two agents, what's the most annoying part
 ```
 
-Así se ve:
-
-```
-↩ Replying to @TU_CUENTA
-
-Same agents, from your phone.
-
-The desktop app can be closed.
-
-[vídeo 05-phone.mp4]
-```
+**Sube este vídeo:** plano general, varias ventanas, un par de líneas. 4 segundos. No mueve el ratón. Se queda quieto.
 
 ---
 
-## TWEET 6 — reply del Tweet 5 (cierre)
+## Si el primero no lo ve nadie
 
-**Subes:** `clips/06-wide.mp4`
+No lo borres. No publiques otro el mismo día.
 
-**El vídeo es esto:**
-
-| Tiempo | Qué se ve |
-|---|---|
-| 0:00–0:04 | Plano ancho. 4 o 5 paneles. 2 o 3 líneas vivas. Sin cursor. Hold. No hay acción. Es la postal. |
-
-**Pegas (115 caracteres). Sin URL:**
+El jueves a la misma hora, tweet NUEVO (no respondas al viejo):
 
 ```
-PLANO. A desktop for Windows and Mac. Free.
+i built a desktop where the agents are just windows
 
-If you already run two agents at once: what do you wish you could see?
+you can see them talk
 ```
 
-Así se ve:
+Vídeo: el de escribir `claude` (el corto, 6 segundos).
 
-```
-↩ Replying to @TU_CUENTA
-
-PLANO. A desktop for Windows and Mac. Free.
-
-If you already run two agents at once: what do you wish you could see?
-
-[vídeo 06-wide.mp4]
-```
+Debajo, la misma respuesta del github.
 
 ---
 
-## Cuenta secundaria (español) — solo el ancla
+## Los días de después (un tweet al día, no es hilo)
 
-Mismo vídeo: `clips/01-mesh-square.mp4`.
+Cada uno es un tweet suelto. El link solo si alguien pregunta.
 
-```
-Puedes ver a tus agentes de IA hablar entre ellos.
-
-Una línea se dibuja sola. Un pulso corre por ella.
-```
-
-Reply del ancla:
+**Día 1 — voz**
 
 ```
-Windows + macOS. Gratis. Sin cuenta.
-
-https://github.com/zqkra/plano-releases
+said “open two claudes next to the browser” out loud and they just appeared
 ```
 
-El hilo 2–6 lo puedes dejar en inglés o no publicarlo en la secundaria. No traduzcas el hilo si no vas a grabar los clips otra vez con UI en español (la UI es inglés).
+Vídeo: hablas, salen dos ventanas.
+
+**Día 2 — encajar ventanas**
+
+```
+you can drag one window onto another and they snap together
+```
+
+Vídeo: arrastras una encima de la otra y se parten la pantalla.
+
+**Día 3 — se acuerda**
+
+```
+quit, came back later, the agent picked up the same conversation
+
+not a new one
+```
+
+Vídeo: cierras, abres, el chat del agente sigue.
+
+**Día 4 — git**
+
+```
+each terminal shows the git branch it's actually on
+```
+
+Vídeo: cambias de rama y el cartelito de arriba cambia.
+
+**Día 5 — navegador**
+
+```
+that's a real browser inside it. zooms with everything else
+```
+
+Vídeo: haces zoom atrás y la web se hace pequeña con el resto. Luego clickeas dentro y funciona.
+
+**Día 6 — pestañas**
+
+```
+tabs, theme and font size are per terminal
+
+not global
+```
+
+Vídeo: tres pestañas, cambias el color de una sola.
+
+**Día 7 — focus**
+
+```
+one window. everything else goes dark. the agent keeps going
+```
+
+Vídeo: pones focus, el resto se apaga.
+
+**Día 8 — nota**
+
+```
+sticky note sitting next to the agent that's rewriting it
+```
+
+Vídeo: una nota al lado de un agente.
+
+**Día 9 — zona**
+
+```
+drew a box around three agents so they count as a team
+```
+
+Vídeo: dibujas un rectángulo, tres ventanas dentro.
+
+**Día 10 — comando**
+
+```
+cmd-k, new agent, it just shows up
+```
+
+Vídeo: abres la paleta, eliges new agent, nace una ventana.
 
 ---
 
-## SI EL ANCLA NO ARRANCA
+## Cuenta en español (solo el primero)
 
-No borres el hilo. No publiques otro el mismo día.
-
-**Jueves 9:30 AM ET — post nuevo, no quote:**
-
-**Subes:** `clips/02-morph.mp4` (el mismo del Tweet 2)
-
-**Pegas:**
+Mismo vídeo de las líneas.
 
 ```
-I built a desktop where your AI agents live as windows.
+lo acabo de sacar.
 
-You can see them talk.
+puedes ver a tus agentes de IA hablar entre ellos. corre en tu ordenador. sin cuenta, sin nube, no tengo servidor.
+
+windows y mac. gratis.
 ```
 
-Reply con el mismo link de GitHub.
-
----
-
-## SEMANA SIGUIENTE — un post suelto al día
-
-Cada uno es un tweet nuevo, no un hilo. Link solo si preguntan, o en la primera reply.
-
-### Día +1
-
-**Subes:** `clips/07-voice.mp4`  
-8s. Hablas. Nacen dos paneles y se colocan. Sin transcripción en pantalla.
+Respuesta:
 
 ```
-I said “open two Claudes next to the browser.” They appeared.
+windows + mac, gratis, sin cuenta
+
+https://github.com/zqkra/plano
 ```
 
-### Día +2
-
-**Subes:** `clips/08-dock.mp4`  
-6s. Arrastras un panel sobre otro. Se fusionan en split.
-
-```
-Drag one window onto another. They snap.
-```
-
-### Día +3
-
-**Subes:** `clips/09-restore.mp4`  
-8s. Último mensaje visible → cierras → abres → el mismo hilo del agente, no uno en blanco.
-
-```
-Quit. Reopen. The agent continues the same conversation, not a blank one.
-```
-
-### Día +4
-
-**Subes:** `clips/10-git.mp4`  
-5s. `git checkout` en el panel. El badge de rama cambia.
-
-```
-Each terminal wears the branch it's actually on.
-```
-
-### Día +5
-
-**Subes:** `clips/11-browser.mp4`  
-6s. Zoom out del canvas. La web se escala con él. Un click dentro sigue funcionando.
-
-```
-That's a live webview. It zooms with the canvas. Not a screenshot.
-```
-
-### Día +6
-
-**Subes:** `clips/12-tabs.mp4`  
-6s. Tres tabs. Cambias el tema. El borde del panel se tiñe.
-
-```
-Tabs per terminal. Theme per terminal. Font zoom per terminal.
-```
-
-### Día +7
-
-**Subes:** `clips/13-focus.mp4`  
-5s. Focus on. Todo lo demás se oscurece. El agente sigue.
-
-```
-One window. Everything else dims. The agent keeps running in the dark.
-```
-
-### Día +8
-
-**Subes:** `clips/14-sticky.mp4`  
-5s. Una nota pegada al lado del agente que la está reescribiendo.
-
-```
-A sticky note next to the agent that is rewriting it.
-```
-
-### Día +9
-
-**Subes:** `clips/15-region.mp4`  
-6s. Dibujas una región. Tres paneles dentro. Una línea cruza el borde.
-
-```
-A region is just a named rectangle. The agents inside it are a team.
-```
-
-### Día +10
-
-**Subes:** `clips/16-palette.mp4`  
-5s. Cmd-K → “new agent” → nace un panel.
-
-```
-Cmd-K. New agent, new terminal, zoom to fit.
-```
-
----
-
-## Mapa rápido
-
-| Dónde | Pegar | Subir |
-|---|---|---|
-| Tweet 1 (ancla) | `You can watch your AI agents talk to each other.` + 2ª línea | `01-mesh-square.mp4` |
-| Reply A | download + free + v0.2.26 | nada |
-| Reply B | crédito al streamer | nada |
-| Tweet 2 | `Type claude in a normal terminal.` | `02-morph.mp4` |
-| Tweet 3 | `One prompt. Three windows open themselves.` | `03-spawn.mp4` |
-| Tweet 4 | `Close the app. The agents keep working.` | `04-survive.mp4` |
-| Tweet 5 | `Same agents, from your phone.` | `05-phone.mp4` |
-| Tweet 6 | `PLANO. A desktop for Windows and Mac. Free.` | `06-wide.mp4` |
+El resto del hilo déjalo en inglés. La app está en inglés y si lo traduces entero parece otro producto.

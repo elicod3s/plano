@@ -10,7 +10,7 @@ Seguidores = cifra **actual** al día de la investigación, no histórica. Si no
 1. El código fuente **sigue privado** (`README.md`: binaries only). `package.json` dice MIT, pero no es open source hasta que el repo de código sea público. El ancla dice **free**. No digas open source.
 2. El handle del streamer está como `<STREAMER_HANDLE>` en el brief y **no aparece en el repo**. Sustitúyelo antes de colgar la respuesta de crédito. Sin él, esa jugada no existe.
 
-Descarga: https://github.com/zqkra/plano-releases
+Descarga: https://github.com/zqkra/plano
 
 ---
 
@@ -279,7 +279,7 @@ No publiques el hilo como 1/6. Publica el ancla. A los 30–60s cuelga tweets 2�
 ```
 Windows + macOS. Free. No account.
 
-https://github.com/zqkra/plano-releases
+https://github.com/zqkra/plano
 
 v0.2.26. Built in about 3 months, one person.
 ```
