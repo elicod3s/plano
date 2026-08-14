@@ -14,6 +14,7 @@ subscriptions, on your own machine.
 [![Download](https://img.shields.io/badge/Download-Windows%20·%20macOS-111111?style=for-the-badge&logo=github&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
 [![Latest release](https://img.shields.io/github/v/release/zqkra/plano?style=for-the-badge&label=version&color=2b2b2b)](https://github.com/zqkra/plano/releases)
 [![License](https://img.shields.io/github/license/zqkra/plano?style=for-the-badge&color=2b2b2b)](LICENSE)
+[![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/zqkra)
 
 ![Platform](https://img.shields.io/badge/Windows%2010%201809%2B-informational?style=flat-square&color=3a3a3a)
 ![Platform](https://img.shields.io/badge/macOS%2012%2B-informational?style=flat-square&color=3a3a3a)
@@ -250,6 +251,12 @@ and let them coordinate with each other through the `plano` CLI.
 
 Privacy: nothing leaves your machine. The mesh binds to loopback; the LAN surface (PLANO Mobile)
 is token-authenticated.
+
+## Support
+
+PLANO is free and open source. If it saves you time, you can
+[buy me a coffee](https://ko-fi.com/zqkra) — entirely optional, and it changes nothing about the
+app: no paid tier, no locked features, no telemetry either way.
 
 ## License
 
