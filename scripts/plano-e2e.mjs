@@ -1,5 +1,5 @@
 /**
- * PLANO full-app E2E — proves the herdr-style guarantee through the real app:
+ * PLANO full-app E2E — proves the agents-never-close guarantee through the real app:
  *
  *   1. Seed a temp userData with a workspace containing one terminal panel (tab `tab-e2e-1`).
  *   2. Launch PLANO (parameterized exe) with a CDP debugging port.

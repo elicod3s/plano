@@ -18,7 +18,7 @@ A list rendered by an agent CLI inside a PLANO terminal:
 
 - Normally the glyphs look **uneven — letters sit at slightly different baselines and horizontal
   offsets**, as if each character were nudged by a fraction of a pixel. The user's words: "el texto
-  se ve chueco y nada centrado".
+  se ve chueco y nada centrado" ("the text looks crooked and nothing is centered").
 - **Select that same text (drag-highlight) and it snaps straight**: correct baseline, even spacing.
   Same text, same font, same line — only the draw path changed.
 
@@ -27,7 +27,7 @@ selection layer forces a redraw that lands on the cell grid.
 
 ## Where to look (do not guess — measure)
 
-The terminal uses the **Deska render-scale model**: xterm is opened into a counter-scaled render
+The terminal uses the **render-scale model**: xterm is opened into a counter-scaled render
 box and the font size is `fontSize × renderScale`, so the canvas stays crisp under canvas zoom.
 
 - `src/renderer/panels/terminal/useXterm.ts` — the render-scale model, font size, resize/fit path.

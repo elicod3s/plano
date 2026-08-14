@@ -1,67 +1,68 @@
-# Documentación de PLANO
+# PLANO documentation
 
-Este índice es el punto de entrada para la documentación activa del proyecto. Los respaldos históricos conservan su estructura original dentro de `Backups/` y la copia independiente de macOS permanece en `Plano mac version/`.
+This is the documentation index for the PLANO repo. Docs are grouped by who they are for:
+visitors wanting the big picture, contributors touching the code, and the project's own
+open work items.
 
-## Empezar aquí
+## Start here
 
-- [Plan completo para salir al mercado](product/MARKET_LAUNCH_ROADMAP.md)
-- [Arquitectura](architecture/ARCHITECTURE.md)
-- [Sistema de diseño](design/DESIGN_SYSTEM.md)
-- [Mobile & Remote](architecture/MOBILE_REMOTE.md)
+- **[README](../README.md)** — what PLANO is, the download link, and what makes it different.
+- **[Architecture](architecture/ARCHITECTURE.md)** — how the app is built: the three-process
+  split (renderer / preload / main), the canvas model, agent detection, persistence.
+- **[Design system](design/DESIGN_SYSTEM.md)** — the locked visual language ("Monolith Draft"):
+  tokens, typography, color rules, what must never change.
 
-## Producto
+## For contributors
 
-- [Plan de lanzamiento](product/MARKET_LAUNCH_ROADMAP.md) — tareas necesarias para publicar PLANO.
-- [Roadmap de funciones](product/FEATURE_ROADMAP.md) — ideas y evolución posterior del producto.
+### Architecture
 
-## Arquitectura
+- [Architecture](architecture/ARCHITECTURE.md) — the full system spec.
+- [Mobile & Remote](architecture/MOBILE_REMOTE.md) — the detached agent host, the PLANO Mobile
+  web app, and the packaging/install/deploy workflow. Read it before touching those modules;
+  update it when something changes.
 
-- [Arquitectura general](architecture/ARCHITECTURE.md)
-- [Mobile & Remote](architecture/MOBILE_REMOTE.md)
+### Design
 
-## Diseño
-
-- [Sistema de diseño](design/DESIGN_SYSTEM.md)
-
-## Ingeniería
-
-### Planes de arquitectura
-
-- [Interconexión universal de agentes (Mesh v2)](engineering/plans/PLAN_AGENT_MESH_INTERCONNECT.md) — que cualquier harness se detecte solo, se escriban entre sí de forma visible y puedan crear agentes nuevos en el canvas.
-- [Mesh v3: orquestación robusta](engineering/plans/PLAN_AGENT_MESH_V3_ROBUSTNESS.md) — por qué la orden no se ejecuta hoy, estado real de cada agente, petición→respuesta, delegación por capacidad y enlaces persistentes.
-- [Mesh v4: presencia visual + encadenado](engineering/plans/PLAN_AGENT_MESH_V4_PRESENCE_AND_CHAINING.md) — que se vea que todo está conectado (animación con criterio) y «cuando termines, que lo ejecute Codex».
-- [Conciencia entre workspaces + avisos](engineering/plans/PLAN_AGENT_AWARENESS_AND_NOTIFICATIONS.md) — estado real por workspace, avisos dentro de PLANO con diseño propio, y slider de fuente de terminal.
-
-### Planes de renderizado y movimiento
-
-- [Fluidez del canvas y saneamiento del panel Files](engineering/plans/PLAN_CANVAS_FILES_SMOOTHNESS.md) — por qué un panel Files degrada todo el canvas y cómo acotarlo (cámara, containment, culling, I/O del árbol).
-- [Terminales nítidas al arrastrar y foco visual estilo Deska](engineering/plans/PLAN_TERMINAL_DESKA_DRAG_AND_FOCUS.md) — estado actual, implementación, pruebas, actualización e instalación.
-- [Cristal óptico unificado](engineering/plans/PLAN_OPTICAL_GLASS_UNIFIED_RENDER.md)
-- [Movimiento unitario y oclusión](engineering/plans/PLAN_UNIFIED_MOTION_AND_OCCLUSION_HIERARCHY.md)
-- [Nitidez y fluidez del canvas](engineering/plans/PLAN_CANVAS_SHARPNESS_AND_SMOOTHNESS.md) — propuesta superada, conservada como referencia.
+- [Design system](design/DESIGN_SYSTEM.md) — tokens, layout, motion, and the hard rules.
 
 ### Terminal
 
-- [Análisis de la terminal](engineering/terminal/ANALISIS_TERMINAL_PLANO.md)
-- [Problema histórico de recorte derecho](engineering/terminal/TERMINAL_RIGHT_CLIPPING_PROBLEM.md)
-- [Corrección histórica del zoom](engineering/terminal/TERMINAL_ZOOM_FIX.md)
-- [Diagnóstico histórico de zoom y scroll](engineering/terminal/TERMINAL_ZOOM_SCROLL_BUG.md)
+- [Terminal analysis](engineering/terminal/ANALISIS_TERMINAL_PLANO.md) — how the terminal is
+  built: xterm + node-pty, the persistent-session registry, the render-box scaling model.
+- [Glyph alignment brief](engineering/plans/BRIEF_TERMINAL_GLYPH_ALIGNMENT.md) — why the
+  render-scale model exists and where the relevant code lives (paired with
+  `tests/e2e/glyph-align-probe.mjs`).
 
-### Voz
+### Voice
 
-- [Handoff técnico de Odla](engineering/voice/ODLA_VOICE_HANDOFF.md)
+- [Odla voice handoff](engineering/voice/ODLA_VOICE_HANDOFF.md) — problem spec for the voice
+  assistant work: what it is, where it should go, what is failing. Deliberately contains no
+  solutions.
 
-## Archivo
+## Open work
 
-- [Prompt histórico de UI](archive/PROMPT_UI_PLANO.md)
+These documents track work that is planned or in flight. Read them before picking anything up.
 
-## Regla de organización
+- [Mesh v7 orchestration](engineering/plans/PLAN_AGENT_MESH_V7_ORCHESTRATION.md) — the
+  orchestration layer on top of the mesh transport; what exists and what is missing
+  (`worker-start`, lifecycle commands, gates, tombstones).
+- [Terminal drag & focus plan](engineering/plans/PLAN_TERMINAL_DRAG_FOCUS.md) — paused
+  implementation plan for crisp drag ghosting and focus dimming; provisional changes exist
+  but are not accepted yet.
+- [Agents open issues](engineering/plans/STATUS_AGENTS_OPEN_ISSUES.md) — current state of the
+  agent mesh, what is proven vs unverified, and the ordered next steps.
 
-- La raíz conserva únicamente `README.md` y `CLAUDE.md`.
-- Los planes de producto van en `docs/product/`.
-- La arquitectura viva va en `docs/architecture/`.
-- Las decisiones visuales van en `docs/design/`.
-- Los diagnósticos y planes técnicos van en `docs/engineering/`.
-- La investigación de productos externos va en `docs/research/`.
-- Los documentos reemplazados pero útiles van en `docs/archive/`.
-- Al crear o mover un documento, este índice debe actualizarse.
+## Tests
+
+- [tests/e2e](../tests/e2e/README.md) — the dev-run regression probes (one per regressible
+  behavior, launched against isolated user data).
+
+## House rules
+
+- Everything in this repo is written in **English**.
+- The repo root keeps only `README.md` and `CLAUDE.md`.
+- Living architecture goes in `docs/architecture/`, visual decisions in `docs/design/`,
+  engineering diagnosis and plans in `docs/engineering/`, reusable probes in `tests/e2e/`.
+- Personal / unreleased material (e.g. launch-marketing drafts) lives in `docs/private/`,
+  which is gitignored — never commit it.
+- When a document moves, update this index.

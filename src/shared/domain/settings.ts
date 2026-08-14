@@ -288,7 +288,7 @@ export const DEFAULT_SETTINGS: PlanoSettings = {
     shellPath: '',
     fontFamily: '',
     fontSize: 0,
-    // 1.4 = the shipped pre-glass default (mirrors "Deska's airier rhythm") — the build the user
+    // 1.4 = the shipped pre-glass default — the row rhythm the user
     // verified as pixel-perfect. The v9 experiment at 1.0 packed rows so tight that CLI output
     // looked clipped/joined and the terminal read as "cut off" on the right; 1.4 restores the
     // comfortable row rhythm of the original. The Settings slider still caps manual values at 1.2
@@ -309,7 +309,7 @@ export const DEFAULT_SETTINGS: PlanoSettings = {
     // pressure. A safety valve — turn off to restore the original "every visited terminal stays
     // live forever" behaviour if a workspace ever feels wrong on return.
     autoSuspendIdle: true,
-    // The herdr-style guarantee: terminals live in a detached Agent Host, so closing PLANO never
+    // Terminals live in a detached Agent Host, so closing PLANO never
     // closes the agents you left open. Off = quitting kills everything (old behaviour).
     keepAgentsOnQuit: true,
   },

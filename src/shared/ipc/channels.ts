@@ -11,7 +11,7 @@ export const CH = {
   terminalAttach: 'terminal:attach', // re-bind a remounted panel to its still-running PTY (replays buffer)
   terminalDetach: 'terminal:detach', // panel left (space switch) — keep the PTY alive, buffer its output
   terminalListProcesses: 'terminal:listProcesses',
-  /** Re-discover the detached Agent Host's live sessions on launch (herdr-style restore: terminals
+  /** Re-discover the detached Agent Host's live sessions on launch (restore: terminals
    *  that survived the app closing reattach instead of respawning). */
   terminalRestore: 'terminal:restore', // renderer → main (invoke)
   terminalData: 'terminal:data', // main → renderer (event)

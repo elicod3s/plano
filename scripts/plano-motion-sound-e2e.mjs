@@ -223,7 +223,7 @@ ok('T6 xterm stays mounted across the drag', settleResult?.xtermSameNode === tru
 // neutralize the opacity transition — a backgrounded window freezes it mid-flight, so the
 // computed value would read between 0.75 and 1 while the state IS correct.
 await c.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 8, y: 8, modifiers: 0 }).catch(() => undefined)
-// The Deska dim is carried by a pointer-events-none OVERLAY (.terminal-dim-overlay); the shell
+// The dim is carried by a pointer-events-none OVERLAY (.terminal-dim-overlay); the shell
 // itself must stay at opacity 1 in BOTH states — opacity < 1 on the shell composites the xterm
 // canvas as a transparent layer and re-rasterizes the CLI text on every repaint while the mouse
 // moves (the crispness regression vs the pre-glass build). Assert the shell stays opaque.
@@ -242,7 +242,7 @@ const focusStyle = await c.evalJs(`(async () => {
   return { inactive, active, overlayInactive }
 })()`)
 // The overlay mounts via React only for a genuinely inactive panel (real canvas click — covered
-// by the motion suite's deska-focus); the manual attribute can't mount it, so only assert the
+// by the motion suite's canvas-focus); the manual attribute can't mount it, so only assert the
 // crispness guarantee here: the shell NEVER drops below opacity 1.
 ok('T6 terminal shell stays opaque (crisp canvas)', focusStyle?.inactive === '1' && focusStyle?.active === '1', JSON.stringify(focusStyle))
 

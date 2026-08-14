@@ -1,7 +1,7 @@
 /**
  * Command spec table (plan v5 A1) — the single source of truth for `plano help`,
  * `plano agent-context --json` (a machine-readable schema so agents can discover the surface,
- * the same trick as Orca's agent-context) and the usage errors in commands.ts.
+ * the same trick as agent-context) and the usage errors in commands.ts.
  */
 
 /**
@@ -197,7 +197,7 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     command: 'worktree create',
-    summary: 'Orca-style alias of spawn: boot an agent in a folder of this canvas',
+    summary: 'Alias of spawn: boot an agent in a folder of this canvas',
     usage: 'plano worktree create <folder> --agent <harness> [--prompt <text>] [--wait] [--json]',
     args: ['<folder>'],
     flags: [
@@ -273,7 +273,7 @@ export const COMMANDS: CommandSpec[] = [
   },
   {
     command: 'context',
-    summary: 'Another agent\'s full redacted chat transcript (bounded server-side, ~64 KiB) — read it like a conversation, as Orca\'s terminal read',
+    summary: 'Another agent\'s full redacted chat transcript (bounded server-side, ~64 KiB) — read it like a conversation, as a terminal read',
     usage: 'plano context <agentId> [--lines <n>] [--json]',
     args: ['<agentId>'],
     flags: [

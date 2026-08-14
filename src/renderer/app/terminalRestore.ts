@@ -1,5 +1,5 @@
 /**
- * Renderer-side restore of surviving terminal sessions (the herdr-style "agents never close"
+ * Renderer-side restore of surviving terminal sessions (the "agents never close"
  * feature). Terminals live in a detached Agent Host (main → daemon), so when PLANO closes they
  * keep running; on the next launch this module re-discovers them BEFORE workspace panels mount and
  * seeds the terminal store, so `TerminalEngine.getOrCreate` finds an existing runtime entry and

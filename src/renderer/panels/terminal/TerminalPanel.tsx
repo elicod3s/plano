@@ -97,7 +97,7 @@ export function TerminalPanel({ panel }: { panel: Panel }) {
     (props.activeTabId && tabs.some((t) => t.id === props.activeTabId) ? props.activeTabId : undefined) ??
     tabs[0].id
 
-  // Deska-parity focus: narrow store subscription that runs the engine's safe xterm focus when this
+  // Focus: narrow store subscription that runs the engine's safe xterm focus when this
   // panel becomes the focused canvas member, when the epoch bumps while focused (refocus after an
   // overlay stole DOM focus), or when the active tab changes while focused. No React state involved,
   // so focusing this terminal never re-renders other terminal bodies.

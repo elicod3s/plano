@@ -6,7 +6,7 @@
  * poll the roster to guess who was alive, and echo sentinels into its own transcript to fake an
  * acknowledgement. This is the layer above the wire.
  *
- * The model is Orca's, because the separation is the whole design:
+ * The model's separation is the whole design:
  *
  *   Run       a durable namespace and the coordinator's inbox. It NEVER schedules or places
  *             workers — agents choose placement, the daemon records and guarantees.
@@ -72,7 +72,7 @@ interface Snapshot {
   dispatches: Dispatch[]
 }
 
-/** Three consecutive failures on one task stop the loop — Orca's circuit breaker. */
+/** Three consecutive failures on one task stop the loop — the circuit breaker. */
 export const MAX_TASK_FAILURES = 3
 
 const EMPTY: Snapshot = { runs: [], tasks: [], dispatches: [] }

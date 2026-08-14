@@ -75,7 +75,7 @@ export function usePanZoom(ref: RefObject<HTMLElement>): void {
         const anchor = { x: e.clientX - rect.left, y: e.clientY - rect.top }
         const sens = useSettingsStore.getState().settings.canvas.zoomSensitivity
         viewportController.begin('wheel-zoom')
-        // Deska's wheel-zoom math (copied verbatim): clamp a single notch to ±24 so one big
+        // Wheel-zoom math: clamp a single notch to ±24 so one big
         // mouse-wheel notch can't jump the view, then a multiplicative exp curve (scale 0.01) so a
         // trackpad's small per-event deltas read as a smooth continuous zoom. Anchor-preserving
         // zoomAt (the panel under the cursor stays put) is unchanged — only the curve changed.

@@ -2,7 +2,7 @@
  * PtyManager — the main-process owner of terminal lifecycle + the renderer bridge.
  *
  * The actual PTY processes live in the detached Agent Host (see AgentHostClient + daemon/index.ts),
- * so they survive the app quitting — this is the herdr-style guarantee that agents never close. This
+ * so they survive the app quitting — the guarantee that agents never close. This
  * class: creates sessions via the host, forwards write/resize/kill, bridges host events (data/exit)
  * to the renderer, and re-registers agent detection / history / dev-url / agent-session wiring
  * whenever a session (re)appears — both on create and on restore (an app relaunch re-attaching to
@@ -531,7 +531,7 @@ export class PtyManager {
 
   /**
    * App teardown. With "keep agents running" (the default) the host connection drops and every
-   * session keeps running in the background — exactly like herdr detach. With it off, the host is
+   * session keeps running in the background — a full detach. With it off, the host is
    * told to kill everything (the old behavior).
    */
   shutdown(keepAgents: boolean): void {

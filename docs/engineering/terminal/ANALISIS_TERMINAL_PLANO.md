@@ -1,64 +1,64 @@
-# Análisis de la Terminal en PLANO
+# Terminal Analysis in PLANO
 
-## 1. Visión General
+## 1. Overview
 
-La terminal de PLANO es una implementación moderna basada en tecnologías web que proporciona terminales completas dentro de la aplicación de escritorio. Se diseñó con referencia a Deska (otra aplicación similar) y utiliza un enfoque de "registro persistente" para manejar las sesiones de terminal.
+PLANO's terminal is a modern, web-based implementation that provides full terminals inside the desktop app. It uses a "persistent registry" approach to manage terminal sessions.
 
-## 2. Tecnologías Clave
+## 2. Key Technologies
 
-### Dependencias Principales:
-- **@xterm/xterm** (v5.5.0): Terminal en el navegador con soporte WebGL
-- **@xterm/addon-fit**: Ajuste automático de tamaño
-- **@xterm/addon-webgl** (v0.18.0): Renderizado acelerado por GPU
-- **@xterm/addon-web-links**: Enlaces clickeables en terminal
-- **@xterm/addon-search**: Búsqueda en scrollback
-- **@xterm/addon-unicode11**: Soporte Unicode 11
-- **@xterm/addon-canvas** (v0.7.0): Alternativa Canvas 2D
-- **node-pty** (v1.0.0): Creación de pseudo-terminales nativos (ConPTY en Windows)
+### Main Dependencies:
+- **@xterm/xterm** (v5.5.0): Browser terminal with WebGL support
+- **@xterm/addon-fit**: Automatic size fitting
+- **@xterm/addon-webgl** (v0.18.0): GPU-accelerated rendering
+- **@xterm/addon-web-links**: Clickable links in the terminal
+- **@xterm/addon-search**: Scrollback search
+- **@xterm/addon-unicode11**: Unicode 11 support
+- **@xterm/addon-canvas** (v0.7.0): Canvas 2D fallback
+- **node-pty** (v1.0.0): Native pseudo-terminal creation (ConPTY on Windows)
 
-### Stack Arquitectónico:
+### Architectural Stack:
 ```
 Electron 33 + electron-vite
 React 18 + TypeScript + Tailwind CSS
-zustand + immer (gestión de estado)
+zustand + immer (state management)
 ```
 
-## 3. Funcionamiento de la Terminal
+## 3. How the Terminal Works
 
-### Estructura del Panel de Terminal:
+### Terminal Panel Structure:
 ```
 TerminalPanel
-├─ TerminalStatusStrip (barra superior)
-├─ TerminalSearchBar (aparece con Cmd+F/Ctrl+F)
-├─ .deska-terminal-canvas (contendor principal)
-│  └─ renderBoxRef (div absoluto con transformación de escala)
-│     └─ xterm.element (montado por terminalRegistry)
-└─ TerminalActionBar (barra inferior)
+├─ TerminalStatusStrip (top bar)
+├─ TerminalSearchBar (appears with Cmd+F/Ctrl+F)
+├─ container div (main container)
+│  └─ renderBoxRef (absolute div with scale transform)
+│     └─ xterm element (mounted by terminalRegistry)
+└─ TerminalActionBar (bottom bar)
 ```
 
-### Ciclo de Vida Persistente:
-La aplicación utiliza un sistema de **terminalRegistry** que mantiene las instancias de terminal vivas incluso cuando el componente React se desmonta. Esto permite:
-- Reutilizar terminales existentes
-- Mantener procesos PTY activos
-- Reanudar sesiones entre navegaciones
+### Persistent Lifecycle:
+The app uses a **terminalRegistry** that keeps terminal instances alive even when the React component unmounts. This allows:
+- Reusing existing terminals
+- Keeping PTY processes active
+- Resuming sessions across navigations
 
-### Manejo de Escala:
-El sistema utiliza un enfoque de "render box" virtual que se escala según el zoom del canvas:
-- El `renderBoxRef` tiene dimensiones virtuales (`100 * renderScale %`)
-- Se contra-escala con `scale(1 / renderScale)`
-- Esto permite renderizar glifos en alta resolución antes de aplicar el zoom global
+### Scale Handling:
+The system uses a virtual "render box" approach that scales according to the canvas zoom:
+- The `renderBoxRef` has virtual dimensions (`100 * renderScale %`)
+- It is counter-scaled with `scale(1 / renderScale)`
+- This renders glyphs at high resolution before applying the global zoom
 
-### Ajuste de Tamaño:
-La implementación utiliza `FitAddon.proposeDimensions()` con lógica especial:
-- Verifica que las dimensiones propuestas sean válidas
-- Aplica mínimos de 1 fila/columna
-- Maneja desbordamiento vertical de subpíxeles
-- Llama a `terminal.resize()` solo cuando hay cambios reales
+### Size Fitting:
+The implementation uses `FitAddon.proposeDimensions()` with special logic:
+- Verifies that the proposed dimensions are valid
+- Applies a minimum of 1 row/column
+- Handles sub-pixel vertical overflow
+- Calls `terminal.resize()` only when there are real changes
 
-## 4. Modo Agente para AI Coding CLIs
+## 4. Agent Mode for AI Coding CLIs
 
-### Detección Automática:
-PLANO detecta automáticamente cuando se ejecutan AI coding CLIs como:
+### Automatic Detection:
+PLANO automatically detects when AI coding CLIs are running, such as:
 - Claude Code
 - Codex (OpenAI)
 - Kiro CLI
@@ -67,68 +67,66 @@ PLANO detecta automáticamente cuando se ejecutan AI coding CLIs como:
 - Cursor
 - Opencode
 
-### Sistema de Detección:
-- **Process-tree matching**: Análisis de árbol de procesos
-- **Output-heuristic**: Detección por patrones de salida
-- **Fused confidence**: Combinación de múltiples fuentes (0.8-0.95)
+### Detection System:
+- **Process-tree matching**: Process tree analysis
+- **Output-heuristic**: Detection by output patterns
+- **Fused confidence**: Combination of multiple sources (0.8-0.95)
 
-### Características del Modo Agente:
-1. **Sin cambio de color**: Mantiene el diseño monocromático "Monolith Draft"
-2. **Cambios visuales sutiles**: Movimiento y peso visual diferenciado
-3. **Acordes de marca**: Colores específicos por agente (excepción única al diseño monocromático)
-4. **Iconos específicos**: Iconos de lucide-react por tipo de agente
+### Agent Mode Features:
+1. **No color change**: Keeps the monochrome "Monolith Draft" design
+2. **Subtle visual changes**: Differentiated motion and visual weight
+3. **Brand chords**: Agent-specific colors (the single exception to the monochrome design)
+4. **Specific icons**: lucide-react icons per agent type
 
-### Reanudación de Sesiones:
-El sistema guarda referencias de sesiones (`AgentSessionRef`) que incluyen:
-- Tipo de agente (`ResumableAgent`)
-- ID de sesión (UUID)
-- Directorio de trabajo (cwd)
+### Session Resumption:
+The system stores session references (`AgentSessionRef`) that include:
+- Agent type (`ResumableAgent`)
+- Session ID (UUID)
+- Working directory (cwd)
 
-**Guardias de seguridad:**
-- Validación del directorio de trabajo (resume es scope por proyecto)
-- Verificación de existencia de sesión en disco
-- Inyección protegida (regex estricta para IDs)
+**Security guards:**
+- Working-directory validation (resume is scoped per project)
+- Session existence verification on disk
+- Protected injection (strict regex for IDs)
 
-## 5. Diferencias con Deska (Referencia)
+## 5. Design decisions
 
-Según el análisis en `DESKA_TERMINAL_REFERENCE.md`:
+| Aspect | PLANO |
+|--------|-------|
+| **Lifecycle** | Two approaches in PLANO: persistent registry per panel, and per-panel hook + sessions store |
+| **DOM mounting** | xterm in a direct React container |
+| **Scale** | CSS transform of the world layer |
+| **Size fitting** | Several calculations and verifications |
+| **Size observation** | Container/viewport via `ResizeObserver` |
+| **Scrollbar** | Global rule `scrollbar-gutter: stable` |
 
-| Aspecto | Deska | PLANO |
-|---------|-------|-------|
-| **Ciclo de vida** | Registro persistente por panel | Store de sesiones + hook por panel |
-| **Montaje DOM** | xterm en render box absoluto | xterm en contenedor React directo |
-| **Escala** | Render box virtual + contra-escalado | Transformación CSS del world layer |
-| **Ajuste de tamaño** | `FitAddon.proposeDimensions()` + un resize | Varios cálculos y verificaciones |
-| **Observación de tamaño** | Render box, umbral 0.5px + debounce | Contenedor/viewport via `ResizeObserver` |
-| **Scrollbar** | Sin gutter especial | Regla global `scrollbar-gutter: stable` |
-
-## 6. Consideraciones de Seguridad
+## 6. Security Considerations
 
 - `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`
-- Validación zod de todos los payloads IPC
-- Contenido web embebido en sesión aislada
-- Guardias de inyección para comandos de reanudación
+- zod validation of all IPC payloads
+- Embedded web content in an isolated session
+- Injection guards for resume commands
 
-## 7. Configuración para Windows
+## 7. Windows Setup
 
-### Requisitos:
-- Windows 10 1809+ (para ConPTY)
-- Desktop development with C++ (VS Build Tools) para compilar node-pty
+### Requirements:
+- Windows 10 1809+ (for ConPTY)
+- Desktop development with C++ (VS Build Tools) to compile node-pty
 
-### Comandos de Configuración:
+### Setup Commands:
 ```bash
 npm install
-npm run rebuild  # compila node-pty contra ABI de Electron
-npm run dev      # inicia PLANO con HMR
+npm run rebuild  # compiles node-pty against Electron's ABI
+npm run dev      # starts PLANO with HMR
 ```
 
-## 8. Conclusión
+## 8. Conclusion
 
-La terminal de PLANO representa una implementación sofisticada que combina:
-- Renderizado web moderno con aceleración GPU
-- Gestión persistente de sesiones
-- Detección inteligente de AI coding CLIs
-- Reanudación automática de conversaciones
-- Diseño monocromático con excepciones controladas
+PLANO's terminal is a sophisticated implementation that combines:
+- Modern web rendering with GPU acceleration
+- Persistent session management
+- Smart detection of AI coding CLIs
+- Automatic conversation resumption
+- Monochrome design with controlled exceptions
 
-El sistema está bien pensado para desarrolladores que trabajan con múltiples herramientas de IA, proporcionando una experiencia fluida y sin interrupciones entre sesiones de trabajo.
+The system is well thought out for developers who work with multiple AI tools, providing a smooth, uninterrupted experience between work sessions.

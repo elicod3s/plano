@@ -4,7 +4,7 @@
  * Every CLI that can run a command on its own lifecycle events is asked to tell us when a turn
  * STARTS, when it ENDS and when it is BLOCKED waiting for the user. That is the difference
  * between "the output went quiet for 4 seconds" (a guess that fires mid-turn on any CLI that
- * pauses for an API call) and "the agent said it finished". The same approach Orca takes with its
+ * pauses for an API call) and "the agent said it finished". The same approach managed
  * managed hooks — we have one advantage: every PTY already carries `PLANO_AGENT_ID`, so a hook
  * fired by a CLI inside a PLANO terminal attributes itself with no pane bookkeeping.
  *
@@ -95,7 +95,7 @@ function hookScriptPath(userData: string): string {
  * Claude Code runs hooks through a POSIX shell — on Windows too (git-bash). `cmd /c "<path>"`
  * therefore does NOT reach cmd as written: the shell strips the quotes, cmd starts INTERACTIVE,
  * prints its banner and swallows the hook payload from stdin as if the user had typed it. The
- * fix is the shape Orca uses: invoke the script directly with forward slashes, guard on the file
+ * fix: invoke the script directly with forward slashes, guard on the file
  * existing, and drain stdin when it does not — a hook that leaves stdin unread can stall the CLI.
  */
 function hookCommand(userData: string, event: AgentHookEvent): string {

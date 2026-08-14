@@ -5,7 +5,7 @@ import { paneIds } from '@shared/domain/dock'
 import type { GroupProps, TerminalProps } from '@shared/domain/panel'
 
 /**
- * Transient canvas focus (Deska parity). Exactly ONE logical top-level "surface" is focused at a
+ * Transient canvas focus. Exactly ONE logical top-level "surface" is focused at a
  * time: a standalone panel focuses itself; a dock group focuses as ONE outer surface with the
  * clicked member pane recorded for keyboard routing. Ephemeral UI state ONLY — never persisted,
  * never autosaved, never part of usePanelStore / useSpacesStore / the workspace document (App's

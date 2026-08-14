@@ -7,7 +7,7 @@ intent. Anything marked *unverified* has NOT been proven working, whatever the c
 
 ## 0. The root cause, found — PLANO had no way to RECEIVE
 
-Everything below §1 describes symptoms of one design difference from Orca.
+Everything below §1 describes symptoms of one design gap: PLANO had no receive path.
 
 **PLANO delivered by typing into the peer's terminal.** That is the only channel it had, so every
 message depended on correctly reading a TUI we do not own: is the composer open, is it mid-turn, is
@@ -16,11 +16,9 @@ an idle transition that a booting or long-running agent may never make. `send` e
 outright — `not-agent: target is a plain terminal` — for any peer whose harness was not yet
 detected, which is precisely what a freshly spawned agent looks like for its first minutes.
 
-**Orca never does this.** In Orca a worker receives by *calling* `orchestration check`, and a
-follow-up to a worker is, in its own words, *"structured inbox mail, not prompt injection"*. The
-worker blocks inside `check --wait`, so the message arrives as the output of a command it is
-already running — no composer to detect, no paste to confirm, no Enter to prove. Typing is used
-once, to wake an idle worker with its initial task.
+A worker receives by *calling* `check --wait` and blocking, so the message arrives as the output of
+a command it is already running — no composer to detect, no paste to confirm, no Enter to prove.
+Typing is used once, to wake an idle worker with its initial task.
 
 PLANO already had `check` (v7) with replaying delivery batches. What it did not have was the wire:
 **`send` never woke a `check --wait` waiter.** An agent told to "wait for messages" had no mechanism
@@ -41,7 +39,7 @@ refuses) in `.plano-tests/mesh-cli-e2e.mjs`, with C1–C17 still green.
 
 ### And the reason it had never worked with a real agent
 
-`.plano-tests/mesh-real-omp.mjs` runs the user's exact scenario against a **real OMP agent**:
+The user's exact scenario was reproduced against a **real OMP agent** via the mesh e2e probe:
 `plano spawn omp . --prompt "do nothing, wait for messages, answer when greeted"`, then a peer
 greets it. The first run failed in a way no amount of mesh work would have fixed:
 
@@ -145,7 +143,7 @@ Treat them as claims until the next real session.
 | Spawn prompt parked in the mailbox | `send` refuses an `unknown` harness, so the prompt was dropped with only a log line and the newborn never greeted anyone | Unverified |
 | Composer-live outranks `busy` | A mid-turn agent with a live input box now receives immediately instead of waiting for idle | Unverified |
 | `plano help` no longer crashes | Odd-length flat array → `undefined.padEnd`; `watch`/`close` were also invisible | Proven |
-| Spawn folder resolved | `plano spawn omp animal-cases` put the worker in `C:\Users\<name>` instead of the folder | Unverified |
+| Spawn folder resolved | `plano spawn omp animal-cases` put the worker in `%USERPROFILE%` instead of the folder | Unverified |
 | Fan-out React crash (#300) | A hook called inside a click handler took the whole renderer down | Proven present in the shipped 0.2.22 bundle; fix unverified live |
 
 **None of this is published.** The version users run (0.2.22) still contains the fan-out crash and

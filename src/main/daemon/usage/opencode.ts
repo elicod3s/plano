@@ -2,7 +2,7 @@
  * opencode-go adapter — OpenCode Go subscription usage via opencode.ai's SST/TanStack
  * server-fn protocol (NOT a REST path; `https://opencode.ai/api/usage` was a guess and is gone).
  *
- * Protocol (extracted from Orca's shipped main bundle — its own working implementation — and
+ * Protocol (extracted from the provider's shipped main bundle — its own working implementation — and
  * live-tested on this machine):
  *   1. Workspaces: GET https://opencode.ai/_server?id=<WORKSPACES_SERVER_ID> with
  *      X-Server-Id / X-Server-Instance headers → a script whose text contains `id: "wrk_…"`.
@@ -30,7 +30,7 @@ import type { ProviderUsage, UsageWindow } from '@shared/domain/usage'
 
 const BASE_URL = (process.env.OPENCODE_BASE_URL?.trim() || 'https://opencode.ai').replace(/\/+$/, '')
 const SERVER_URL = `${BASE_URL}/_server`
-/** The server-fn id Orca calls for the workspace list (stable across releases). */
+/** The server-fn id the provider calls for the workspace list (stable across releases). */
 const WORKSPACES_SERVER_ID = 'def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f'
 const TIMEOUT_MS = 15_000
 
@@ -77,7 +77,7 @@ export function parseWorkspaceIds(text: string): string[] {
   return ids
 }
 
-/** First top-level numeric field of a `{…}` block (depth-1 aware, like Orca). */
+/** First top-level numeric field of a `{…}` block (depth-1 aware). */
 function extractTopLevelNumber(objText: string, fieldName: string): number | null {
   const fieldRegex = new RegExp(`\\b${fieldName}\\b\\s*:\\s*(-?[0-9]+(?:\\.[0-9]+)?)`)
   let depth = 0
@@ -103,7 +103,7 @@ function extractTopLevelNumber(objText: string, fieldName: string): number | nul
   return null
 }
 
-/** Find `key: {…}` with top-level `usagePercent` + `resetInSec` (mirrors Orca's parser). */
+/** Find `key: {…}` with top-level `usagePercent` + `resetInSec`. */
 function extractUsageBlock(text: string, key: string): string | null {
   const keyRegex = new RegExp(`\\b${key}\\b\\s*:`, 'g')
   let keyMatch: RegExpExecArray | null

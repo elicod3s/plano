@@ -1,5 +1,5 @@
 /**
- * The CLI's HTTP JSON-RPC client (plan v5 A1) — the exact shape of Orca's RuntimeClient: a
+ * The CLI's HTTP JSON-RPC client (plan v5 A1): a
  * thin, stateless POST per command to the daemon's mesh endpoint. No app state, no PTYs.
  * Identity comes from the terminal environment: PLANO_MESH_TOKEN + PLANO_MESH_URL.
  */

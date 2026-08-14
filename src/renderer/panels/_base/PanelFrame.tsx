@@ -590,7 +590,7 @@ function PanelFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number }) {
       style={anchorStyle}
       onPointerDownCapture={(e) => {
         bringToFront(panel.id)
-        // Deska parity: every primary pointer-down on the surface is a focus action — refocusing
+        // Every primary pointer-down on the surface is a focus action — refocusing
         // an ALREADY-focused panel (e.g. after an overlay/palette stole DOM focus) still bumps the
         // epoch. Header buttons/inputs (.app-no-drag) are excluded so close/lock/title-edit never
         // refocus; the unfocused shield consumes the event so this never reaches the content.
@@ -848,7 +848,7 @@ function ResizeHandles({ onBegin }: { onBegin: (dir: ResizeDir) => (e: React.Poi
 }
 
 /**
- * Deska's transparent unfocused input shield (canvas-node-view overlay). Absolutely positioned by
+ * Transparent unfocused input shield (canvas-node overlay). Absolutely positioned by
  * its parent over a surface's CONTENT area; it is the mechanism that makes the first click on an
  * unfocused surface a pure focus action — capture alone does NOT prevent descendant activation,
  * but a sibling layer does: the pointer-down hits the shield, never the terminal/editor/browser
@@ -867,7 +867,7 @@ function ResizeHandles({ onBegin }: { onBegin: (dir: ResizeDir) => (e: React.Poi
  *   - header drag and the z-20 resize bands sit ABOVE the shield (z-10) and stay usable;
  *   - an OS file drag hovering the surface disables the shield until the drag leaves/drops, so
  *     supported file/drop flows reach the content (and the canvas drop handler) as before;
- *   - aria-hidden, never focusable, visually transparent with Deska's 150ms ease transition.
+ *   - aria-hidden, never focusable, visually transparent with a 150ms ease transition.
  *
  * A DOM shield reliably intercepts Electron `<webview>` guests too (the guest composites INSIDE the
  * webview element box, which sits below this layer). If a future Electron version regresses that

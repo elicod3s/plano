@@ -1,5 +1,5 @@
 /**
- * `plano` — PLANO mesh CLI entry (plan v5 A1). A thin JSON-RPC client exactly like Orca's:
+ * `plano` — PLANO mesh CLI entry (plan v5 A1). A thin JSON-RPC client:
  * parse args → dispatch one command → print. No app state, no PTYs; every command is one POST
  * to the daemon's mesh endpoint, attributed by PLANO_MESH_TOKEN.
  *

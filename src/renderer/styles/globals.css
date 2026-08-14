@@ -166,7 +166,7 @@
      any overlay that must escape a panel is portaled to the chrome (see TreeContextMenu). */
   contain: layout paint style;
 }
-/* Inactive-surface dimming (Deska focus parity): the focused top-level surface — or any hovered
+/* Inactive-surface dimming: the focused top-level surface — or any hovered
    one — renders at full opacity; every other floating surface rests at 0.75 with a 180ms
    var(--ease-settle) transition. Opacity is applied INLINE by the surface frames (PanelFrame /
    DockGroupFrame) from the transient canvas-focus store plus local hover state — never from

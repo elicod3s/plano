@@ -1,5 +1,5 @@
 // REAL-AGENT E2E: launch Claude Code inside a PLANO terminal, quit the app, verify the agent
-// process survives AND is still detected on relaunch (the exact herdr-style user scenario).
+// process survives AND is still detected on relaunch (the exact agents-never-close user scenario).
 import { spawn } from 'node:child_process'
 import http from 'node:http'
 import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs'

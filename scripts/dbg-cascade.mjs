@@ -5,7 +5,7 @@ import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const info = JSON.parse(readFileSync('C:/Users/Administrator/AppData/Roaming/PLANO/agent-host.json', 'utf8'))
+const info = JSON.parse(readFileSync(join(process.env.APPDATA, 'PLANO/agent-host.json'), 'utf8'))
 const base = `http://127.0.0.1:${info.webPort}`
 async function getJson(p, port) { return new Promise((res, rej) => { const r = http.get(`http://127.0.0.1:${port}${p}`, (x) => { let d=''; x.on('data',c=>d+=c); x.on('end',()=>{ try{res(JSON.parse(d))}catch{rej(new Error('bad'))} }) }); r.on('error', rej) }) }
 const targets = await getJson('/json', 9701)

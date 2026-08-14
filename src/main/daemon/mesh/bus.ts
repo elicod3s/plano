@@ -58,7 +58,7 @@ const WATCH_MAX_TIMEOUT_MS = 60 * 60_000
 /** v7 B3: coordinator rolling wait — generous, because supervised work runs for tens of minutes. */
 const CHECK_DEFAULT_TIMEOUT_MS = 15 * 60_000
 const CHECK_MAX_TIMEOUT_MS = 60 * 60_000
-/** One Delivery hands out at most this many messages, like Orca's 50. */
+/** One Delivery hands out at most this many messages. */
 const CHECK_BATCH_MAX = 50
 const BRACKETED_PASTE_BEGIN = '\x1b[200~'
 const BRACKETED_PASTE_END = '\x1b[201~'
@@ -216,8 +216,8 @@ export class MeshBus {
       }) => { ok: boolean; error?: string; ptyIds?: string[] })
     | null = null
   /**
-   * Close a terminal. `panel` closes every terminal in the target's panel (Orca's `--tab`), not
-   * just the one session (Orca's default). Returns the pty ids that were actually torn down.
+   * Close a terminal. `panel` closes every terminal in the target's panel, not
+   * just the one session. Returns the pty ids that were actually torn down.
    */
   onClose: ((req: { ptyId: string; panel: boolean }) => { ok: boolean; error?: string; closed?: string[] }) | null = null
   /** Event fan-out to the desktop app (mesh-link / mesh-msg frames). */
@@ -1320,11 +1320,11 @@ export class MeshBus {
     if (!resolved.ok) return resolved.result
     const target = resolved.agent
     to = target.id
-    // v8 — copied from Orca: mail is DURABLE first and typed second.
+    // v8 — mail is DURABLE first and typed second.
     //
     // `send` used to refuse outright when the target's harness was still `unknown` ("target is a
     // plain terminal"). A booting agent IS that for its first minutes, so a message to a newborn
-    // was rejected rather than kept. Orca never refuses a send: the message is recorded and the
+    // was rejected rather than kept. A send is never refused: the message is recorded and the
     // peer's own `check` consumes it — typing into the TUI is a WAKE-UP for an idle agent, not the
     // delivery channel. A message therefore cannot be lost by a screen that was not ready.
     // v6 A1: a busy target QUEUES instead of refusing. Refusing made "mid-turn" the caller's
@@ -2613,7 +2613,7 @@ export class MeshBus {
    * Close a terminal — the counterpart to spawnAgent, which agents had no way to undo: they could
    * create workers all day and never tidy up after one.
    *
-   * Shaped after Orca's `terminal close`: closing ONE session is the default, and `--panel` (its
+   * Shaped after the terminal close contract: closing ONE session is the default, and `--panel` (its
    * `--tab`) takes the whole panel down. Closing yourself is allowed, because "I am done, clean me
    * up" is a legitimate last act — but the answer is sent BEFORE the kill, since the CLI making
    * this call is a child of the very PTY being torn down and would otherwise die mid-sentence.

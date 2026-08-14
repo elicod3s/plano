@@ -1,4 +1,4 @@
-// AISLATED motion E2E (no sound, no agents/pi): Deska-style terminal drag ghost.
+// ISOLATED motion E2E (no sound, no agents/pi): terminal drag ghost.
 //   Each scenario returns a structured result { name, pass, observed, expected, error? }.
 //   Runs against the seeded workspace at zoom 0.90 / 1.00 / 1.25, plus cancel paths,
 //   focus dimming, a snap-zone drop, and a 56-panel perf probe.
@@ -9,10 +9,10 @@
 //   drag@0.90 / 1.00 / 1.25   ghost follows, source hidden + frozen, xterm untouched, commit
 //   escape-cancel             Escape during drag: ghost removed, source restored, rect unchanged
 //   pointercancel             pointercancel during drag: same as escape
-//   focus-states              Deska focus: unfocused 0.75 (shield active), hover 1, away 0.75, click → 1
+//   focus-states              focus dimming: unfocused 0.75 (shield active), hover 1, away 0.75, click → 1
 //   snap/dock-right-zone      right-border drag: zone preview visible, drop tiles to right half
 //   perf-56-panels            drag inside an 8x7 grid, p95 of rAF frame time
-//   deska-focus               fresh 0.75 → canvas click stays 0.75 → terminal click 1
+//   canvas-focus              fresh 0.75 → canvas click stays 0.75 → terminal click 1
 //
 // Background-window notes (Chromium throttles rAF/timers to ~1s):
 //   - moves are separated by `await requestAnimationFrame` (never synchronous bursts)
@@ -514,7 +514,7 @@ async function scenarioFocusStates(c) {
   const fg = await ensureForeground(c)
   if (!fg?.ok) return recordSkip('focus-states', 'window could not be foregrounded (rAF throttled)')
   const shellSel = `document.querySelector('[data-panel-type="terminal"]')`
-  // Deska focus semantics: unfocused + not hovered → 0.75; focused OR hovered → 1. The
+  // Focus semantics: unfocused + not hovered → 0.75; focused OR hovered → 1. The
   // transparent shield sits over unfocused surfaces and consumes the first primary click.
   await c.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 8, y: 8, modifiers: 0 })
   await c.evalJs(`(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); 'ok' })()`)
@@ -566,12 +566,12 @@ async function scenarioFocusStates(c) {
     { k: 'hoverOpaque', pass: hover?.opacity === '1', expected: 'hover restores shell to 1', observed: JSON.stringify(hover) },
     { k: 'awayDimmed', pass: away?.opacity === '0.75', expected: 'leave → back to 0.75', observed: JSON.stringify(away) },
     { k: 'clickFocusOpaque', pass: focused?.opacity === '1' && focused?.shield === 'inert', expected: 'focused shell 1, shield inert', observed: JSON.stringify(focused) },
-  ], observed, 'Deska focus: 0.75 unfocused (shield active), 1 on hover/focus (shield inert)')
+  ], observed, 'Focus: 0.75 unfocused (shield active), 1 on hover/focus (shield inert)')
 }
 
-async function scenarioDeskaFocus(c) {
+async function scenarioCanvasFocus(c) {
   const fg = await ensureForeground(c)
-  if (!fg?.ok) return recordSkip('deska-focus', 'window could not be foregrounded (rAF throttled)')
+  if (!fg?.ok) return recordSkip('canvas-focus', 'window could not be foregrounded (rAF throttled)')
   const r = await c.evalJs(`(async () => {
     const raf = window.__e2e.raf
     const shell = document.querySelector('[data-panel-type="terminal"]')
@@ -584,7 +584,7 @@ async function scenarioDeskaFocus(c) {
       el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: x, clientY: y, pointerId: 21, button: 0, buttons: 1 }))
       el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, clientX: x, clientY: y, pointerId: 21, button: 0, buttons: 0 }))
     }
-    // Deska focus: fresh (unfocused) 0.75; empty-canvas click clears focus (stays 0.75);
+    // Focus: fresh (unfocused) 0.75; empty-canvas click clears focus (stays 0.75);
     // clicking the terminal header focuses it (opacity 1, shield inert).
     const read = async (expect) => {
       shell.style.transition = 'none'
@@ -617,13 +617,13 @@ async function scenarioDeskaFocus(c) {
     const afterClick = await read('1')
     return { initial, afterCanvas, afterClick }
   })()`)
-  if (r?.__exc) return record('deska-focus', false, {}, 'Deska focus: 0.75 unfocused, 1 after terminal click', 'page error: ' + r.__exc)
-  if (r?.error) return record('deska-focus', false, r, 'Deska focus: 0.75 unfocused, 1 after terminal click', r.error)
-  recordChecks('deska-focus', [
+  if (r?.__exc) return record('canvas-focus', false, {}, 'Focus: 0.75 unfocused, 1 after terminal click', 'page error: ' + r.__exc)
+  if (r?.error) return record('canvas-focus', false, r, 'Focus: 0.75 unfocused, 1 after terminal click', r.error)
+  recordChecks('canvas-focus', [
     { k: 'freshDimmed', pass: r.initial?.pass === true, expected: 'shell 0.75 (no focus yet), shield active', observed: JSON.stringify(r.initial) },
     { k: 'canvasClickKeepsDimmed', pass: r.afterCanvas?.pass === true, expected: 'shell 0.75 (focus cleared), shield active', observed: JSON.stringify(r.afterCanvas) },
     { k: 'terminalClickFocuses', pass: r.afterClick?.pass === true, expected: 'shell 1 (focused), shield inert', observed: JSON.stringify(r.afterClick) },
-  ], r, 'Deska focus semantics: unfocused 0.75, terminal click focuses to 1')
+  ], r, 'Focus semantics: unfocused 0.75, terminal click focuses to 1')
 }
 
 /**
@@ -1120,8 +1120,8 @@ async function main() {
       await scenarioPointerCancel(c1)
       say('→ focus-states')
       await scenarioFocusStates(c1)
-      say('→ deska-focus')
-      await scenarioDeskaFocus(c1)
+      say('→ canvas-focus')
+      await scenarioCanvasFocus(c1)
       say('→ snap')
       await scenarioSnap(c1)
     }

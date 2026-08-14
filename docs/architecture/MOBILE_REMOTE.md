@@ -1,188 +1,188 @@
-# PLANO Mobile & Remote — arquitectura, flujo y cómo subir cambios
+# PLANO Mobile & Remote — architecture, flow, and how to ship changes
 
-> Documento vivo: describe EXACTAMENTE cómo funciona el sistema de terminales persistentes
-> (estilo herdr), la web app móvil, el acceso remoto y — lo más importante — **cómo empaquetar,
-> instalar y subir un cambio en minutos sin romper nada**. Léelo completo antes de tocar estos
-> módulos, y actualízalo cuando cambie algo.
+> Living document: describes EXACTLY how the persistent-terminals (detached-host) system works,
+> the mobile web app, remote access and — most importantly — **how to package, install and ship
+> a change in minutes without breaking anything**. Read it completely before touching these
+> modules, and update it when something changes.
 
 ---
 
-## 1. El modelo mental (3 procesos)
+## 1. The mental model (3 processes)
 
 ```
-CELULAR (web app PWA)          PC — PLANO
+PHONE (web app PWA)          PC — PLANO
 ┌──────────────────┐           ┌───────────────────────────────────────┐
-│ navegador móvil  │           │  PLANO.exe (Electron)                 │
+│ mobile browser   │           │  PLANO.exe (Electron)                 │
 │ (web-dist)       │           │  ├─ renderer (canvas, UI)             │
 │                   │  HTTP+WS  │  ├─ main (services, IPC, detection)  │
-│  ⇄── LAN/remoto ──┼──────────┼─►└─ daemon "Agent Host" (proceso      │
-└──────────────────┘   token/   │     hijo DETACHED, ELECTRON_RUN_AS_  │
-                       subred   │     NODE=1, sobrevive al cierre)     │
-                                │        └─ dueño real de TODOS los    │
-                                │           PTYs/agentes               │
+│  ⇄── LAN/remote ──┼──────────┼─►└─ daemon "Agent Host" (DETACHED     │
+└──────────────────┘   token/   │     child, ELECTRON_RUN_AS_NODE=1,   │
+                       subnet   │     survives app close)               │
+                                │        └─ real owner of ALL PTYs/    │
+                                │           agents                     │
                                 └───────────────────────────────────────┘
 ```
 
-- **El daemon es el dueño de los terminales** (no el UI). Cierra PLANO → el daemon sigue vivo
-  con tus agentes corriendo (la feature herdr). Reabre → se reconecta y re-engancha las mismas
-  sesiones (mismo PID, scrollback intacto, sin `--resume`).
-- **El celular habla con el daemon** (no con el UI): ver/crear/hablar/matar agentes, terminal en
-  vivo vía xterm, incluso con PLANO cerrado.
+- **The daemon owns the terminals** (not the UI). Close PLANO → the daemon stays alive with your
+  agents running (the agents-never-close feature). Reopen → it reconnects and re-attaches the same
+  sessions (same PID, scrollback intact, no `--resume`).
+- **The phone talks to the daemon** (not the UI): view/create/talk to/kill agents, live terminal
+  via xterm, even with PLANO closed.
 
 ---
 
-## 2. Archivos clave
+## 2. Key files
 
-### Daemon (main, compilado a `out/main/daemon.js`, corre como `ELECTRON_RUN_AS_NODE=1`)
-| Archivo | Rol |
+### Daemon (main, compiled to `out/main/daemon.js`, runs as `ELECTRON_RUN_AS_NODE=1`)
+| File | Role |
 |---|---|
-| `src/main/daemon/index.ts` | Proceso daemon: TCP server (protocolo JSON por líneas, token), sesiones PTY, buffering (anillo 512KB), detección ligera de agentes, arranque del web server, mDNS, puerto fijo 56780, pending panels |
-| `src/main/daemon/ptySpawn.ts` | Lógica de spawn de shells (env limpio, PowerShell init, cmd /k fast-boot, ConPTY→WinPTY fallback) — compartida |
-| `src/main/daemon/agentLight.ts` | Detección ligera de agentes (tabla de firmas + árbol de procesos) cuando PLANO está cerrado |
-| `src/main/daemon/webServer.ts` | Servidor HTTP+WebSocket 0.0.0.0: sirve la web app estática, REST API, WS en vivo, auth por token **o misma subred** |
-| `src/main/daemon/pendingPanels.ts` | Terminales creados desde el celular mientras PLANO estaba cerrado → se materializan al abrir |
+| `src/main/daemon/index.ts` | Daemon process: TCP server (JSON line protocol, token), PTY sessions, buffering (512KB ring), lightweight agent detection, web server startup, mDNS, fixed port 56780, pending panels |
+| `src/main/daemon/ptySpawn.ts` | Shell spawn logic (clean env, PowerShell init, cmd /k fast-boot, ConPTY→WinPTY fallback) — shared |
+| `src/main/daemon/agentLight.ts` | Lightweight agent detection (signature table + process tree) while PLANO is closed |
+| `src/main/daemon/webServer.ts` | HTTP+WebSocket server on 0.0.0.0: serves the static web app, REST API, live WS, auth by token **or same subnet** |
+| `src/main/daemon/pendingPanels.ts` | Terminals created from the phone while PLANO was closed → materialized on open |
 
-### Puente main ↔ daemon
-| Archivo | Rol |
+### main ↔ daemon bridge
+| File | Role |
 |---|---|
-| `src/main/services/AgentHostClient.ts` | Cliente del daemon: spawn/connect, RPC request/response, maneja peticiones daemon→app (`getWorkspaces`, `resolveSpace`), eventos (`external-terminal`, `session-removed`) |
-| `src/main/services/PtyManager.ts` | Fachada para el renderer: create/attach/kill via daemon + re-registro de detección/historial/devUrls/contexto; `restoreSessions(kept)` (con union de pending ids); `registerExternalSession`; `shutdown(keepAgents)` |
-| `src/main/index.ts` | Wiring: pasa `--webRoot`, conecta `onHostRequest`, `onExternalTerminal` → renderer, `will-quit` → `pty.shutdown(keepAgents)` |
+| `src/main/services/AgentHostClient.ts` | Daemon client: spawn/connect, RPC request/response, handles daemon→app requests (`getWorkspaces`, `resolveSpace`), events (`external-terminal`, `session-removed`) |
+| `src/main/services/PtyManager.ts` | Facade for the renderer: create/attach/kill via daemon + detection/history/devUrls/context re-registration; `restoreSessions(kept)` (union with pending ids); `registerExternalSession`; `shutdown(keepAgents)` |
+| `src/main/index.ts` | Wiring: passes `--webRoot`, connects `onHostRequest`, `onExternalTerminal` → renderer, `will-quit` → `pty.shutdown(keepAgents)` |
 
 ### Renderer (PC)
-| Archivo | Rol |
+| File | Role |
 |---|---|
-| `src/renderer/app/terminalRestore.ts` | Seed de `useTerminalStore` con sesiones vivas del daemon ANTES de montar paneles (reattach en vez de respawn) |
-| `src/renderer/app/externalTerminals.ts` | Materializar terminales creados desde el celular: grid de 2 columnas desde el centro del viewport, toast, y `removeExternalTerminal` al cerrarse |
-| `src/renderer/app/terminalSessions.ts` | `reconcileTerminalSessions(protectedIds)` — no mata sesiones pendientes del celular |
-| `src/renderer/chrome/MobileChip.tsx` | Badge en la TopBar: gris "Mobile" → verde "Phone" cuando un celular conecta; clic abre Settings → Mobile |
-| `src/renderer/chrome/Toasts.tsx` + `stores/useToastStore.ts` | Toasts flotantes ("Created X from your phone") |
-| `src/renderer/chrome/settings/sections.tsx` | Sección **Mobile & Remote**: QR por IP real + URL + token + toggle keep-agents |
+| `src/renderer/app/terminalRestore.ts` | Seeds `useTerminalStore` with the daemon's live sessions BEFORE mounting panels (reattach instead of respawn) |
+| `src/renderer/app/externalTerminals.ts` | Materializes terminals created from the phone: 2-column grid from the viewport center, toast, and `removeExternalTerminal` on close |
+| `src/renderer/app/terminalSessions.ts` | `reconcileTerminalSessions(protectedIds)` — does not kill the phone's pending sessions |
+| `src/renderer/chrome/MobileChip.tsx` | Badge in the TopBar: grey "Mobile" → green "Phone" when a phone connects; click opens Settings → Mobile |
+| `src/renderer/chrome/Toasts.tsx` + `stores/useToastStore.ts` | Floating toasts ("Created X from your phone") |
+| `src/renderer/chrome/settings/sections.tsx` | **Mobile & Remote** section: QR with real IP + URL + token + keep-agents toggle |
 
-### Web app móvil (`web/`, Vite+React; se compila a `web-dist/` → se empaqueta como `resources/web`)
-| Archivo | Rol |
+### Mobile web app (`web/`, Vite+React; builds to `web-dist/` → packaged as `resources/web`)
+| File | Role |
 |---|---|
-| `web/src/App.tsx` | Bootstrap: auto-conectar por URL token / conexión guardada / **same-origin sin token** |
-| `web/src/screens/Connect.tsx` | Pantalla de conexión: prefill `plano.local:56780`, sonda `/api/ping`, token opcional en local |
-| `web/src/screens/Home.tsx` | Listas live de agentes/terminales/workspaces + botón ✕ eliminar |
-| `web/src/screens/AgentDetail.tsx` / `Terminal.tsx` | Terminal REAL (xterm) del agente + barra de flechas |
-| `web/src/components/LiveTerminal.tsx` | xterm.js con attach/detach al daemon, buffer replay, resize |
-| `web/src/components/TerminalToolbar.tsx` | Solo 4 flechas (←↑↓→) que envían secuencias ANSI SIN tocar el foco del teclado |
-| `web/src/components/BrandMark.tsx` | El logo real de PLANO (mismo SVG del desktop) |
-| `web/src/lib/api.ts` / `ws.ts` / `store.ts` | Cliente REST (timeout 8s) + canal WebSocket con reconexión + mini store |
+| `web/src/App.tsx` | Bootstrap: auto-connect by URL token / saved connection / **same-origin without token** |
+| `web/src/screens/Connect.tsx` | Connection screen: prefills `plano.local:56780`, probes `/api/ping`, optional token stored locally |
+| `web/src/screens/Home.tsx` | Live lists of agents/terminals/workspaces + ✕ delete button |
+| `web/src/screens/AgentDetail.tsx` / `Terminal.tsx` | REAL agent terminal (xterm) + arrow bar |
+| `web/src/components/LiveTerminal.tsx` | xterm.js with attach/detach to daemon, buffer replay, resize |
+| `web/src/components/TerminalToolbar.tsx` | Only 4 arrows (←↑↓→) that send ANSI sequences WITHOUT touching keyboard focus |
+| `web/src/components/BrandMark.tsx` | The real PLANO logo (same SVG as the desktop) |
+| `web/src/lib/api.ts` / `ws.ts` / `store.ts` | REST client (8s timeout) + WebSocket channel with reconnection + mini store |
 
-### IPC compartido
-`src/shared/ipc/channels.ts`, `contracts.ts`, `src/preload/index.ts` — canales nuevos:
+### Shared IPC
+`src/shared/ipc/channels.ts`, `contracts.ts`, `src/preload/index.ts` — new channels:
 `terminal:restore`, `terminal:pendingPanels`, `terminal:externalCreated`, `terminal:sessionRemoved`, `app:getRemoteInfo`.
 
 ---
 
-## 3. Flujos principales
+## 3. Main flows
 
-### 3.1 Agentes que nunca se cierran (herdr)
-1. PLANO arranca → `AgentHostClient` espawnea el daemon (detached, `unref`) o se conecta al existente.
-2. El renderer, ANTES de montar paneles: `materializePendingPanels` (fetch de pendientes) →
-   `restoreSurvivingTerminals(keptIds ∪ pending)` → `restoreWorkspaces` → materializar pendientes.
-3. Un terminal que sobrevivió tiene su ptyId en `byPanel` → `TerminalEngine.getOrCreate` →
-   `reattachPty` → `terminal.attach(ptyId)` → el daemon devuelve el buffer y reanuda el stream.
-4. Cerrar PLANO (`window-all-closed` → `will-quit`) → `pty.shutdown(keepAgentsOnQuit)`:
-   - `true` (default): `host.disconnect()` — el daemon marca sesiones detached y sigue buffereando.
-   - `false`: `host.shutdownSync()` (socket write + `taskkill /F /T` del pid del daemon).
+### 3.1 Agents that never close (detached host)
+1. PLANO starts → `AgentHostClient` spawns the daemon (detached, `unref`) or connects to the existing one.
+2. The renderer, BEFORE mounting panels: `materializePendingPanels` (fetch pending) →
+   `restoreSurvivingTerminals(keptIds ∪ pending)` → `restoreWorkspaces` → materialize pending.
+3. A surviving terminal has its ptyId in `byPanel` → `TerminalEngine.getOrCreate` →
+   `reattachPty` → `terminal.attach(ptyId)` → the daemon returns the buffer and resumes the stream.
+4. Close PLANO (`window-all-closed` → `will-quit`) → `pty.shutdown(keepAgentsOnQuit)`:
+   - `true` (default): `host.disconnect()` — the daemon marks sessions detached and keeps buffering.
+   - `false`: `host.shutdownSync()` (socket write + `taskkill /F /T` of the daemon pid).
 
-### 3.2 El celular crea/habla/elimina
-1. Celular → `POST /api/sessions` (o WS) → el daemon espawnea la sesión.
-2. ¿PLANO abierto? → broadcast `external-terminal` → renderer materializa el panel (grid 2 cols,
-   centro del viewport, toast). ¿Cerrado? → `pending-panels.json` → materializa en el próximo arranque.
-3. Hablar: `WS write` / `POST write` → el daemon escribe al PTY → el output llega al PC Y al celular
-   (misma sesión viva, bidireccional en tiempo real).
-4. Eliminar: ✕ en la lista → `kill` → el daemon borra la sesión + broadcast `session-removed` →
-   el renderer quita el panel del canvas.
+### 3.2 The phone creates/talks to/deletes
+1. Phone → `POST /api/sessions` (or WS) → the daemon spawns the session.
+2. PLANO open? → broadcast `external-terminal` → renderer materializes the panel (2-col grid,
+   viewport center, toast). Closed? → `pending-panels.json` → materializes on next startup.
+3. Talk: `WS write` / `POST write` → the daemon writes to the PTY → output reaches the PC AND the
+   phone (same live session, real-time bidirectional).
+4. Delete: ✕ in the list → `kill` → the daemon removes the session + broadcasts `session-removed` →
+   the renderer removes the panel from the canvas.
 
 ### 3.3 Auth
-- Misma subred (la IP remota comparte subred con las interfaces reales del PC) → **sin token**.
-- Cualquier otra cosa (internet, túnel) → token obligatorio (`?token=` o `Authorization: Bearer`).
-- `/api/ping` siempre abierto (sonda de la pantalla de conexión).
+- Same subnet (the remote IP shares a subnet with the PC's real interfaces) → **no token**.
+- Anything else (internet, tunnel) → token required (`?token=` or `Authorization: Bearer`).
+- `/api/ping` always open (probe for the connection screen).
 
 ---
 
-## 4. CÓMO SUBIR UN CAMBIO (el flujo exacto, sin errores)
+## 4. HOW TO SHIP A CHANGE (the exact flow, error-free)
 
-> La máquina no tiene VS Build Tools: **`npmRebuild=false` es OBLIGATORIO** en electron-builder.
+> The machine has no VS Build Tools: **`npmRebuild=false` is MANDATORY** in electron-builder.
 
 ```bash
-# 1) Cambios en la web app móvil:
+# 1) Mobile web app changes:
 cd web && npm run typecheck && npm run build        # → web-dist/
 
-# 2) Cambios en el daemon/main/renderer del PC:
-cd .. && npm run typecheck                          # ambos proyectos
+# 2) PC daemon/main/renderer changes:
+cd .. && npm run typecheck                          # both projects
 npm run build                                       # electron-vite → out/
 
-# 3) Empaquetar (SIEMPRE con --config.npmRebuild=false):
+# 3) Package (ALWAYS with --config.npmRebuild=false):
 npx electron-builder --dir --win --config.npmRebuild=false   # → release/win-unpacked
 
-# 4) Instalar (reemplaza la app en ejecución):
+# 4) Install (replaces the running app):
 powershell -Command "Get-Process PLANO -ErrorAction SilentlyContinue | Stop-Process -Force"
 sleep 3
 rm -rf "$LOCALAPPDATA/Programs/PLANO"
 cp -rf release/win-unpacked "$LOCALAPPDATA/Programs/PLANO"
 
-# 5) Lanzar:
+# 5) Launch:
 "$LOCALAPPDATA/Programs/PLANO/PLANO.exe" &
 ```
 
-**Puertos de test para no pisarse:** usa puertos CDP altos y frescos (9505+, 96xx+, 97xx+).
-**Siempre mata procesos zombie** (`Get-Process PLANO,electron,chrome | Stop-Process -Force`)
-porque un puerto tomado por un leftover hace fallar las E2E con "timeout: cdp".
+**Test ports to avoid collisions:** use fresh high CDP ports (9505+, 96xx+, 97xx+).
+**Always kill zombie processes** (`Get-Process PLANO,electron,chrome | Stop-Process -Force`)
+because a port held by a leftover makes E2E fail with "timeout: cdp".
 
-### Test suite (scripts en `scripts/`)
-| Script | Qué prueba |
+### Test suite (scripts in `scripts/`)
+| Script | What it tests |
 |---|---|
-| `agent-host-test.mjs` | Daemon puro: spawn detached, sesión sobrevive disconnect, reattach, buffer, kill, shutdown |
-| `daemon-web-test.mjs` | Web server: static, auth (token/sin token), REST create/write/buffer/kill, WS events |
-| `plano-e2e.mjs` | App completa: spawn → quit → shell sobrevive → relaunch → misma sesión/pid → stream → kill |
-| `plano-mobile-e2e.mjs` | Celular: crear con app abierta (materializa), escribir (se ve en PC), crear con app cerrada (pending→relaunch) |
-| `plano-pwa-ui-test.mjs` | La PWA en Chrome headless (`--headless=old`): connect, ver agentes, mensaje, crear desde UI |
-| `plano-agent-e2e.mjs` | Claude Code REAL: sobrevive quit, se redetecta al relaunch, write llega a la misma sesión |
+| `agent-host-test.mjs` | Pure daemon: detached spawn, session survives disconnect, reattach, buffer, kill, shutdown |
+| `daemon-web-test.mjs` | Web server: static, auth (token/no token), REST create/write/buffer/kill, WS events |
+| `plano-e2e.mjs` | Full app: spawn → quit → shell survives → relaunch → same session/pid → stream → kill |
+| `plano-mobile-e2e.mjs` | Phone: create with app open (materializes), write (visible on PC), create with app closed (pending→relaunch) |
+| `plano-pwa-ui-test.mjs` | The PWA in headless Chrome (`--headless=old`): connect, see agents, message, create from UI |
+| `plano-agent-e2e.mjs` | REAL Claude Code: survives quit, re-detected on relaunch, write reaches the same session |
 
-Ejecutar una: `node scripts/plano-e2e.mjs "D:\Tools\Plano\release\win-unpacked\PLANO.exe" <tempUserData> <port>` (o con el electron de dev).
-
----
-
-## 5. Gotchas / decisiones tomadas (NO revertir sin entender)
-
-- **`npm install` puede PODAR deps** que no están en package.json (pasó con express/
-  @modelcontextprotocol y @types/express — reinstalar con `--save`/`--save-dev`).
-- **`asar extract-file package.json` SOBREESCRIBE el package.json del repo** — usar `-d` a un tmp.
-- **Puerto web fijo 56780** (+ fallback aleatorio). El QR/URL de Settings usa el real. `WebServer.listen`
-  debe RECHAZAR en EADDRINUSE (si no, el daemon se cuelga sin escribir el host file).
-- **mDNS `plano.local`** anunciado con bonjour-service. Funciona en iOS/Safari; NO en Android/Chrome
-  (el QR con la IP literal es la vía universal).
-- **Filtro de IPs del QR**: excluye VPN/loopback/APIPA (NordLynx 10.5.0.2 rompía el QR — el primer
-  adaptador del OS no es la LAN real). Prioriza Ethernet/Wi-Fi.
-- **El daemon necesita `--webRoot`** (dev: `web-dist`, packaged: `resources/web`).
-- **`attached` es un CONTADOR de viewers** (desktop + celular). El stream va a sockets que
-  adjuntaron esa ptyId (un celular en Home NO recibe el stream de todas las sesiones).
-- **El frame `request` del daemon lleva `id`** — el cliente DEBE chequear `event === 'request'`
-  ANTES del branch genérico de replies RPC (si no, se traga las peticiones del daemon).
-- **`reconcileTerminalSessions(protectedIds)`** — sin esto, las sesiones pendientes del celular se
-  mataban como huérfanas en el arranque.
-- **`height: 100dvh`** en la web app — sin esto las barras inferiores salen debajo de la pantalla
-  en móviles (URL bar del navegador).
-- **El contenedor del terminal debe ser `display:flex; flex-direction:column`** — si no, el xterm
-  desborda y la barra de flechas se superpone al terminal.
-- **Las flechas del toolbar NO hacen `focus()`** — hacerlo abre/cierra el teclado del celular.
-- **Ventana de terminal del desktop** (`src/main/windows/mainWindow.ts`): no tocar el layout.
-- **Limpiar artefactos de test**: crear sesiones de prueba en el userData REAL crea workspaces/
-  paneles "Administrator"/"FromPhone" — limpiar editando `%APPDATA%/PLANO/workspaces.json` con la
-  app cerrada (autosave sobrescribiría la edición si está abierta).
-- **`keepAgentsOnQuit`** (default true) — el setting que decide "cerrar PLANO = matar todo" (false)
-  vs "seguir corriendo" (true).
+Run one: `node scripts/plano-e2e.mjs "D:\Tools\Plano\release\win-unpacked\PLANO.exe" <tempUserData> <port>` (or with the dev electron).
 
 ---
 
-## 6. Roadmap de próximos pasos naturales
+## 5. Gotchas / decisions made (don't revert without understanding)
 
-1. Notificaciones del celular cuando un agente termina (push/WS persistente).
-2. Dashboard "qué hicieron mis agentes" (timeline de prompts/outputs).
-3. Bandeja del sistema en el PC con el estado de agentes en background.
-4. Tailscale como alternativa al túnel (más estable, requiere app en ambos dispositivos).
+- **`npm install` can PRUNE deps not in package.json** (happened with express/
+  @modelcontextprotocol and @types/express — reinstall with `--save`/`--save-dev`).
+- **`asar extract-file package.json` OVERWRITES the repo's package.json** — use `-d` to a tmp dir.
+- **Fixed web port 56780** (+ random fallback). The Settings QR/URL uses the real one. `WebServer.listen`
+  must REJECT on EADDRINUSE (otherwise the daemon hangs without writing the host file).
+- **mDNS `plano.local`** announced with bonjour-service. Works on iOS/Safari; NOT on Android/Chrome
+  (the QR with the literal IP is the universal path).
+- **QR IP filter**: excludes VPN/loopback/APIPA (NordLynx 10.5.0.2 broke the QR — the first OS
+  adapter isn't the real LAN). Prioritizes Ethernet/Wi-Fi.
+- **The daemon needs `--webRoot`** (dev: `web-dist`, packaged: `resources/web`).
+- **`attached` is a viewer COUNTER** (desktop + phone). The stream goes to sockets that attached
+  to that ptyId (a phone on Home does NOT receive streams of all sessions).
+- **The daemon's `request` frame carries `id`** — the client MUST check `event === 'request'`
+  BEFORE the generic RPC-reply branch (otherwise it swallows the daemon's requests).
+- **`reconcileTerminalSessions(protectedIds)`** — without this, the phone's pending sessions were
+  killed as orphans at startup.
+- **`height: 100dvh`** in the web app — without this the bottom bars fall below the screen on
+  mobiles (browser URL bar).
+- **The terminal container must be `display:flex; flex-direction:column`** — otherwise xterm
+  overflows and the arrow bar overlaps the terminal.
+- **The toolbar arrows must NOT `focus()`** — doing so opens/closes the phone's keyboard.
+- **Desktop terminal window** (`src/main/windows/mainWindow.ts`): don't touch the layout.
+- **Clean up test artifacts**: creating test sessions in the REAL userData creates
+  local test workspaces/panels (named after the machine user / "FromPhone") — clean them by editing `%APPDATA%/PLANO/workspaces.json`
+  with the app closed (autosave would overwrite the edit if the app is open).
+- **`keepAgentsOnQuit`** (default true) — the setting that decides "close PLANO = kill everything"
+  (false) vs "keep running" (true).
+
+---
+
+## 6. Roadmap of natural next steps
+
+1. Phone notifications when an agent finishes (push/persistent WS).
+2. "What my agents did" dashboard (timeline of prompts/outputs).
+3. System tray on the PC with background agent status.
+4. Tailscale as an alternative to the tunnel (more stable, requires the app on both devices).

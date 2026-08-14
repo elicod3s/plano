@@ -243,7 +243,7 @@ export function parseClaudePayload(raw: unknown): ProviderUsage | null {
  * The statusLine hook is the fast path but it only fires on a turn — and Claude Code reads
  * `settings.json` at session START, so a session that was already open when PLANO installed the
  * hook never reports at all. Polling the endpoint the CLI itself uses closes that gap. It is
- * rate-limited (Orca documents 429s under tight polling), so the collector calls this on a slow
+ * rate-limited (429s under tight polling), so the collector calls this on a slow
  * cadence and the hook keeps providing the live updates.
  *
  * Credentials come from `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`; an expired

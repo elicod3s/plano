@@ -4,17 +4,17 @@
 
 ## Where we actually are
 
-v6 + the guarded-send work brought the **transport** to parity with Orca, and that part is verified
+v6 + the guarded-send work completed the **transport** layer, and that part is verified
 in code, not claimed:
 
-| Capability | PLANO today | Orca |
-|---|---|---|
-| Readiness checked before writing | `agentReadiness()`; a permission prompt is a zero-byte boundary | `terminal.agentStatus` guarded send |
-| Atomic delivery | bracketed paste, **gated on the PTY actually enabling DECSET ?2004** | bracketed paste |
-| Write receipt | `accepted` + `bytesWritten` from node-pty | `accepted` + `bytesWritten` |
-| Post-write proof | verifies the line left the composer | — |
-| Real executable on PATH | `plano.exe` compiled on the machine | shipped `orca.exe` |
-| Outcome reporting to the sender | mailbox notices (delivered/expired/undeliverable/blocked) | — |
+| Capability | PLANO today |
+|---|---|
+| Readiness checked before writing | `agentReadiness()`; a permission prompt is a zero-byte boundary |
+| Atomic delivery | bracketed paste, **gated on the PTY actually enabling DECSET ?2004** |
+| Write receipt | `accepted` + `bytesWritten` from node-pty |
+| Post-write proof | verifies the line left the composer |
+| Real executable on PATH | `plano.exe` compiled on the machine |
+| Outcome reporting to the sender | mailbox notices (delivered/expired/undeliverable/blocked) |
 
 What is missing is everything **above** the wire. PLANO can carry a message between two agents; it
 cannot yet run a *project* across five of them. Concretely, from the field report:
@@ -28,7 +28,7 @@ cannot yet run a *project* across five of them. Concretely, from the field repor
 - Coordination invented by hand: `echo SENT-ENGINE` sentinels, roster polling to infer delivery,
   and a coordinator that could only guess who was still alive.
 
-## What Orca actually does (read from `skill-guides/orchestration.md`)
+## The orchestration model
 
 Three objects, and the separation between them is the whole design:
 
@@ -45,7 +45,7 @@ And the semantics that make it survive real sessions:
    mid-processing.
 2. **`check --wait --types worker_done,escalation,question`** — a rolling long-poll instead of
    sleep/poll loops. One wait covers every worker.
-3. **A timeout is a checkpoint, not a failure.** Verbatim: *"Long coding tasks routinely run 15-60
+3. **A timeout is a checkpoint, not a failure.** In practice: *"Long coding tasks routinely run 15-60
    minutes; keep using rolling waits."* And: *"Heartbeats and visible terminal activity mean the
    worker is alive, not done."*
 4. **`worker_done --outcome succeeded|failed`** with `--files-modified`. *"never encode failure only
@@ -129,7 +129,7 @@ skills gain a short "if you were dispatched" section — the docs are the contra
 **C3. `plano worker-done`** (worker side) settles Task + Dispatch atomically and wakes every
 coordinator waiting on that Run. `--outcome failed` is mandatory for failure: prose is not a status.
 
-**C4. Post-completion lifecycle**: `worker-release` (close the terminal Orca-style, after preserving
+**C4. Post-completion lifecycle**: `worker-release` (close the terminal after preserving
 its transcript), `worker-retain` (record a deliberate keep), `worker-stop`, `worker-abandon`. Never
 release on a timeout, a heartbeat, or an idle TUI — only on a settled Dispatch.
 
@@ -137,7 +137,7 @@ release on a timeout, a heartbeat, or an idle TUI — only on a settled Dispatch
 `plano gate-resolve --id <g> --resolution <r>`, for coordinator decisions inside the DAG. Distinct
 from `ask`, which stays worker→coordinator.
 
-## Phase D — the post-mortem (our own gap, not Orca's)
+## Phase D — the post-mortem (a PLANO gap)
 
 **D1. `exited` must say WHY.** `wait`/`status` return
 `{ state: 'exited', exitCode, ranForMs, producedOutput: boolean, likely: 'finished'|'died-early' }`.
@@ -176,9 +176,9 @@ typecheck` clean, `npx electron-vite build` before every run.
 
 ## Explicit non-goals
 
-- No scheduler. Like Orca's Run, PLANO never decides placement or concurrency — agents choose, the
+- No scheduler: PLANO never decides placement or concurrency — agents choose, the
   daemon records and guarantees.
-- No remote/multi-machine dispatch (Orca's `--on <environment>`). Out of scope until PLANO has a
+- No remote/multi-machine dispatch (a `--on <environment>` flag) — out of scope until PLANO has a
   second host to talk to.
 - No replacement of the existing primitives: `send`, `ask`, `wait`, `watch`, `context` stay exactly
   as they are. v7 is the layer that uses them.

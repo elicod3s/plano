@@ -112,7 +112,7 @@ export interface TerminalSession {
   /** Destroy the renderer-side Terminal + addons + listeners. Does NOT kill the PTY — the teardown
    *  helpers in app/terminalSessions own that (they are the single PTY choke point). */
   dispose: () => void
-  /** Deska-parity keyboard focus: focus this terminal's xterm helper textarea with scroll
+  /** Keyboard focus: focus this terminal's xterm helper textarea with scroll
    *  preservation and bounded retries while the DOM is still attaching. Never resizes, reattaches
    *  or recreates the Terminal and never touches PTY state. A new run supersedes any in-flight one. */
   focus: () => void
@@ -219,7 +219,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     scrollback: ts0.scrollback,
     macOptionIsMeta: true,
     minimumContrastRatio: 1,
-    // Deska parity: customGlyphs OFF → box-drawing / block / CLI-art glyphs are drawn FROM THE FONT
+    // customGlyphs OFF → box-drawing / block / CLI-art glyphs are drawn FROM THE FONT
     // (which carry their own intra-cell metrics) instead of as vectors clipped to the cell. Measured:
     // the bundled JetBrains Mono box-drawing ink is ~1.32em, so at lineHeight 1.0 (the default) the
     // strokes overflow the cell and connect; the moment lineHeight pushes the cell past the ink
@@ -266,7 +266,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     /* keep Unicode-11 widths */
   }
 
-  // Renderer: the WEBGL addon (Deska). DOM renderer's spans round to fractional positions under our
+  // Renderer: the WebGL addon. DOM renderer's spans round to fractional positions under our
   // nested transforms and overlap; the 2D-canvas addon accumulates draws and ghosts. WebGL clears its
   // framebuffer every frame and rebuilds the glyph atlas crisp on cell-size change. Loaded lazily on
   // first open() — the renderer needs the element to exist — and globally budgeted so a large number
@@ -330,7 +330,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     renderBox.style.transform = `scale(${1 / eff})`
   }
 
-  // FIT (Deska's safeFit): no horizontal reserve needed (render-scale keeps on-screen scale ≈ 1, so
+  // FIT (safeFit): no horizontal reserve needed (render-scale keeps on-screen scale ≈ 1, so
   // FitAddon's column count is exact); only correct a sub-pixel VERTICAL overflow so the bottom row
   // isn't clipped by the overflow:hidden box. One resize() per fit → one SIGWINCH for a TUI.
   const safeFit = (scrollBottom = true): void => {
@@ -401,7 +401,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     refreshEffScale()
   }
 
-  // ── Canvas-zoom re-raster (Deska model) ─────────────────────────────────────────────────────────
+  // ── Canvas-zoom re-raster ───────────────────────────────────────────────────────────────────────
   // On a render-scale STEP change, ATOMICALLY set the counter-scaled box, currentScale and the font in
   // ONE frame so they can NEVER disagree. There is deliberately NO fit here. Two reasons:
   //   1. cols/rows are scale-INVARIANT: the box width is container×eff and the cell width is baseCell×eff,
@@ -996,7 +996,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     // of silently falling back to the DOM renderer (whose transformed rows can visually overlap).
     loadWebgl()
 
-    // Deska parity (registry.ts attach): self-heal the off-by-one where the DOM scrollbar reaches the
+    // Self-heal the off-by-one where the DOM scrollbar reaches the
     // bottom but xterm's viewportY lands one row short of baseY, hiding the freshest line. Bound ONCE to
     // the persistent .xterm-viewport (it survives reparents) and torn down on dispose, so re-attaches
     // never stack listeners.
@@ -1052,7 +1052,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
       lastFitW = w
       lastFitH = h
       try {
-        // Deska parity: a resize that doesn't change the grid (or one made while the user has scrolled
+        // A resize that doesn't change the grid (or one made while the user has scrolled
         // up) must NOT yank the viewport to the bottom — re-pin only when we were at the bottom AND the
         // grid actually changed.
         const vp = term.element?.querySelector('.xterm-viewport') as HTMLElement | null
@@ -1128,13 +1128,13 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     renderBox = null
   }
 
-  // ── Deska-parity keyboard focus ─────────────────────────────────────────────────────────────────
+  // ── Keyboard focus ──────────────────────────────────────────────────────────────────────────────
   // Runs are per-session and supersede each other: `focus()` cancels the previous run and bumps the
   // run id so stale callbacks become no-ops. The wait loop tolerates a DOM that is temporarily
   // detached during tab/workspace attachment; after the first success a short recheck window keeps
   // re-asserting focus so a detach/reattach race cannot drop it. Every timer is tracked and cleared
   // by `cancelFocus` (unmount / focus moved elsewhere) and by `dispose`.
-  const FOCUS_WAIT_ATTEMPTS = 80 // 80 × 25 ms = 2 s — Deska parity: DOM may lag a tab/workspace attach
+  const FOCUS_WAIT_ATTEMPTS = 80 // 80 × 25 ms = 2 s — DOM may lag a tab/workspace attach
   const FOCUS_RECHECK_ATTEMPTS = 20 // 20 × 25 ms = 0.5 s post-success detach/reattach race window
   const FOCUS_INTERVAL_MS = 25
   let focusRunId = 0
@@ -1241,7 +1241,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     unsubs.forEach((u) => u())
     unsubs.length = 0
     useTerminalControlStore.getState().unregister(termId)
-    // Dispose WebGL BEFORE the terminal so its GL context is freed promptly (Deska) — GL contexts are
+    // Dispose WebGL BEFORE the terminal so its GL context is freed promptly — GL contexts are
     // otherwise reclaimed only on GC.
     unloadWebgl()
     term.dispose()
@@ -1287,7 +1287,7 @@ class TerminalEngine {
     this.sessions.get(termId)?.detach()
   }
 
-  /** Deska-parity keyboard focus for the terminal (tab) whose DOM is mounted. Keyed by terminal TAB
+  /** Keyboard focus for the terminal (tab) whose DOM is mounted. Keyed by terminal TAB
    *  id; never exposes the mutable registry and never resizes/reattaches/recreates the Terminal or
    *  touches PTY state. A new call supersedes any in-flight focus run for the same terminal. */
   focus(termId: string): void {

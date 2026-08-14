@@ -4,7 +4,7 @@
  * Credentials: ~/.grok/auth.json (honours GROK_HOME), keyed `"https://auth.x.ai::<uuid>"` with
  * the OAuth JWT under `key`, `expires_at` (ISO), `user_id`, `email`.
  *
- * Endpoint (NOT guessed — extracted from Orca's shipped main bundle, the same "read the
+ * Endpoint (NOT guessed — extracted from the shipped main bundle, the same "read the
  * binary" move that settled the Claude schema, and verified live on this machine):
  *   GET https://cli-chat-proxy.grok.com/v1/billing?format=credits
  *   headers: Authorization: Bearer <JWT>, X-XAI-Token-Auth: xai-grok-cli, x-userid: <user_id>
@@ -29,7 +29,7 @@ const BILLING_CREDITS_URL = `${PROXY_BASE}/billing?format=credits`
 const BILLING_DEFAULT_URL = `${PROXY_BASE}/billing`
 const TIMEOUT_MS = 10_000
 const GROK_CLI_AUTH_HEADER = 'xai-grok-cli'
-/** Tokens within 5 min of expiry are treated as expired (Orca's skew). */
+/** Tokens within 5 min of expiry are treated as expired (provider skew). */
 const TOKEN_SKEW_MS = 300_000
 const WEEKLY_MIN = 10_080
 const MONTHLY_MIN = 43_200

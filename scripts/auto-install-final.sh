@@ -16,10 +16,10 @@
 #   9. verify a resumed pi process is running
 # Rollback: if the copy/verify fails, the previous install is moved back.
 
-LOG="D:/Tools/Plano/.plano/install-final.log"
-SRC="D:/Tools/Plano/release/win-unpacked"
-DST="C:/Users/Administrator/AppData/Local/Programs/PLANO"
-WS="C:/Users/Administrator/AppData/Roaming/plano/workspaces.json"
+LOG=".plano/install-final.log"
+SRC="release/win-unpacked"
+DST="$LOCALAPPDATA/Programs/PLANO"
+WS="$APPDATA/plano/workspaces.json"
 SESSION="019fd394-b84e-70c8-bf99-559c6f7c81dd"
 TAB_ID="7-JnDmq_Dw"
 
@@ -29,7 +29,7 @@ log "=== auto-install started (grace 90s) ==="
 sleep 90
 
 # ── 2. stop the Agent Host daemon ────────────────────────────────────────────
-HOST_PID=$(python -c "import json;print(json.load(open('C:/Users/Administrator/AppData/Roaming/plano/agent-host.json'))['pid'])" 2>/dev/null)
+HOST_PID=$(python -c "import json,os;print(json.load(open(os.path.join(os.environ['APPDATA'],'plano/agent-host.json')))['pid'])" 2>/dev/null)
 if [ -n "$HOST_PID" ]; then
   if taskkill //F //PID "$HOST_PID" >>"$LOG" 2>&1; then log "daemon $HOST_PID stopped"; else log "daemon $HOST_PID already gone"; fi
 fi

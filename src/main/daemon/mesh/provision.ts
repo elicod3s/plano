@@ -157,7 +157,7 @@ answer it with \`plano reply\`.
 - **How is X doing**: \`plano status <agentId>\` — live state (idle/working/awaiting-input/
   error/exited), current task, redacted output tail, pending messages, exit code.
 - **Read X's whole chat**: \`plano context <agentId> [--lines N]\` — the full transcript of
-  another agent, exactly like reading its conversation in Orca. Bounded (~64 KiB) and redacted
+  another agent, exactly like reading its conversation. Bounded (~64 KiB) and redacted
   when the desktop app answers; when it is closed or slow the daemon serves its own rendered copy
   of that terminal, so this NEVER comes back empty just because the window is not open.
 - **Send a message**: \`plano send <to> <text>\` — recorded first, routed second, so it cannot be
@@ -197,7 +197,7 @@ answer it with \`plano reply\`.
   allowed (the answer is sent before the terminal goes).
 - **Create new agents in THIS canvas**: \`plano spawn <harness> [folder] [--prompt "<task>"]
   [--count N] [--wait]\` — fresh terminal(s) booting the harness appear in the same workspace,
-  next to your panel. \`--wait\` blocks until they finish. Orca-style alias:
+  next to your panel. \`--wait\` blocks until they finish. Alias of spawn:
   \`plano worktree create <folder> --agent <harness> --prompt "<task>" --wait\`.
   **\`<harness>\` is NOT a closed list.** Known names open straight away:
   \`claude codex pi omp kiro opencode aider gemini cursor grok\`. Any OTHER name is looked up as

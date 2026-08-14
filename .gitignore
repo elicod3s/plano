@@ -7,6 +7,7 @@ node_modules/
 out/
 dist/
 release/
+web-dist/
 *.tsbuildinfo
 
 # Bundled voice model (downloaded by scripts/fetch-model.mjs, shipped via extraResources — not committed)
@@ -38,6 +39,9 @@ Thumbs.db
 # PLANO workspace files created while testing inside this repo
 .plano/
 
+# Dev-probe scratch (old .plano-tests workspace — moved to tests/e2e, this dir must not return)
+.plano-tests/
+
 # Stitch design exploration exports (kept out of the app build)
 stitch_export/
 
@@ -54,5 +58,8 @@ dev-server.err
 Plano mac version/
 Plano mac version.zip
 
+# Personal / unreleased material — never publish
+docs/private/
+
 # Reverse-engineering notes on other apps — never publish
-docs/research/deska/
+docs/research/

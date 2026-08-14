@@ -85,7 +85,7 @@ export function App() {
         .then((r) => r.panels)
         .catch(() => [])
       setPendingProtectedIds(pending.map((p) => p.terminalId))
-      // herdr-style restore: terminals that survived the app closing live in the detached Agent
+      // Restore: terminals that survived the app closing live in the detached Agent
       // Host — seed them into the terminal store BEFORE workspace panels mount, so they reattach
       // (replaying buffered output) instead of respawning. Agents keep running across restarts.
       await restoreSurvivingTerminals(pending.map((p) => p.terminalId)).catch(() => undefined)

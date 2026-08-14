@@ -47,7 +47,7 @@ export function TerminalView({
           data-wheel-own
           className="relative min-h-0 min-w-0 flex-1 overflow-hidden"
         >
-          {/* Render box (Deska model): xterm is opened into THIS element — see useXterm. */}
+          {/* Render box: xterm is opened into THIS element — see useXterm. */}
           <div ref={renderBoxRef} style={{ position: 'absolute', top: 0, left: 0 }} />
         </div>
       </div>

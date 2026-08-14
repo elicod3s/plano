@@ -1,5 +1,5 @@
 /**
- * Headless Agent Host lifecycle test — proves the herdr-style guarantee end to end:
+ * Headless Agent Host lifecycle test — proves the agents-never-close guarantee end to end:
  *  1. spawn the daemon (ELECTRON_RUN_AS_NODE child of the Electron binary)
  *  2. connect, hello, create a PTY running a long-lived command
  *  3. write + receive data events

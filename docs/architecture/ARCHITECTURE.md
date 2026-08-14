@@ -83,7 +83,7 @@ message, spawn and wait on the others — regardless of vendor.
   canvas, placed next to the requester's panel), `plano claim`/`plano handoff`,
   `plano chain`/`plano chains`/`plano cancel-chain`, `plano inbox`/`plano ack`, `plano
   broadcast`, `plano context`, `plano timeline`, `plano find`/`plano declare`, `plano
-  set-model`/`plano interrupt`/`plano compact`, `plano worktree create` (Orca-style alias),
+  set-model`/`plano interrupt`/`plano compact`, `plano worktree create` (spawn alias),
   `plano agent-context` (machine-readable command schema). The CLI source is
   `src/main/daemon/cli/`, bundled to `out/main/cli.js` and copied into `<userData>/bin` by
   `installCli`; the launchers run it under `ELECTRON_RUN_AS_NODE` (no system Node required).

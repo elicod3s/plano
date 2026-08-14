@@ -6,7 +6,7 @@ import type { TerminalProps } from '@shared/domain/panel'
  * live xterm/DOM node — it's all math + string parsing so it can be reasoned about in isolation.
  */
 
-// ── Render-scale model (ported from Deska) ───────────────────────────────────────────────────────
+// ── Render-scale model ───────────────────────────────────────────────────────────────────────────
 // The infinite canvas applies ONE scale(zoom) transform to the world layer. A terminal opened
 // straight into that layer has its pre-rasterized glyph atlas CSS-UPSCALED when zoom > 1, and the
 // overflow:hidden clip edge — after scaling — shaves the last column's glyphs. That clip lives in
@@ -28,7 +28,7 @@ export function snapRenderScale(zoom: number): number {
 }
 
 /** Frames to retry a fit when a freshly (re)attached render box still measures zero — covers the
- *  layout gap right after term.element is re-parented into a new container (Deska's attach retry). */
+ *  layout gap right after term.element is re-parented into a new container (attach retry). */
 export const FIT_RETRY_FRAMES = 5
 
 // ── Whole-device-pixel cell pitch ────────────────────────────────────────────────────────────────
@@ -171,7 +171,7 @@ export function parseOsc7Cwd(data: string): string | null {
   } catch {
     /* malformed %-encoding — keep the raw string */
   }
-  // "/C:/Users/x" → "C:\Users\x" (Windows). POSIX paths are left untouched.
+  // msys path → Windows path: "/C:/..." → "C:\..." (e.g. %USERPROFILE%). POSIX paths are left untouched.
   if (/^\/[a-zA-Z]:/.test(s)) s = s.slice(1).replace(/\//g, '\\')
   return s.trim() || null
 }

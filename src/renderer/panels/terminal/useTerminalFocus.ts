@@ -3,7 +3,7 @@ import { useCanvasFocusStore } from '@/stores/useCanvasFocusStore'
 import { terminalEngine } from './engine'
 
 /**
- * Deska-parity NARROW focus subscription for one terminal panel. Reacts ONLY when this panel is the
+ * Narrow focus subscription for one terminal panel. Reacts ONLY when this panel is the
  * focused canvas member:
  *
  *   (a) its panel id becomes the focused member (`focusSurface(surfaceId, panelId)` — a shield

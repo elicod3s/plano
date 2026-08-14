@@ -22,7 +22,7 @@ import { dirname, join } from 'node:path'
  * `failed to execute command 'plano': batch file arguments are invalid` (exit 126) — every single
  * time. The prompt was never the problem; the file extension was.
  *
- * Orca solves this by shipping a real `orca.exe` next to its `orca.cmd`, so PATH resolves to the
+ * The fix: ship a real `plano.exe` next to the `.cmd` launcher, so PATH resolves to the
  * executable and the harness spawns a normal Windows process. PLANO cannot ship a prebuilt binary
  * for every install, but it does not have to: the .NET Framework C# compiler is part of Windows
  * itself, so the launcher is COMPILED ON THE MACHINE at provisioning time. ~4 KB, no toolchain,

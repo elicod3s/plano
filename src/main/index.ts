@@ -369,7 +369,7 @@ function ensureFirewallRuleForPlano(): void {
 
   app.on('will-quit', () => {
     diagnostics.log('app-will-quit')
-    // The herdr-style default: keep every terminal (and the agents inside it) running in the
+    // The default: keep every terminal (and the agents inside it) running in the
     // detached Agent Host when the app quits, so reopening lands exactly where you left it. When
     // the setting is off, shut the host down (which kills all sessions — the old behaviour).
     const keepAgents = settingsService?.getSync().terminal.keepAgentsOnQuit ?? true

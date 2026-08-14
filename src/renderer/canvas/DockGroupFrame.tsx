@@ -43,7 +43,7 @@ function DockGroupFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number 
   const members = usePanelStore(
     useShallow((s) => memberIds.map((id) => s.panels[id]).filter((p): p is Panel => Boolean(p))),
   )
-  // The whole group dims/brightens as ONE outer surface (Deska node parity). Narrow boolean
+  // The whole group dims/brightens as ONE outer surface. Narrow boolean
   // selector: surfaces whose focus state did not change bail out of re-rendering.
   const focused = useCanvasFocusStore((s) => s.focus?.surfaceId === panel.id)
   const [hovered, setHovered] = useState(false)
@@ -208,7 +208,7 @@ function DockGroupFrameInner({ panel, zIndex }: { panel: Panel; zIndex?: number 
       style={anchorStyle}
       onPointerDownCapture={(e) => {
         bringToFront(panel.id)
-        // Deska parity: primary clicks anywhere inside a pane (header or body) are a group-focus
+        // Primary clicks anywhere inside a pane (header or body) are a group-focus
         // action with THAT pane as the member — clicking between panes in an already-focused group
         // bumps the epoch and redirects the member without changing the group's opacity. Header
         // buttons/inputs (.app-no-drag) are excluded; resize handles/dividers focus via their own
