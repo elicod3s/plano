@@ -1,0 +1,12 @@
+# Puts a "Sponsor" button at the top of the repo, next to Star and Fork.
+#
+# The `github:` entry only renders once GitHub Sponsors is actually enabled on the account
+# (Settings → Sponsors → complete the profile, identity and bank verification). Until then GitHub
+# ignores it, so this file is safe to ship early.
+#
+# To add a one-off tipping link that needs no GitHub account on the donor's side, uncomment one:
+#   ko_fi: <username>            # 0% on one-off donations
+#   buy_me_a_coffee: <username>  # ~5%
+#   custom: ['https://…']        # anything else (Polar, PayPal, …)
+
+github: [zqkra]
