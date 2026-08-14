@@ -118,6 +118,11 @@ export interface TerminalSession {
   focus: () => void
   /** Cancel any in-flight focus run for this terminal (focus moved elsewhere / component unmount). */
   cancelFocus: () => void
+  /**
+   * Re-rasterize this terminal's glyphs. Called on the OTHER terminals when a new one is born —
+   * see `TerminalEngine.getOrCreate`. Cheap, and a no-op while detached.
+   */
+  refreshGlyphs: () => void
 }
 
 const termTheme = (id: TerminalSettings['theme'], override?: TerminalProps['theme']) =>
@@ -680,13 +685,17 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     ]
     void Promise.all(faces.map((face) => document.fonts.load(face).catch(() => []))).then(remeasureAndFit)
     void document.fonts.ready.then(remeasureAndFit)
-    // A face can still finish arriving later — a font the user picks in Settings, or a subset
-    // fetched the first time a glyph needs it. Whenever any does, drop the atlas so nothing keeps
-    // a substituted glyph. Only the atlas: re-measuring here could request another face and feed
-    // this event back to itself.
-    const onFontsLoaded = (): void => dropGlyphAtlas()
-    document.fonts.addEventListener('loadingdone', onFontsLoaded)
-    unsubs.push(() => document.fonts.removeEventListener('loadingdone', onFontsLoaded))
+    // NO `document.fonts` 'loadingdone' listener here, deliberately.
+    //
+    // It used to drop the atlas on every such event, as insurance for a face arriving late. But
+    // `document.fonts` is a DOCUMENT-level event and every terminal registers its own listener, so
+    // opening terminals — `plano spawn … --count 3` does three at once, each requesting its faces —
+    // fired it repeatedly and made EVERY live terminal clear its texture atlas mid-frame. The
+    // renderer then drew from a half-rebuilt atlas: box-drawing came out as dotted gaps and text as
+    // broken fragments, and only a resize (a full re-render) cleared it.
+    //
+    // The insurance was never what fixed the original bug either — requesting the exact weights
+    // above is. So the atlas is dropped once, when those faces resolve, and never again.
   }
 
   // Copy-on-select (opt-in): mirror the selection to the clipboard as it's made.
@@ -1032,6 +1041,11 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     // tabs release their renderer in detachDom(); the newly active tab can now claim the slot instead
     // of silently falling back to the DOM renderer (whose transformed rows can visually overlap).
     loadWebgl()
+    // THIS is the instant the shared texture atlas is disturbed — acquiring it is what invalidates
+    // the glyphs of the terminals already on screen. Repairing from session CREATION was too early
+    // (a session is created before its panel mounts and attaches), which left the corruption visible
+    // until the trailing pass. Repair from here, where the damage actually happens.
+    terminalEngine.notifyAtlasAcquired(termId)
 
     // Self-heal the off-by-one where the DOM scrollbar reaches the
     // bottom but xterm's viewportY lands one row short of baseY, hiding the freshest line. Bound ONCE to
@@ -1284,7 +1298,7 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     term.dispose()
   }
 
-  return { termId, panelId, attach, detach: detachDom, dispose, focus, cancelFocus }
+  return { termId, panelId, attach, detach: detachDom, dispose, focus, cancelFocus, refreshGlyphs: dropGlyphAtlas }
 }
 
 /**
@@ -1314,6 +1328,47 @@ class TerminalEngine {
     const session = createSession(termId, panelId, () => this.dispose(termId))
     this.sessions.set(termId, session)
     return session
+  }
+
+  /**
+   * A newborn terminal invalidates the glyphs of the ones already on screen — re-rasterize them.
+   *
+   * xterm's WebGL renderer SHARES one texture atlas between terminal instances (`acquireTextureAtlas`
+   * / `removeTerminalFromCache` over a `_cacheMap` in the addon). When new terminals join that cache
+   * — `plano spawn … --count 3` creates three at once — the atlas backing the terminals already
+   * drawn is rebuilt underneath them, and their cached texture coordinates then point at the wrong
+   * region: the layout stays perfectly correct while every glyph comes out as a fragment, box-drawing
+   * as a dotted line. Resizing "fixed" it only because it forced a re-rasterization.
+   *
+   * So: do that re-rasterization deliberately — and IMMEDIATELY, on the next frame after each
+   * birth. A debounce here is actively wrong: every terminal of a `--count 3` burst restarts the
+   * timer, so the repaint lands only after the LAST one, and the corruption stays on screen for
+   * about a second. The window has to be a frame, not a burst.
+   *
+   * A trailing pass still runs once the burst settles, because a terminal that is still opening
+   * (its WebGL addon attaches when its panel mounts) can disturb the atlas after the immediate
+   * pass has already run. Deferred to a frame in both cases: clearing an atlas mid-draw is itself
+   * a way to render from a half-built one.
+   */
+  private glyphRefreshTimer: ReturnType<typeof setTimeout> | null = null
+
+  private refreshOtherGlyphs(exceptId: string): void {
+    requestAnimationFrame(() => {
+      for (const [id, session] of this.sessions) {
+        if (id === exceptId) continue // the newborn rasterizes from scratch anyway
+        session.refreshGlyphs()
+      }
+    })
+  }
+
+  /** Called by a session the moment it acquires the shared WebGL atlas (see attach → loadWebgl). */
+  notifyAtlasAcquired(termId: string): void {
+    this.refreshOtherGlyphs(termId)
+    if (this.glyphRefreshTimer) clearTimeout(this.glyphRefreshTimer)
+    this.glyphRefreshTimer = setTimeout(() => {
+      this.glyphRefreshTimer = null
+      this.refreshOtherGlyphs('')
+    }, 600)
   }
 
   attach(termId: string, container: HTMLDivElement, renderBox: HTMLDivElement): void {
