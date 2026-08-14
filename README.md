@@ -1,37 +1,136 @@
+<div align="center">
+
 # PLANO
 
-**The infinite canvas workspace for builders.** One spatial screen per project — terminals,
-editors, browsers and AI agents side by side on a pan/zoom canvas that remembers exactly how you
-left it. Built for solo developers and small teams who live in the terminal and run AI coding
-CLIs all day.
+### The IDE for orchestrating AI agents — on one infinite canvas, entirely on your machine
+
+Stop juggling a dozen terminal tabs and chat windows. Run **many AI agents at once**, see all of
+them at the same time, let them spawn and delegate to each other, and watch the work take shape
+as a map you can actually read.
+
+**No account. No cloud. No telemetry.** PLANO drives the AI CLIs you already have, with your own
+subscriptions, on your own computer.
+
+[![Download](https://img.shields.io/badge/Download-Windows%20·%20macOS-111111?style=for-the-badge&logo=github&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
+[![Latest release](https://img.shields.io/github/v/release/zqkra/plano?style=for-the-badge&label=version&color=2b2b2b)](https://github.com/zqkra/plano/releases)
+[![License](https://img.shields.io/github/license/zqkra/plano?style=for-the-badge&color=2b2b2b)](LICENSE)
+
+![Platform](https://img.shields.io/badge/Windows%2010%201809%2B-informational?style=flat-square&color=3a3a3a)
+![Platform](https://img.shields.io/badge/macOS%2012%2B-informational?style=flat-square&color=3a3a3a)
+![Built with](https://img.shields.io/badge/Electron%20·%20React%20·%20TypeScript-informational?style=flat-square&color=3a3a3a)
+
+</div>
+
+<!-- MEDIA SLOT 1 — HERO. Drop docs/media/hero-canvas.png, then delete this comment and
+     uncomment the line below. Shot spec: docs/media/README.md
+![PLANO — the infinite canvas](docs/media/hero-canvas.png)
+-->
+
+---
 
 ## Download
 
-**[github.com/zqkra/plano/releases](https://github.com/zqkra/plano/releases)**
+**[Download the latest release →](https://github.com/zqkra/plano/releases/latest)**
 
-- **Windows**: the `.exe` installer. Self-updating — PLANO checks for new releases on launch
-  and every 4 hours, downloads in the background, and installs on restart or quit.
-- **macOS**: `.dmg` (Apple Silicon). Unsigned CI builds; right-click → **Open** on first launch.
+- **Windows** — `.exe` installer. Self-updating: PLANO checks for new releases on launch and
+  every 4 hours, downloads in the background, and installs on restart or quit.
+- **macOS** — `.dmg` (Apple Silicon). Unsigned CI builds; right-click → **Open** on first launch.
 
 Requires Windows 10 1809+ (for ConPTY) or macOS 12+.
 
-## What makes it different
+---
 
-- **A canvas, not tabs.** Panels float on one infinite space per project: terminals, code
-  editors, browsers, markdown, sticky notes. Pan and zoom, and every layout is saved per
-  project — reopen and it is exactly where you left it.
-- **Terminals that become agents.** Open Claude Code, Codex, Gemini, or any AI coding CLI
-  inside a terminal panel and it morphs into *agent mode* — no color flood, just motion and
-  weight. Its panel tints to show a live agent is in there.
-- **Agents that talk to each other.** PLANO's mesh detects every AI CLI running in any
-  terminal, shows them all from one overlay (`Ctrl+Shift+A`), lets you send one message to
-  several at once, chain work ("when you finish, hand it to Codex"), and keep a shared
-  scratchpad + timeline. The `plano` CLI lets any terminal drive the same mesh.
-- **Agents survive the app closing.** Terminals run in a detached agent host, so closing
-  PLANO never closes the agents you left working. Reopen and they reattach — same process,
-  same scrollback.
-- **Local-first.** Everything runs on your machine. Context persistence and the optional MCP
-  bridge are opt-in; nothing leaves your computer unless you enable it.
+## Why orchestrate on a canvas
+
+One agent is a chat window. Five agents is a mess — tabs you cannot see at once, work you cannot
+place, and no way to tell who is waiting on whom. PLANO gives that swarm a **shape**:
+
+|  | Terminal tabs | Chat / cloud tools | **PLANO** |
+|---|---|---|---|
+| See every agent at once | ✗ one at a time | ✗ one thread at a time | ✓ all of them, side by side |
+| Who delegated to whom | invisible | invisible | ✓ children open **beneath** their parent |
+| Agents talk to each other | ✗ | ✗ | ✓ `send` · `ask` · `reply` · `spawn` |
+| Survives closing the app | ✗ | n/a | ✓ detached host, reattach on reopen |
+| Your models, your subscriptions | ✓ | ✗ their inference | ✓ your CLIs, your keys |
+| Where your code goes | your machine | **their servers** | ✓ **your machine, always** |
+
+### Everything is local. Not "private by default" — local.
+
+- **No account, no sign-in, no telemetry.** There is nothing to opt out of.
+- **PLANO has no model and no API key of its own.** It runs *your* CLIs — Claude Code, Codex,
+  Gemini, Oh My Pi — under *your* subscriptions. Your prompts go where they already went.
+- **The mesh is loopback.** Agent-to-agent messaging binds to `127.0.0.1`. The only network
+  surface is PLANO Mobile on your own Wi-Fi, and it is token-authenticated.
+- **Redaction before sharing.** When one agent reads another's transcript, it passes through a
+  central redactor (tokens, keys, passwords, PEM blocks) first.
+- **Your workspace is a file you own.** Layout lives in `.plano/workspace.json` inside your
+  project. Delete the folder and PLANO forgets everything.
+
+## A canvas, not tabs
+
+Panels float on one infinite space per project — terminals, code editors, browsers, markdown,
+sticky notes. Pan and zoom. The layout is saved per project, so reopening a folder puts every
+panel back exactly where it was.
+
+<!-- MEDIA SLOT 2 — CANVAS. Drop docs/media/canvas.png and uncomment:
+![One canvas per project](docs/media/canvas.png)
+-->
+
+## Terminals that become agents
+
+Run Claude Code, Codex, Gemini, Oh My Pi or any other AI coding CLI inside a terminal panel and
+PLANO notices — the panel morphs into *agent mode*, tinted with that agent's own accent. No
+configuration: detection reads the process tree and the output banner.
+
+<!-- MEDIA SLOT 3 — AGENT MODE. Drop docs/media/agent-mode.png and uncomment:
+![A terminal morphed into agent mode](docs/media/agent-mode.png)
+-->
+
+## Agents that spawn agents — as a map you can read
+
+`plano spawn` opens new agents **below** the one that asked for them, siblings side by side and
+centred on their parent. The canvas becomes the org chart of the work: who delegated to whom is
+visible from the shape alone, and depth grows downward instead of running off-screen.
+
+<!-- MEDIA SLOT 4 — ORCHESTRATION TREE (the signature shot). Drop
+     docs/media/orchestration-tree.png and uncomment:
+![A coordinator with its workers spawned beneath it](docs/media/orchestration-tree.png)
+-->
+
+## Agents that talk to each other
+
+Every AI CLI in any terminal joins one mesh. The `plano` CLI — already on each agent's PATH —
+lets them message, ask, delegate and wait on each other:
+
+```sh
+plano roster                              # who is running, where, and what they are doing
+plano send <agent> "review the migration" # durable: never lost, never refused
+plano check --wait                        # block until mail arrives — no polling, no sleeping
+plano spawn codex . --count 3             # three workers, placed beneath you
+```
+
+Delivery is durable first and typed second: a message is recorded the moment `send` returns, and
+an agent parked on `plano check --wait` is woken in milliseconds.
+
+<!-- MEDIA SLOT 5 — MESH. Drop docs/media/mesh.png and uncomment:
+![Agents messaging each other across the canvas](docs/media/mesh.png)
+-->
+
+## Agents survive the app closing
+
+Terminals run in a detached agent host, so quitting PLANO never kills the agents you left
+working. Reopen and they reattach — same process, same scrollback. You can also watch and talk
+to them from your phone on the same Wi-Fi, with the desktop app closed.
+
+<!-- MEDIA SLOT 6 — MOBILE (optional). Drop docs/media/mobile.png and uncomment:
+![PLANO Mobile](docs/media/mobile.png)
+-->
+
+## Local-first
+
+Everything runs on your machine. There is no account, no telemetry and no cloud: the mesh is a
+loopback service, and agent output passes through a central redactor (tokens, keys, passwords,
+PEM blocks) before it is ever exposed to another agent.
 
 ## Requirements
 
@@ -121,19 +220,23 @@ architecture doc.
 ### Agent Mesh
 
 PLANO's cross-workspace agent coordination: detect any AI coding CLI running in a terminal
-(Claude Code, Codex, Gemini, Pi, …), see them all from one overlay (`Ctrl+Shift+A`), send one
-message to several at once, interrupt/focus any of them, keep a shared scratchpad + timeline,
-and expose context to other tools over a local MCP bridge.
+(Claude Code, Codex, Gemini, Oh My Pi, Grok, …), see them all from one overlay (`Ctrl+Shift+A`),
+and let them coordinate with each other through the `plano` CLI.
 
-- **Context lives in the main process** — it keeps working even when a workspace is in the
-  background and its terminals are hibernated.
-- **Redaction is central** — tails, search, scratchpad and MCP all pass through one redactor
-  (tokens/keys/passwords/PEM/credentials) before anything leaves the PTY stream.
-- **MCP is local, token-authed and read-only by default** (loopback only; mutating tools opt-in).
-- **Fan-out is isolated** — parallel writing agents each get their own git worktree + branch.
+- **CLI-first, no MCP.** Any harness that can run a command participates — no server handshake,
+  no config files to merge. The CLI speaks JSON-RPC to the agent host over loopback, and identity
+  rides the terminal environment.
+- **Delivery is durable, not typed-and-hoped.** A message is recorded before it is routed, so a
+  peer that is booting, mid-turn or parked on `plano check --wait` still receives it. `send`
+  never refuses.
+- **Receiving is a blocking call, not a poll.** `plano check --wait` returns the moment mail
+  arrives; a timeout is an explicit checkpoint, never mistaken for silence.
+- **Context lives in the agent host** — it keeps working with the desktop app closed, and every
+  tail, transcript and search passes through one redactor (tokens/keys/passwords/PEM) before it
+  reaches another agent.
 
-Privacy: nothing leaves your machine unless you enable it. Context persistence and the MCP
-bridge are opt-in.
+Privacy: nothing leaves your machine. The mesh binds to loopback; the LAN surface (PLANO Mobile)
+is token-authenticated.
 
 ## License
 
