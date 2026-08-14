@@ -60,6 +60,14 @@ const PLACE_GAP = 20
 /** Mind-map spacing: siblings side by side, generations stacked with room for the link between. */
 const TREE_HGAP = 48
 const TREE_VGAP = 120
+/**
+ * The row a spawn batch landed on, keyed by the parent panel — so siblings that arrive as separate
+ * events still agree on one Y and read as one generation. A batch is delivered within a second;
+ * the window only has to outlive that, and a stale entry is harmless because the next batch's
+ * first child recomputes the row anyway.
+ */
+const BATCH_WINDOW_MS = 30_000
+const spawnRows = new Map<string, { y: number; at: number; count: number }>()
 
 /**
  * Where a terminal created from OUTSIDE the canvas lands.
@@ -89,15 +97,26 @@ function placeExternalPanel(e: ExternalTerminalEvent): { x: number; y: number; w
     const rowWidth = count * width + (count - 1) * TREE_HGAP
     const startX = origin.rect.x + width / 2 - rowWidth / 2
 
-    // The generation band is resolved for the ROW, not per child: each sibling runs this function
-    // separately, so the test has to depend only on the parent and the batch size. Nudging children
-    // one at a time would land them at different heights and the row would stop reading as one
-    // generation — the exact thing this layout exists to show.
-    let y = origin.rect.y + height + TREE_VGAP
-    for (let attempt = 0; attempt < 12; attempt += 1) {
-      const band = { x: startX, y, width: rowWidth, height }
-      if (!others.some((p) => p.id !== origin.id && rectsIntersect(band, p.rect))) break
-      y += height + TREE_VGAP
+    // The generation row is decided ONCE per batch, by its first child, and every sibling reuses it.
+    //
+    // Resolving it per child looked equivalent and is not: each sibling arrives as its own event, so
+    // by the time child 1 runs, child 0 is ALREADY on the canvas — the "is this band free" test then
+    // collides with its own sibling and drops a generation, and child 2 collides with both. The
+    // result was a diagonal staircase instead of a row, which is the opposite of the thing this
+    // layout exists to show.
+    const batch = spawnRows.get(origin.id)
+    const reusable = batch && batch.count === count && Date.now() - batch.at < BATCH_WINDOW_MS
+    let y: number
+    if (index > 0 && reusable) {
+      y = batch.y
+    } else {
+      y = origin.rect.y + height + TREE_VGAP
+      for (let attempt = 0; attempt < 12; attempt += 1) {
+        const band = { x: startX, y, width: rowWidth, height }
+        if (!others.some((p) => p.id !== origin.id && rectsIntersect(band, p.rect))) break
+        y += height + TREE_VGAP
+      }
+      spawnRows.set(origin.id, { y, at: Date.now(), count })
     }
     return { x: Math.round(startX + index * (width + TREE_HGAP)), y: Math.round(y), width, height }
   } else {

@@ -274,7 +274,20 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
   // allocating a replacement during GPU pressure is exactly the churn that used to amplify the crash.
   let webglAddon: WebglAddon | null = null
   let ownsWebglSlot = false
-  const webglReloadAttempted = false
+  /**
+   * One reclaim per session after Chromium takes this terminal's GPU context away.
+   *
+   * This was `const … = false`, so the guard below was dead code and nothing ever reloaded: a
+   * terminal that lost its context fell to the DOM renderer permanently. That matters because the
+   * DOM renderer draws rows as positioned spans, and this canvas SCALES its panels — transformed
+   * spans overlap and shear, which is the "characters go unreadable" the user sees, and why
+   * resizing appears to fix it (a resize forces a fresh layout pass over those spans).
+   *
+   * The trigger is ordinary use: Chromium caps WebGL contexts per renderer process and evicts the
+   * OLDEST one to make room. `plano spawn … --count 3` creates three at once, so the agent that
+   * asked for them is exactly the context that gets evicted.
+   */
+  let webglReloadAttempted = false
   const releaseWebgl = (): void => {
     if (!ownsWebglSlot) return
     ownsWebglSlot = false
@@ -298,15 +311,39 @@ function createSession(termId: string, panelId: string, removeSelf: () => void):
     try {
       const addon = new WebglAddon()
       addon.onContextLoss(() => {
+        if (webglAddon !== addon) return
         try {
-          if (webglAddon !== addon) return
           addon.dispose()
         } catch {
           /* ignore */
         }
         webglAddon = null
-        if (webglReloadAttempted) return // give up → DOM fallback, never loop (no console flood)
         releaseWebgl()
+        if (webglReloadAttempted) {
+          // Second loss in one session: stop fighting for a context (retrying here is how a
+          // cascade starts — every reclaim evicts somebody else's). Stay on the DOM renderer, but
+          // repaint the whole viewport so it does not keep the half-drawn frame the dead context
+          // left on screen.
+          try {
+            term.refresh(0, term.rows - 1)
+          } catch {
+            /* renderer torn down */
+          }
+          return
+        }
+        webglReloadAttempted = true
+        // Take a context back on the next frame. Reloading synchronously inside the loss callback
+        // fails — the addon is still being torn down — and a frame is also long enough for the
+        // burst of newly spawned terminals to have finished claiming theirs.
+        requestAnimationFrame(() => {
+          if (disposed || !term.element || webglAddon) return
+          loadWebgl()
+          try {
+            term.refresh(0, term.rows - 1)
+          } catch {
+            /* renderer torn down */
+          }
+        })
       })
       term.loadAddon(addon)
       webglAddon = addon
