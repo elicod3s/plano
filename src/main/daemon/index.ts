@@ -1,7 +1,7 @@
 /**
  * PLANO Agent Host — the detached background process that owns every PTY session.
  *
- * This is the herdr-style heart of "agents never close": the app's terminals are NOT children of
+ * This is the heart of "agents never close": the app's terminals are NOT children of
  * the UI. They are spawned by this standalone process, which the app launches as a detached child
  * (`ELECTRON_RUN_AS_NODE=1 <execPath> <app>/out/main/daemon.js --userData <dir> --webRoot <dir>`)
  * and unrefs, so it survives the app quitting. When the app closes, the host marks every session
@@ -45,7 +45,7 @@ import { cleanupMcpEntries, installAgentDocs } from './mesh/provision'
 import { installCli } from './mesh/cli'
 import { installAgentHooks, parseHookRequest } from './agentHooks'
 import { UsageService } from './usage/service'
-import { launchCommandFor } from '@shared/domain/agentLaunch'
+import { launchCommandFor, kindForHarness } from '@shared/domain/agentLaunch'
 import { probeHarnessOnHost } from './harnessResolve'
 
 /**
@@ -60,7 +60,7 @@ import { probeHarnessOnHost } from './harnessResolve'
  * Now each spawned ptyId gets its own prompt, and the requester is excluded outright.
  */
 /**
- * The lifecycle preamble every spawned agent receives with its task — Orca's `dispatch --inject`,
+ * The lifecycle preamble every spawned agent receives with its task — `dispatch --inject`,
  * ported.
  *
  * Without it, "wait for messages and answer when someone greets you" is an instruction with no
@@ -304,7 +304,7 @@ mesh.onClose = ({ ptyId, panel }) => {
   const entry = sessions.get(ptyId)
   if (!entry) return { ok: false, error: `no session ${ptyId.slice(0, 8)}` }
   // `panel` closes every terminal sharing that panel (a PLANO panel hosts many tabs); the default
-  // closes just this one, mirroring Orca's pane-vs-tab split.
+  // closes just this one — the pane-vs-tab split.
   const targets = panel
     ? [...sessions.values()].filter((s) => s.panelId === entry.panelId).map((s) => s.ptyId)
     : [ptyId]
@@ -338,7 +338,7 @@ mesh.onSpawn = (req) => {
   // A RELATIVE folder is resolved against the requester's cwd. `plano spawn omp animal-cases`
   // used to hand node-pty the bare string "animal-cases", which is not a directory from the
   // daemon's own working directory — the spawn silently fell back to the user's home, and the
-  // roster then showed every worker sitting in C:\Users\<name> instead of the project. It only
+  // roster then showed every worker sitting in %USERPROFILE% instead of the project. It only
   // went unnoticed because the agents happened to use absolute paths in their work.
   const requestedCwd = req.cwd?.trim() || ''
   const base = requester?.cwd || ''
@@ -424,6 +424,13 @@ interface Session {
   /** Light detection (runs even with the app closed). */
   agentKind: AgentKind | null
   agentPid: number | null
+  /**
+   * What `plano spawn <harness>` asked for, when PLANO launched this session itself. Ground truth
+   * for what the session IS — it outranks process-tree detection, which can only see the engine a
+   * wrapper boots (omp → codex) after the wrapper process has exited. Null for terminals PLANO did
+   * not spawn as a known harness (plain shells, phone terminals), where detection is all we have.
+   */
+  spawnedKind: AgentKind | null
   /** Plan v3 A2: honest-busy state threaded across polls. */
   activity?: import('./agentLight').ActivityState
   busyNow?: boolean
@@ -457,7 +464,7 @@ function observeTerminalModes(entry: Session, data: string): void {
 }
 
 /**
- * Orca-style guarded-send status, owned by the daemon so it works with the desktop closed.
+ * Guarded-send status, owned by the daemon so it works with the desktop closed.
  * Permission text wins over every inferred/hook state; worker and hook evidence win over idle;
  * a write is sendable only for a detected agent with a rendered TUI surface.
  */
@@ -467,7 +474,13 @@ function agentReadiness(ptyId: string): AgentReadiness {
     return { state: 'unknown', inputMode: 'clean', pasteMode: 'plain', detail: 'terminal is not writable' }
   }
   const agent = mesh.agent(ptyId)
-  const kind = agent?.kind ?? entry.agentKind ?? entry.appKind ?? 'unknown'
+  // Composer/edit detection uses the DETECTED engine, never the roster's display label. These are
+  // the same thing for every ordinary session; they diverge only for a wrapper like omp, whose
+  // roster label is `omp` (what the user launched) while the process on screen is the codex engine.
+  // The input-prompt markers must match the real process, so this deliberately reads detection —
+  // NOT `agent?.kind`, which now carries the launch label. Behavior-identical to before for every
+  // existing session (the roster label was itself derived from detection until spawn labels existed).
+  const kind = entry.agentKind ?? entry.appKind ?? 'unknown'
   const rendered = readScreen(ptyId) || normalizeTerminalText(entry.buffer.slice(-8).join(''))
   const pasteMode: AgentReadiness['pasteMode'] = entry.bracketedPasteEnabled ? 'bracketed' : 'plain'
   const edit = inputEditState(rendered, kind)
@@ -484,7 +497,7 @@ function agentReadiness(ptyId: string): AgentReadiness {
   // on, it will accept the text now and act on it when the current turn ends — that is what the
   // harness's own composer is for, and it is why a human can type into Claude while it works.
   //
-  // Orca's readiness has no `busy` state at all (`sendable | no-agent | permission |
+  // Readiness has no `busy` state at all (`sendable | no-agent | permission |
   // status-unavailable`): only a permission prompt is a hard boundary. Treating mid-turn as a
   // blocker is what made a message sit in the mailbox until the peer went idle — the "it just
   // waits" complaint. Working is not a reason to refuse; an unusable composer is.
@@ -615,10 +628,19 @@ function removeSession(ptyId: string): void {
   maybeScheduleIdleExit()
 }
 
+/**
+ * The kind a session REPORTS to the roster / phone: what the user launched, when PLANO launched it
+ * (`plano spawn omp` ⇒ omp), falling back to detection for terminals it did not spawn. This is a
+ * label only — `agentReadiness` deliberately does not consult it, so it can never affect delivery.
+ */
+function reportedKind(entry: Session): AgentKind | null {
+  return entry.spawnedKind ?? entry.appKind ?? entry.agentKind
+}
+
 // ── phone-facing view ───────────────────────────────────────────────────────
 
 function sessionView(entry: Session): SessionView {
-  const kind = entry.appKind ?? entry.agentKind
+  const kind = reportedKind(entry)
   const phase = entry.appActive ? (entry.appPhase ?? lightPhase(entry.lastOutputAt)) : entry.agentKind ? lightPhase(entry.lastOutputAt) : null
   return {
     ptyId: entry.ptyId,
@@ -748,6 +770,7 @@ function createEntry(
     lastOutputAt: Date.now(),
     agentKind: null,
     agentPid: null,
+    spawnedKind: null,
     appKind: null,
     appPhase: null,
   }
@@ -819,13 +842,15 @@ function startDetection(): void {
         // moment the terminal goes quiet (which is most of a turn: the model is thinking).
         const held = hookHeldUntil.get(entry.ptyId) ?? 0
         if (held > Date.now()) {
-          if (entry.agentKind) mesh.setKind(entry.ptyId, entry.agentKind)
+          if (entry.agentKind) mesh.setKind(entry.ptyId, reportedKind(entry) ?? entry.agentKind)
           continue
         }
         if (held) hookHeldUntil.delete(entry.ptyId)
 
         if (entry.agentKind) {
-          mesh.setKind(entry.ptyId, entry.agentKind)
+          // The roster shows what the user launched (reportedKind); composer detection below still
+          // uses entry.agentKind, the real engine on screen.
+          mesh.setKind(entry.ptyId, reportedKind(entry) ?? entry.agentKind)
           // Permission is a SCREEN state, not an append-only transcript fact. A cleared prompt
           // remains forever in the raw ring buffer; trusting it kept the agent blocked after the
           // human had already answered. Use the daemon's rendered xterm, with raw only as startup
@@ -1030,6 +1055,10 @@ function handlePhoneCreate(req: WebCreateRequest): SessionView | { error: string
   // spaceId the renderer fell back to its folder rule and materialized the panel on another
   // canvas. For the phone the resolution stays async and is patched in when it lands.
   const entry = createEntry(result, { ptyId, panelId, terminalId, spaceId: req.originSpaceId ?? '' })
+  // Remember what `plano spawn <harness>` actually asked for. This is a label only: it changes what
+  // the roster REPORTS, never how a message is delivered — the readiness/composer path already
+  // resolves omp's boxed input prompt through BOXED_INPUT_PROMPT regardless of the kind string.
+  entry.spawnedKind = req.origin?.harness ? kindForHarness(req.origin.harness) : null
   sessions.set(ptyId, entry)
   // Plan F1: bus/phone-created sessions are mesh agents too (this is also the F6 spawn path).
   mesh.registerAgent({
@@ -1045,6 +1074,9 @@ function handlePhoneCreate(req: WebCreateRequest): SessionView | { error: string
     panelTitle: req.name ?? 'Terminal',
     lastSeen: Date.now(),
   } satisfies MeshAgent)
+  // Show the launched harness on the roster from the first tick, before process detection (which
+  // for a wrapper only ever sees the inner engine) has had a chance to run. Label only.
+  if (entry.spawnedKind) mesh.setKind(ptyId, entry.spawnedKind)
   log(`phone-create ptyId=${ptyId.slice(0, 8)} clients=${clients.size} boot=${(req.bootCommand || '').slice(0, 30)}`)
 
   void spaceIdPromise.then((spaceId) => {
@@ -1175,8 +1207,11 @@ function dispatch(method: string, params: Record<string, unknown>): unknown {
         entry.appPhase = v.phase === 'working' || v.phase === 'idle' ? (v.phase as AgentPhase) : null
         entry.appDisplayName = typeof v.displayName === 'string' ? v.displayName : undefined
         // Kind mirrors into the roster; busy comes ONLY from the detect loop (v3 A2) —
-        // the app verdict used the same lying byte-window and pinned busy=true.
-        if (entry.appKind) mesh.setKind(entry.ptyId, entry.appKind)
+        // the app verdict used the same lying byte-window and pinned busy=true. The launch label
+        // (reportedKind) wins over the desktop verdict for the same wrapper reason as the detect
+        // loop: `plano spawn omp` is an omp session even though its detector sees codex.
+        const rk = reportedKind(entry)
+        if (rk) mesh.setKind(entry.ptyId, rk)
         const view = sessionView(entry)
         web?.push({ event: 'verdict', ptyId: entry.ptyId, kind: view.agentKind, phase: view.phase, active: view.agentKind !== null })
       }
