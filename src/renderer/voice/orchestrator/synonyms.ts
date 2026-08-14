@@ -20,13 +20,14 @@ export function normalize(text: string): string {
 
 /** Panel types the voice assistant can create (the canvas-creatable ones; no group/files/voice). */
 export const PANEL_PHRASES: ReadonlyArray<readonly [PanelType, readonly string[]]> = [
-  ['terminal', ['terminal', 'terminales', 'consola', 'consolas', 'shell', 'powershell', 'cmd', 'terminar']],
+  // 'agente'/'asistente'/'ia' land here on purpose: an agent LIVES in a terminal, and an empty one
+  // already offers the launcher (TerminalView → AgentLauncher). They used to open the Agent panel,
+  // which only ever opened a terminal anyway — so this is the same request with one step removed.
+  ['terminal', ['terminal', 'terminales', 'consola', 'consolas', 'shell', 'powershell', 'cmd', 'terminar', 'agente', 'agent', 'asistente', 'ia', 'ai']],
   // NOTE: bare 'code' is intentionally NOT here — it collides with ASR mishears of "Claude". Files
   // is reached via "archivos"/"editor"/"files"/"explorador de archivos".
   ['editor', ['explorador de archivos', 'editor de codigo', 'archivos', 'archivo', 'editor', 'files', 'file', 'fichero', 'ficheros']],
   ['browser', ['explorador web', 'navegador', 'navegadr', 'browser', 'internet', 'chrome', 'pagina web', 'sitio web']],
-  ['agent', ['agente', 'agent', 'asistente', 'ia', 'ai']],
-  ['git', ['git', 'guit', 'gith', 'hit', 'control de versiones', 'repositorio', 'repo']],
   ['markdown', ['documento', 'markdown', 'nota', 'notas', 'doc', 'md']],
   ['todo', ['lista de tareas', 'tareas', 'pendientes', 'todo', 'to do', 'checklist', 'lista']],
   ['pomodoro', ['pomodoro', 'temporizador', 'timer', 'cronometro', 'reloj']],
@@ -40,8 +41,6 @@ export const PANEL_NOUN: Record<string, string> = {
   terminal: 'Terminal',
   editor: 'Files',
   browser: 'Browser',
-  agent: 'Agent',
-  git: 'Git',
   markdown: 'Document',
   todo: 'To-do',
   pomodoro: 'Pomodoro',

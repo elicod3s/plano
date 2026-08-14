@@ -52,8 +52,6 @@ const CREATE_ORDER: ReadonlyArray<readonly [PanelType, string]> = [
   ['terminal', 'Alt+T'],
   ['editor', 'Alt+E'],
   ['browser', 'Alt+B'],
-  ['agent', 'Alt+A'],
-  ['git', 'Alt+G'],
   ['markdown', 'Alt+M'],
   ['todo', 'Alt+L'],
   ['pomodoro', 'Alt+P'],

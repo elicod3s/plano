@@ -19,7 +19,7 @@ const GAP = 28
 const GROUP_GAP = 56
 
 /** Display order for type groups (most work-central first). Unknown types fall to the end. */
-const TYPE_ORDER: PanelType[] = ['terminal', 'editor', 'files', 'browser', 'agent', 'git', 'markdown', 'todo', 'pomodoro', 'sticky', 'group']
+const TYPE_ORDER: PanelType[] = ['terminal', 'editor', 'files', 'browser', 'markdown', 'todo', 'pomodoro', 'sticky', 'group']
 const orderIndex = (t: PanelType): number => {
   const i = TYPE_ORDER.indexOf(t)
   return i === -1 ? 99 : i

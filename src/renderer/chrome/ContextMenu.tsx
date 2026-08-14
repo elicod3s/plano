@@ -41,7 +41,6 @@ export function ContextMenu() {
     { kind: 'panel', panelType: 'terminal', label: 'New Terminal', icon: 'SquareTerminal' },
     { kind: 'panel', panelType: 'editor', label: 'New Files', icon: 'FolderTree' },
     { kind: 'panel', panelType: 'browser', label: 'New Browser', icon: 'Globe' },
-    { kind: 'panel', panelType: 'agent', label: 'New PLANO Agent', icon: 'Sparkles' },
     { kind: 'panel', panelType: 'todo', label: 'New To-do List', icon: 'ListChecks' },
     { kind: 'panel', panelType: 'pomodoro', label: 'New Pomodoro', icon: 'Timer' },
     { kind: 'panel', panelType: 'sticky', label: 'New Sticky Note', icon: 'StickyNote' },

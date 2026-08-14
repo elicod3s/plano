@@ -42,7 +42,15 @@ function linkPath(a: Rect, b: Rect): { x1: number; y1: number; x2: number; y2: n
   const bc = { x: b.x + b.width / 2, y: b.y + b.height / 2 }
   const dx = bc.x - ac.x
   const dy = bc.y - ac.y
-  const horizontal = Math.abs(dx) >= Math.abs(dy)
+  // Vertical whenever one panel sits CLEAR of the other vertically; horizontal only for panels
+  // that share a horizontal band.
+  //
+  // The old rule compared centre distances, which reads a spawn tree backwards: a row of siblings
+  // sits below its parent, but an outer sibling's centre is further away horizontally than
+  // vertically, so its edge left the parent's SIDE and cut straight across the siblings in
+  // between. "Is it below me" is the parent/child relation the layout draws, so it decides.
+  const vGap = Math.max(a.y - (b.y + b.height), b.y - (a.y + a.height))
+  const horizontal = vGap <= 0
 
   let x1: number, y1: number, x2: number, y2: number
   if (horizontal) {

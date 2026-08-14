@@ -57,39 +57,49 @@ let externalPlaced = 0
 
 /** Breathing room between panels, and the step used when a slot is already taken. */
 const PLACE_GAP = 20
+/** Mind-map spacing: siblings side by side, generations stacked with room for the link between. */
+const TREE_HGAP = 48
+const TREE_VGAP = 120
 
 /**
  * Where a terminal created from OUTSIDE the canvas lands.
  *
  * Two very different cases:
- *  - **Mesh spawn** (an agent asked for it): anchor on the REQUESTER's panel — same size, laid
- *    out as a tidy row to its right (wrapping to a second row past 3), so the batch reads as
- *    "these belong to that one". It used to ignore the requester entirely and drop everything at
- *    the viewport centre with a fixed default size, which is why new agents landed on top of the
- *    terminal that spawned them.
+ *  - **Mesh spawn** (an agent asked for it): the batch is laid out as a MIND MAP — one generation
+ *    directly BELOW the requester, siblings side by side and the whole row centred on the parent,
+ *    so who-spawned-whom is readable from the shape alone (the mesh link then draws the edge down
+ *    through the gap). It used to run to the RIGHT in rows of three, which reads as an unrelated
+ *    strip of windows and pushes every generation further off-screen horizontally — a tree grows
+ *    down, and depth is the thing worth seeing.
  *  - **Phone-created** (no origin): the original centred grid, unchanged.
  *
- * In both cases the result is nudged until it does not overlap an existing panel, so a spawn can
- * never bury live content.
+ * Neither can bury live content.
  */
 function placeExternalPanel(e: ExternalTerminalEvent): { x: number; y: number; width: number; height: number } {
   const panels = usePanelStore.getState().panels
   const origin = e.originPanelId ? panels[e.originPanelId] : undefined
+  const others = Object.values(panels).filter((p) => p.type !== 'region' && p.type !== 'label' && !p.dockedIn)
 
   let rect: { x: number; y: number; width: number; height: number }
   if (origin) {
-    // Same size as the panel that asked — the newcomer reads as a sibling, not a stray window.
+    // Same size as the panel that asked — the newcomer reads as a child, not a stray window.
     const { width, height } = origin.rect
-    const index = Math.max(0, e.groupIndex ?? 0)
-    const perRow = Math.min(3, Math.max(1, e.groupCount ?? 1))
-    const col = index % perRow
-    const row = Math.floor(index / perRow)
-    rect = {
-      x: Math.round(origin.rect.x + (col + 1) * (width + PLACE_GAP)),
-      y: Math.round(origin.rect.y + row * (height + PLACE_GAP)),
-      width,
-      height,
+    const count = Math.max(1, e.groupCount ?? 1)
+    const index = Math.min(Math.max(0, e.groupIndex ?? 0), count - 1)
+    const rowWidth = count * width + (count - 1) * TREE_HGAP
+    const startX = origin.rect.x + width / 2 - rowWidth / 2
+
+    // The generation band is resolved for the ROW, not per child: each sibling runs this function
+    // separately, so the test has to depend only on the parent and the batch size. Nudging children
+    // one at a time would land them at different heights and the row would stop reading as one
+    // generation — the exact thing this layout exists to show.
+    let y = origin.rect.y + height + TREE_VGAP
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const band = { x: startX, y, width: rowWidth, height }
+      if (!others.some((p) => p.id !== origin.id && rectsIntersect(band, p.rect))) break
+      y += height + TREE_VGAP
     }
+    return { x: Math.round(startX + index * (width + TREE_HGAP)), y: Math.round(y), width, height }
   } else {
     const size = PANEL_META.terminal.defaultSize
     const vp = useViewportStore.getState()
@@ -107,8 +117,8 @@ function placeExternalPanel(e: ExternalTerminalEvent): { x: number; y: number; w
   }
 
   // Never bury an existing panel: step down, then across, until the slot is clear. Bounded so a
-  // crowded canvas still places the panel somewhere instead of looping.
-  const others = Object.values(panels).filter((p) => p.type !== 'region' && p.type !== 'label' && !p.dockedIn)
+  // crowded canvas still places the panel somewhere instead of looping. (The mesh-spawn branch
+  // returns above with its own row-level resolution — this is the phone/centred-grid case.)
   for (let attempt = 0; attempt < 24; attempt += 1) {
     if (!others.some((p) => rectsIntersect(rect, p.rect))) break
     if (attempt % 4 === 3) {

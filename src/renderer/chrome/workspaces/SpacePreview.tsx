@@ -66,14 +66,11 @@ function tint(type: PanelType, color: string | undefined, active: boolean): stri
   const weight = ((): number => {
     switch (type) {
       case 'terminal':
-      case 'agent':
         return 0.62
       case 'editor':
       case 'browser':
       case 'markdown':
       case 'files':
-      case 'git':
-      case 'voice':
       case 'todo':
       case 'pomodoro':
         return 0.4

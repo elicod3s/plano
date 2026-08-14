@@ -8,7 +8,7 @@ import type { PanelType } from '@shared/domain/panel'
 import { useSettingsStore } from '@/stores/useSettingsStore'
 import type { Intent } from './types'
 
-const CREATABLE: PanelType[] = ['terminal', 'editor', 'browser', 'agent', 'git', 'markdown', 'todo', 'pomodoro', 'sticky', 'region', 'label']
+const CREATABLE: PanelType[] = ['terminal', 'editor', 'browser', 'markdown', 'todo', 'pomodoro', 'sticky', 'region', 'label']
 
 const SYSTEM = `You translate a user's spoken request into ONE JSON action for the PLANO canvas IDE.
 Reply with ONLY a JSON object, no prose. Schemas:

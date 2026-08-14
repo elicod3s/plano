@@ -15,7 +15,7 @@ import { useSettingsStore } from '@/stores/useSettingsStore'
 import { resolveSiteUrl } from './synonyms'
 import type { Intent, Target } from './types'
 
-const CREATABLE: PanelType[] = ['terminal', 'editor', 'browser', 'agent', 'git', 'markdown', 'todo', 'pomodoro', 'sticky', 'region', 'label']
+const CREATABLE: PanelType[] = ['terminal', 'editor', 'browser', 'markdown', 'todo', 'pomodoro', 'sticky', 'region', 'label']
 
 /** Spoken agent word → its launch command + kind + display (mirrors AGENTS_SPOKEN). */
 const AGENT_BY_WORD: Record<string, { command: string; kind: AgentKind; display: string }> = {

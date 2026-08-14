@@ -23,7 +23,6 @@ import {
   Select,
   TextField,
   NumberField,
-  PlaceholderCard,
   type Opt,
 } from './controls'
 import { ThemeGallery, AccentSwatches, TerminalThemeGallery, GridStylePicker, BackgroundPicker } from './galleries'
@@ -32,7 +31,7 @@ import { playAgentDoneChime } from '@/lib/agentChime'
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`
 
-// ── General (incl. Canvas & Workspace, Mobile & Remote, Account placeholder) ──
+// ── General (incl. Canvas & Workspace, Mobile & Remote) ──
 function GeneralSection() {
   const s = useSettingsStore((st) => st.settings.general)
   const patch = useSettingsStore((st) => st.patch)
@@ -68,7 +67,6 @@ function GeneralSection() {
         <Toggle checked={s.agentDoneNotify} onChange={(v) => set({ agentDoneNotify: v })} />
       </SettingRow>
       <CanvasBlock />
-      <AccountBlock />
     </>
   )
 }
@@ -90,19 +88,6 @@ function CanvasBlock() {
         <Toggle checked={s.autosave} onChange={(autosave) => set({ autosave })} />
       </SettingRow>
     </>
-  )
-}
-
-function AccountBlock() {
-  return (
-    <div className="mt-6">
-      <div className="label-caps mb-2 px-1">Account</div>
-      <PlaceholderCard
-        icon="UserRound"
-        title="Sign-in is coming"
-        body="PLANO runs fully local today. Cloud sign-in — synced settings, workspaces and agent history across machines — lands in a future build."
-      />
-    </div>
   )
 }
 
@@ -877,7 +862,6 @@ export const SETTINGS_INDEX: { section: SettingsSection; title: string; keywords
   { section: 'general', title: 'Autosave', keywords: 'save workspace persist' },
   { section: 'mobile', title: 'Mobile web app', keywords: 'phone remote lan wifi qr scan connect web app mobile android ios tablet' },
   { section: 'mobile', title: 'Remote access', keywords: 'token pairing security same network' },
-  { section: 'general', title: 'Account', keywords: 'sign in login profile sync cloud' },
   { section: 'appearance', title: 'Theme', keywords: 'dark light color monolith indigo orange tokyo sakura pearl mist paper white' },
   { section: 'appearance', title: 'Accent color', keywords: 'highlight tint cyan purple magenta rose lime teal swatch' },
   { section: 'appearance', title: 'Reduce motion', keywords: 'animation accessibility' },

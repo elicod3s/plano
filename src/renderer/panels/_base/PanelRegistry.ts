@@ -3,7 +3,6 @@ import type { Panel, PanelType } from '@shared/domain/panel'
 import { TerminalPanel } from '../terminal/TerminalPanel'
 import { EditorPanel } from '../editor/EditorPanel'
 import { BrowserPanel } from '../browser/BrowserPanel'
-import { AgentPanel } from '../agent/AgentPanel'
 import { MarkdownPanel } from '../markdown/MarkdownPanel'
 import { PomodoroPanel } from '../pomodoro/PomodoroPanel'
 import { TodoPanel } from '../todo/TodoPanel'
@@ -16,17 +15,14 @@ const REGISTRY: Record<PanelType, PanelComponent> = {
   terminal: TerminalPanel,
   editor: EditorPanel,
   browser: BrowserPanel,
-  agent: AgentPanel,
   // 'files' is the legacy File Explorer type, now merged into the unified Files panel
   // (the editor component). Saved 'files' panels are migrated to 'editor' on load
   // (see usePanelStore.replaceAll); this mapping is just a safety net for stragglers.
   files: EditorPanel,
-  git: StubPanel,
   markdown: MarkdownPanel,
   pomodoro: PomodoroPanel,
   todo: TodoPanel,
   sticky: StickyNotePanel,
-  voice: StubPanel,
   // Regions and text labels are ground annotations rendered by their own frames in PanelLayer
   // (RegionFrame / TextLabelFrame), not through PanelFrame — so these slots are never consulted;
   // keep them mapped to satisfy the exhaustive PanelType record.

@@ -17,8 +17,12 @@ import { clearSize, loadSize } from '@/lib/panelSizes'
  * Migrate a persisted panel forward. The legacy 'files' (File Explorer) type was merged
  * into the unified 'editor' (Files) panel, so old explorer panels become editors rooted
  * at the folder they were browsing.
+ *
+ * Retired types are compared as strings: they are gone from `PanelType`, so the compiler would
+ * reject `p.type === 'agent'` outright — but a workspace saved before they were removed still has
+ * them on disk, and a canvas must never fail to open because of a panel we deleted.
  */
-function migratePanel(p: Panel): Panel {
+function migratePanel(p: Panel): Panel | null {
   if (p.type === 'files') {
     const rootPath = (p.props as FilesProps).rootPath
     return {
@@ -30,6 +34,17 @@ function migratePanel(p: Panel): Panel {
       props: { folderPath: rootPath, sidebarOpen: true },
     }
   }
+  const legacy = p.type as string
+  // The Agent panel only ever launched a CLI into a terminal, and an empty terminal already offers
+  // that same launcher — so it becomes the terminal it was a detour to, keeping its place on the
+  // canvas. Its `provider` is not carried over: the launcher asks, and guessing would silently
+  // start an agent the user did not ask for on this open.
+  if (legacy === 'agent') {
+    return { id: p.id, type: 'terminal', rect: p.rect, z: p.z, title: p.title, props: {} }
+  }
+  // Git and Voice panels never rendered anything but "Coming soon", so there is no content to
+  // preserve and nothing to convert them into. Dropping them removes an empty box, not work.
+  if (legacy === 'git' || legacy === 'voice') return null
   return p
 }
 
@@ -277,6 +292,7 @@ export const usePanelStore = create<PanelState>()(
         let maxZ = 1
         for (const raw of panels) {
           const p = migratePanel(raw)
+          if (!p) continue // a retired panel type — see migratePanel
           s.panels[p.id] = p
           maxZ = Math.max(maxZ, p.z)
         }

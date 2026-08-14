@@ -12,17 +12,21 @@ export type PanelType =
   | 'terminal'
   | 'editor'
   | 'browser'
-  | 'agent'
   | 'files'
-  | 'git'
   | 'markdown'
   | 'pomodoro'
   | 'todo'
   | 'sticky'
-  | 'voice'
   | 'region'
   | 'label'
   | 'group'
+// Removed: 'agent', 'git', 'voice'. The Agent panel was a chooser that could not run anything —
+// picking Claude or Codex just opened a terminal, and a terminal already shows that same launcher
+// when it is empty (TerminalView → AgentLauncher), so it was a strictly worse duplicate. Git and
+// Voice never had an implementation at all: both rendered StubPanel's "Coming soon in PLANO", and
+// Git had a dock entry, a palette entry, a right-click entry and Alt+G pointing at it. Real git
+// lives in the per-terminal badge and the workspace chip; real voice is Odla, which is global.
+// Persisted panels of these types are migrated in usePanelStore.migratePanel.
 
 /**
  * One terminal inside a terminal panel (a tab). A panel hosts one or more of these; each has its
@@ -93,15 +97,8 @@ export interface EditorProps {
 export interface BrowserProps {
   url: string
 }
-export interface AgentProps {
-  provider?: string
-  autoApprove?: boolean
-}
 export interface FilesProps {
   rootPath?: string
-}
-export interface GitProps {
-  repoPath?: string
 }
 export interface MarkdownProps {
   filePath?: string
@@ -148,10 +145,6 @@ export interface StickyProps {
   text: string
   tone: StickyTone
 }
-export interface VoiceProps {
-  /** reserved */
-  language?: string
-}
 export interface RegionProps {
   label: string
 }
@@ -167,14 +160,11 @@ export interface PanelPropsMap {
   terminal: TerminalProps
   editor: EditorProps
   browser: BrowserProps
-  agent: AgentProps
   files: FilesProps
-  git: GitProps
   markdown: MarkdownProps
   pomodoro: PomodoroProps
   todo: TodoProps
   sticky: StickyProps
-  voice: VoiceProps
   region: RegionProps
   label: LabelProps
   group: GroupProps
@@ -223,14 +213,11 @@ export const PANEL_META: Record<PanelType, PanelMeta> = {
   // panel rect (instant-open), so the default is the editor size, not a compact tree size.
   editor: { type: 'editor', label: 'New Files', icon: 'FolderTree', defaultSize: { width: 880, height: 600 } },
   browser: { type: 'browser', label: 'New Browser', icon: 'Globe', defaultSize: { width: 720, height: 520 } },
-  agent: { type: 'agent', label: 'New PLANO Agent', icon: 'Sparkles', defaultSize: { width: 480, height: 520 } },
   files: { type: 'files', label: 'New File Explorer', icon: 'FolderTree', defaultSize: { width: 300, height: 460 } },
-  git: { type: 'git', label: 'New Git Panel', icon: 'GitBranch', defaultSize: { width: 420, height: 480 } },
   markdown: { type: 'markdown', label: 'New Document', icon: 'FileText', defaultSize: { width: 560, height: 460 } },
   pomodoro: { type: 'pomodoro', label: 'New Pomodoro', icon: 'Timer', defaultSize: { width: 320, height: 440 } },
   todo: { type: 'todo', label: 'New To-do List', icon: 'ListChecks', defaultSize: { width: 420, height: 580 } },
   sticky: { type: 'sticky', label: 'New Sticky Note', icon: 'StickyNote', defaultSize: { width: 240, height: 220 }, annotation: true },
-  voice: { type: 'voice', label: 'New Voice', icon: 'Mic', defaultSize: { width: 320, height: 200 } },
   region: { type: 'region', label: 'New Region', icon: 'Frame', defaultSize: { width: 640, height: 480 }, annotation: true },
   // Background text: a chrome-less heading that lives behind the panels (like a region, it's
   // ground — see TextLabelFrame), so it spawns wider than a sticky note.
@@ -249,11 +236,7 @@ export function defaultProps<T extends PanelType>(type: T): PanelPropsMap[T] {
       return { sidebarOpen: true } as PanelPropsMap[T]
     case 'browser':
       return { url: 'about:blank' } as PanelPropsMap[T]
-    case 'agent':
-      return {} as PanelPropsMap[T]
     case 'files':
-      return {} as PanelPropsMap[T]
-    case 'git':
       return {} as PanelPropsMap[T]
     case 'markdown':
       return { content: '' } as PanelPropsMap[T]
@@ -276,8 +259,6 @@ export function defaultProps<T extends PanelType>(type: T): PanelPropsMap[T] {
           Math.floor(Math.random() * 6)
         ],
       } as PanelPropsMap[T]
-    case 'voice':
-      return {} as PanelPropsMap[T]
     case 'region':
       return { label: 'Region' } as PanelPropsMap[T]
     case 'label':

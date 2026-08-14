@@ -42,14 +42,9 @@ export function Dock() {
       <IconButton icon="SquareTerminal" label="New Terminal" title={tip('New Terminal', 'terminal')} onClick={() => addPanelAtCenter('terminal')} />
       <IconButton icon="FolderTree" label="New Files" title={tip('New Files', 'editor')} onClick={() => addPanelAtCenter('editor')} />
       <IconButton icon="Globe" label="New Browser" title={tip('New Browser', 'browser')} onClick={() => addPanelAtCenter('browser')} />
-      <IconButton icon="Sparkles" label="New Agent" title={tip('New Agent', 'agent')} onClick={() => addPanelAtCenter('agent')} />
       <IconButton icon="StickyNote" label="New Sticky Note" title={tip('New Sticky Note', 'sticky')} onClick={() => addPanelAtCenter('sticky')} />
       <IconButton icon="ListChecks" label="New To-do List" title={tip('New To-do List', 'todo')} onClick={() => addPanelAtCenter('todo')} />
       <IconButton icon="Timer" label="New Pomodoro" title={tip('New Pomodoro', 'pomodoro')} onClick={() => addPanelAtCenter('pomodoro')} />
-
-      <Divider />
-
-      <IconButton icon="Mic" label="New Voice" title={tip('New Voice', 'voice')} onClick={() => addPanelAtCenter('voice')} />
     </div>
   )
 }
