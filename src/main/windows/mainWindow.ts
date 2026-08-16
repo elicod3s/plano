@@ -46,11 +46,74 @@ export function createMainWindow(
 
   win.once('ready-to-show', () => win.show())
 
+  /**
+   * PLANO has its own canvas zoom, so Chromium's PAGE zoom is never wanted here — and it has no way
+   * back once it happens. An accidental Ctrl+wheel (or Ctrl+minus) shrank the entire UI, chrome and
+   * all, and nothing in the app could undo it: there is no menu, so there is no Ctrl+0 either. The
+   * level is also persisted per origin, so it survived restarts.
+   *
+   * Pinned rather than intercepted at the keyboard: the terminals bind Ctrl +/− themselves for
+   * per-terminal font zoom, and swallowing those keys in main would break a feature to fix a bug.
+   * Forcing the factor back covers every route in (wheel, pinch, shortcut) and leaves the keys
+   * alone. Applied on each load as well, which repairs a window that is ALREADY stuck.
+   */
+  const pinZoom = (): void => {
+    try {
+      // setZoomLevel(0) is the canonical reset and CLEARS the level Chromium persisted for this
+      // origin; setZoomFactor(1) alone would be overridden by that stored value on the next load.
+      // Both are set so a window that is already stuck comes back on launch, without the user
+      // needing a shortcut that does not exist here (there is no menu, so there is no Ctrl+0).
+      win.webContents.setZoomLevel(0)
+      win.webContents.setZoomFactor(1)
+      win.webContents.setVisualZoomLevelLimits(1, 1)
+    } catch {
+      /* webContents gone mid-teardown */
+    }
+  }
+  win.webContents.on('dom-ready', pinZoom)
+  win.webContents.on('did-finish-load', pinZoom)
+  win.webContents.on('zoom-changed', () => {
+    pinZoom()
+    onDiagnostic('page-zoom-blocked')
+  })
+  pinZoom()
+
   // Persist production failures as well as dev-console diagnostics. Electron exposes precise reasons
   // such as oom, crashed, killed, launch-failed and integrity-failure here.
-  win.webContents.on('render-process-gone', (_event, details) =>
-    onDiagnostic('render-process-gone', details),
-  )
+  /**
+   * A dead renderer used to take the whole app with it, silently.
+   *
+   * This handler only LOGGED, so the window then closed, `window-all-closed` fired, and the app
+   * quit with no error and no dialog — PLANO "closed by itself", usually with many agents open
+   * (20 `render-process-gone · crashed` entries in one user's log). The detached agent host kept
+   * every PTY alive, which is why the agents survived while the window vanished.
+   *
+   * Reloading is safe precisely because of that split: terminals live in the daemon, and the
+   * renderer reattaches to them on load and replays their buffers. So a crash becomes a flicker
+   * instead of losing the session.
+   *
+   * Bounded on purpose: a renderer that dies three times inside a minute is failing at something
+   * reload cannot fix, and an infinite reload loop is worse than stopping. After that it stays
+   * down, and the log says why.
+   */
+  let crashTimes: number[] = []
+  win.webContents.on('render-process-gone', (_event, details) => {
+    onDiagnostic('render-process-gone', details)
+    const now = Date.now()
+    crashTimes = crashTimes.filter((t) => now - t < 60_000)
+    crashTimes.push(now)
+    if (crashTimes.length > 3) {
+      onDiagnostic('render-process-gone-giving-up', { crashesInLastMinute: crashTimes.length })
+      return
+    }
+    if (win.isDestroyed()) return
+    onDiagnostic('render-process-reloading', { attempt: crashTimes.length })
+    try {
+      win.webContents.reload()
+    } catch (err) {
+      onDiagnostic('render-process-reload-failed', { error: String(err) })
+    }
+  })
   win.webContents.on('preload-error', (_event, preloadPath, error) =>
     onDiagnostic('preload-error', { preloadPath, error: String(error), stack: error.stack }),
   )
