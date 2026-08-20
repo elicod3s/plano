@@ -18,7 +18,7 @@
 
 import { appendFile, mkdir, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 
 interface HistEntry {
   /** Rolling, ANSI-stripped, whitespace-collapsed window of recent output. */
@@ -44,7 +44,13 @@ const HERMES_RESUME_RE =
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1b\[[0-9;?]*[A-Za-z]|\x1b[\]P][^\x07\x1b]*(?:\x07|\x1b\\)?/g
 
-/** PSReadLine's per-host history file — where a new terminal loads predictions from. */
+/**
+ * PSReadLine's per-host history file — where a new terminal loads predictions from.
+ *
+ * Linux extension: bash/zsh read HISTFILE at startup, so appending the resume command to
+ * ~/.bash_history / ~/.zsh_history makes it appear in future terminals' predictive history
+ * the same way PSReadLine does on Windows. The OnIdle pending-file drain is PowerShell-only.
+ */
 function historyFileFor(shellName: string): string | null {
   const appData = process.env.APPDATA
   if (!appData) return null
@@ -58,6 +64,24 @@ function historyFileFor(shellName: string): string | null {
   }
 }
 
+/**
+ * Linux: resolve a POSIX shell's history file so resume commands are persisted the same way
+ * PSReadLine does on Windows. Returns null for shells whose history format we cannot safely
+ * append to (fish) or for non-Linux POSIX (macOS — left untouched, returns null).
+ */
+function posixHistoryFileFor(shellName: string): string | null {
+  if (process.platform !== 'linux') return null
+  const home = homedir()
+  switch (shellName.toLowerCase()) {
+    case 'bash':
+      return join(home, '.bash_history')
+    case 'zsh':
+      return join(home, '.zsh_history')
+    default:
+      return null
+  }
+}
+
 export class TerminalHistoryService {
   private readonly entries = new Map<string, HistEntry>()
   /** Commands already captured this app session — never remember the same one twice. */
@@ -65,7 +89,7 @@ export class TerminalHistoryService {
 
   register(ptyId: string, shellName: string, shellPid: number, enabled: boolean): void {
     if (!enabled) return
-    const histPath = historyFileFor(shellName)
+    const histPath = historyFileFor(shellName) ?? posixHistoryFileFor(shellName)
     if (!histPath) return // non-PowerShell shells have no PSReadLine history / OnIdle drain
     this.entries.set(ptyId, {
       buf: '',

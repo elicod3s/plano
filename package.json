@@ -1,6 +1,6 @@
 {
   "name": "plano",
-  "version": "0.2.31",
+  "version": "0.3.0",
   "private": true,
   "description": "PLANO \u2014 the infinite canvas workspace for builders. One spatial screen per project: terminals, editors, browsers and AI agents, together.",
   "author": "PLANO",
@@ -21,9 +21,10 @@
     "dist": "npm run model && npm run icons && npm run build:web && electron-vite build && electron-builder --publish never",
     "dist:win": "npm run model && npm run icons && npm run build:web && electron-vite build && electron-builder --win --publish never",
     "dist:mac": "npm run model && npm run icons && electron-vite build && electron-builder --mac --publish never",
-    "dist:linux": "npm run model && npm run icons && electron-vite build && electron-builder --linux --publish never",
+    "dist:linux": "npm run model && npm run icons && npm run build:web && electron-vite build && electron-builder --linux --publish never",
     "release": "node scripts/publish-release.mjs",
-    "release:win": "npm run dist:win && node scripts/publish-release.mjs"
+    "release:win": "npm run dist:win && node scripts/publish-release.mjs",
+    "release:linux": "npm run dist:linux && node scripts/publish-release.mjs --platform linux"
   },
   "build": {
     "appId": "app.plano.desktop",
@@ -109,6 +110,25 @@
     },
     "dmg": {
       "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icons",
+      "category": "Development",
+      "synopsis": "The infinite canvas workspace for builders",
+      "description": "PLANO is an infinite canvas workspace for builders. One spatial screen per project: terminals, editors, browsers and AI agents, together.",
+      "maintainer": "PLANO",
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "desktop": {
+        "StartupWMClass": "plano",
+        "Categories": ["Development"],
+        "Terminal": false
+      }
     }
   },
   "dependencies": {

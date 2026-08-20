@@ -66,25 +66,63 @@ async function rawListeners(): Promise<ListenEntry[]> {
       )
     })
   }
-  // POSIX: lsof -iTCP -sTCP:LISTEN → "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME"
+  // Linux: prefer `ss` (always present via iproute), fall back to `lsof`.
+  // `ss -tlnpH` prints: "State Recv-Q Send-Q Local Address:Port Peer Address:Port users:(("name",pid=N,fd=M))"
+  if (process.platform === 'linux') {
+    return new Promise((resolve) => {
+      execFile('ss', ['-tlnpH'], { timeout: SCAN_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (ssErr, ssStdout) => {
+        if (!ssErr && ssStdout) {
+          resolve(parseSs(ssStdout))
+          return
+        }
+        // Fallback: lsof -iTCP -sTCP:LISTEN
+        execFile('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n'], { timeout: SCAN_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
+          if (err || !stdout) return resolve([])
+          resolve(parseLsof(stdout))
+        })
+      })
+    })
+  }
+  // macOS and other POSIX: lsof -iTCP -sTCP:LISTEN → "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME"
   return new Promise((resolve) => {
     execFile('lsof', ['-iTCP', '-sTCP:LISTEN', '-P', '-n'], { timeout: SCAN_TIMEOUT_MS, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => {
       if (err || !stdout) return resolve([])
-      const out: ListenEntry[] = []
-      const lines = stdout.split(/\r?\n/).slice(1)
-      for (const line of lines) {
-        const cols = line.trim().split(/\s+/)
-        if (cols.length < 9) continue
-        const name = cols[0]
-        const pid = Number(cols[1])
-        const addr = cols[8]
-        const portMatch = /:(\d+)$/.exec(addr)
-        if (!portMatch || !Number.isFinite(pid)) continue
-        out.push({ port: Number(portMatch[1]), pid, name })
-      }
-      resolve(out)
+      resolve(parseLsof(stdout))
     })
   })
+}
+
+/** Parse `ss -tlnpH` output. Never throws — returns [] on any parse failure. */
+function parseSs(stdout: string): ListenEntry[] {
+  const out: ListenEntry[] = []
+  for (const line of stdout.split(/\r?\n/).slice(1)) {
+    // Match a port at the end of the Local Address:Port column, then the users:() field for pid.
+    const portMatch = /[:\]](\d+)\s+\S+\s+/.exec(line)
+    const userMatch = /users:\(\("([^"]+)",pid=(\d+),fd=\d+\)\)/.exec(line)
+    if (!portMatch || !userMatch) continue
+    const port = Number(portMatch[1])
+    const pid = Number(userMatch[2])
+    if (!Number.isFinite(port) || !Number.isFinite(pid)) continue
+    out.push({ port, pid, name: userMatch[1] })
+  }
+  return out
+}
+
+/** Parse `lsof -iTCP -sTCP:LISTEN -P -n` output. Never throws — returns [] on any parse failure. */
+function parseLsof(stdout: string): ListenEntry[] {
+  const out: ListenEntry[] = []
+  const lines = stdout.split(/\r?\n/).slice(1)
+  for (const line of lines) {
+    const cols = line.trim().split(/\s+/)
+    if (cols.length < 9) continue
+    const name = cols[0]
+    const pid = Number(cols[1])
+    const addr = cols[8]
+    const portMatch = /:(\d+)$/.exec(addr)
+    if (!portMatch || !Number.isFinite(pid)) continue
+    out.push({ port: Number(portMatch[1]), pid, name })
+  }
+  return out
 }
 
 /** Listening ports whose owning PID is a descendant of a PLANO PTY shell, joined to panels. */

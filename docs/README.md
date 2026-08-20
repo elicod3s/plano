@@ -25,6 +25,11 @@ open work items.
 
 - [Design system](design/DESIGN_SYSTEM.md) — tokens, layout, motion, and the hard rules.
 
+### Platform setup
+
+- [Linux setup](engineering/LINUX_SETUP.md) — Fedora package list, node-pty rebuild, Wayland
+  launch flags, and packaging for AppImage + rpm.
+
 ### Terminal
 
 - [Terminal analysis](engineering/terminal/ANALISIS_TERMINAL_PLANO.md) — how the terminal is

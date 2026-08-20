@@ -28,6 +28,7 @@ import {
 import { ThemeGallery, AccentSwatches, TerminalThemeGallery, GridStylePicker, BackgroundPicker } from './galleries'
 import { listInputDevices, releaseMic } from '@/voice/audio/mic'
 import { playAgentDoneChime } from '@/lib/agentChime'
+import { fetchPlatform } from '@/lib/platform'
 
 const pct = (v: number): string => `${Math.round(v * 100)}%`
 
@@ -102,6 +103,7 @@ function MobileSection() {
     pairingCode: string
     url: string
     phoneConnected: boolean
+    firewallNotice: string
   } | null>(null)
   const [qrs, setQrs] = useState<Array<{ ip: string; label: string; dataUrl: string }>>([])
 
@@ -193,6 +195,19 @@ function MobileSection() {
       >
         <Toggle checked={keepAgents} onChange={(v) => patch('terminal', { keepAgentsOnQuit: v })} />
       </SettingRow>
+      {info?.firewallNotice ? (
+        <SettingRow title="Firewall" description="The Agent Host port is blocked by firewalld. Run this once so your phone can reach PLANO.">
+          <div className="flex items-center gap-2">
+            <code className="rounded-[10px] border border-glass bg-surface-inset px-2.5 py-1.5 font-mono text-[11px] text-text-secondary">
+              {info.firewallNotice}
+            </code>
+            <Button variant="ghost" size="sm" onClick={() => void window.plano.clipboard.writeText(info.firewallNotice)}>
+              <Icon name="Copy" size={14} />
+              Copy
+            </Button>
+          </div>
+        </SettingRow>
+      ) : null}
     </div>
   )
 }
@@ -394,11 +409,22 @@ function TerminalSection() {
   const s = useSettingsStore((st) => st.settings.terminal)
   const patch = useSettingsStore((st) => st.patch)
   const set = (p: Partial<typeof s>): void => patch('terminal', p)
+  // Linux ports: the privileged platform comes from main over IPC. On Linux, PowerShell/cmd
+  // are never installed — filter them out so the Shell picker only shows shells that exist.
+  // Windows and macOS keep the full list byte-identical to before (all 7 options).
+  const [platform, setPlatform] = useState<NodeJS.Platform | null>(null)
+  useEffect(() => {
+    void fetchPlatform().then(setPlatform)
+  }, [])
+  const shellOpts =
+    platform === 'linux'
+      ? SHELL_OPTS.filter((o) => o.value === 'auto' || o.value === 'bash' || o.value === 'zsh' || o.value === 'fish')
+      : SHELL_OPTS
   return (
     <>
       <SectionTitle>Terminal</SectionTitle>
       <SettingRow title="Shell" description="Program launched for new terminals. The explicit path below overrides this.">
-        <Select value={s.shell} options={SHELL_OPTS} onChange={(shell) => set({ shell })} width={190} />
+        <Select value={s.shell} options={shellOpts} onChange={(shell) => set({ shell })} width={190} />
       </SettingRow>
       <SettingRow title="Shell path" description="Absolute path to a shell executable. Leave blank to use the choice above.">
         <TextField value={s.shellPath} placeholder="Auto-detect" onChange={(shellPath) => set({ shellPath })} width={210} />
@@ -724,11 +750,13 @@ function UpdateRow() {
   const target = useUpdateStore((s) => s.version)
   const percent = useUpdateStore((s) => s.percent)
   const message = useUpdateStore((s) => s.message)
+  const manualUpdateMessage = useUpdateStore((s) => s.manualUpdateMessage)
   const checkedAt = useUpdateStore((s) => s.checkedAt)
   const checkNow = useUpdateStore((s) => s.checkNow)
   const installNow = useUpdateStore((s) => s.installNow)
 
   const status = ((): string => {
+    if (phase === 'manual-required') return manualUpdateMessage ?? 'Manual update required'
     if (!canCheck) return 'Development build'
     if (phase === 'checking') return 'Checking…'
     if (phase === 'downloading') return `Downloading ${target ?? ''} · ${Math.round(percent ?? 0)}%`

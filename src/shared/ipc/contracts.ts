@@ -395,6 +395,13 @@ export interface RemoteInfoResult {
   url: string
   /** True when at least one phone is connected to the mobile web app right now. */
   phoneConnected: boolean
+  /**
+   * Firewall guidance for the current platform. Empty when the firewall is open or not
+   * applicable (Windows auto-adds a rule; macOS has no host firewall). On Linux (firewalld),
+   * when the mobile port is not yet open, this carries the exact command the user should run
+   * so the phone can reach the daemon. Surfaced in Settings -> Mobile & Remote.
+   */
+  firewallNotice: string
 }
 
 // ── auto-update (GitHub releases) ──
@@ -411,6 +418,8 @@ export type UpdatePhase =
   | 'up-to-date'
   /** The last check failed (offline, repo unreachable, …). Logged; auto-retried next cycle. */
   | 'error'
+  /** Linux non-AppImage installs (rpm) cannot self-update — the user must update manually. */
+  | 'manual-required'
 
 /** Snapshot of the updater state, pushed main → renderer and readable on demand. */
 export interface UpdateState {
@@ -428,6 +437,8 @@ export interface UpdateState {
   canCheck: boolean
   /** Unix ms of the last completed check, or undefined before the first one. */
   checkedAt?: number
+  /** Concise guidance shown when phase is 'manual-required' (Linux rpm installs). */
+  manualUpdateMessage?: string
 }
 export interface UpdateCheckResult {
   ok: boolean

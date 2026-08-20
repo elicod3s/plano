@@ -17,7 +17,19 @@
  *   npm run release:win                        # build Windows installer + publish
  *   node scripts/publish-release.mjs           # publish whatever is already in release/
  *   node scripts/publish-release.mjs --platform mac   # publish mac artifacts (dmg + zip + latest-mac.yml)
+ *   node scripts/publish-release.mjs --platform linux # publish linux artifacts (AppImage + latest-linux.yml)
  *   node scripts/publish-release.mjs --replace        # delete an existing vX release first (re-publish)
+ *   node scripts/publish-release.mjs --prerelease      # publish as a GitHub prerelease (not "Latest")
+ *
+ * --prerelease: marks the GitHub release as a prerelease so it does NOT become "Latest". This
+ * matters when a tag ships artifacts for only one platform: every installed Windows build polls
+ * the latest release for latest.yml. If a Linux-only release becomes "Latest", Windows auto-update
+ * 404s because there is no latest.yml. Publishing as a prerelease keeps the previous all-platform
+ * release as "Latest" so Windows/macOS auto-update is untouched. Accepted trade-off: while a tag is
+ * a prerelease, the Linux AppImage does NOT auto-update either, because electron-updater ignores
+ * prereleases. Follow-up: when the Windows 0.3.0 installer is built, re-publish the same tag with
+ * --replace (including latest.yml + PLANO-Setup.exe) and drop --prerelease — one tag then serves
+ * all three platforms and every platform auto-updates again.
  *
  * Requires the GitHub CLI (`gh`) to be installed and authenticated.
  */
@@ -34,6 +46,7 @@ const args = process.argv.slice(2)
 const platform = args.includes('--platform') ? args[args.indexOf('--platform') + 1] ?? 'win' : 'win'
 const replace = args.includes('--replace')
 const skipBuild = args.includes('--skip-build')
+const prerelease = args.includes('--prerelease')
 
 function fail(message) {
   console.error(`\n✖ ${message}`)
@@ -63,7 +76,8 @@ if (!skipBuild) {
   console.log(`\n› Building ${platform} artifacts…`)
   if (platform === 'win') run('npm', ['run', 'dist:win'], { cwd: ROOT })
   else if (platform === 'mac') run('npm', ['run', 'dist:mac'], { cwd: ROOT })
-  else fail(`Unknown --platform "${platform}" (win | mac).`)
+  else if (platform === 'linux') run('npm', ['run', 'dist:linux'], { cwd: ROOT })
+  else fail(`Unknown --platform "${platform}" (win | mac | linux).`)
 }
 
 // ── 2. collect artifacts ────────────────────────────────────────────────────────────────────────
@@ -91,8 +105,23 @@ if (platform === 'win') {
   if (!files.includes(ymlName)) fail(`Missing ${ymlName} in release/ — macOS build must include the zip target.`)
   if (dmg.length === 0 && zip.length === 0) fail('No .dmg or .zip artifacts found in release/.')
   artifacts.push(join(RELEASE_DIR, ymlName), ...dmg.map((f) => join(RELEASE_DIR, f)), ...zip.map((f) => join(RELEASE_DIR, f)))
+} else if (platform === 'linux') {
+  const appImage = files.filter((f) => f.endsWith('.AppImage'))
+  const blockmaps = files.filter((f) => f.endsWith('.AppImage.blockmap'))
+  const ymlName = 'latest-linux.yml'
+  if (appImage.length === 0) fail('No .AppImage artifact found in release/ — did the Linux build succeed?')
+  if (!files.includes(ymlName)) fail(`Missing ${ymlName} in release/ — the AppImage target must be built for auto-update.`)
+  // Sanity: latest-linux.yml must describe THIS version and a file we are actually uploading.
+  const yml = readFileSync(join(RELEASE_DIR, ymlName), 'utf8')
+  const ymlVersion = yml.match(/^version:\s*(.+)$/m)?.[1]?.trim()
+  const ymlPath = yml.match(/^path:\s*(.+)$/m)?.[1]?.trim()
+  if (ymlVersion !== version)
+    fail(`latest-linux.yml says version ${ymlVersion} but package.json says ${version}. Rebuild.`)
+  if (!ymlPath || !files.includes(ymlPath))
+    fail(`latest-linux.yml points at "${ymlPath}" which is missing from release/. Rebuild.`)
+  artifacts.push(join(RELEASE_DIR, ymlName), ...appImage.map((f) => join(RELEASE_DIR, f)), ...blockmaps.map((f) => join(RELEASE_DIR, f)))
 } else {
-  fail(`Unknown --platform "${platform}" (win | mac).`)
+  fail(`Unknown --platform "${platform}" (win | mac | linux).`)
 }
 
 // ── 3. existing release? ────────────────────────────────────────────────────────────────────────
@@ -122,11 +151,10 @@ try {
 }
 
 // ── 5. create the release ───────────────────────────────────────────────────────────────────────
-console.log(`\n› Publishing ${tag} → ${REPO} (${artifacts.map((a) => basename(a)).join(', ')})`)
-run(
-  'gh',
-  ['release', 'create', tag, '--repo', REPO, '--title', `PLANO ${version}`, '--notes', notes, ...artifacts],
-  { cwd: ROOT },
-)
+console.log(`\n› Publishing ${tag} → ${REPO} (${artifacts.map((a) => basename(a)).join(', ')})${prerelease ? ' [prerelease]' : ''}`)
+const releaseArgs = ['release', 'create', tag, '--repo', REPO, '--title', `PLANO ${version}`, '--notes', notes]
+if (prerelease) releaseArgs.push('--prerelease')
+releaseArgs.push(...artifacts)
+run('gh', releaseArgs, { cwd: ROOT })
 
-console.log(`\n✔ ${tag} published. Installed PLANO builds will pick it up on their next check (≤ 4h) or immediately on restart.`)
+console.log(`\n✔ ${tag} published${prerelease ? ' as a prerelease — existing "Latest" release is unchanged' : ''}. Installed PLANO builds will pick it up on their next check (≤ 4h) or immediately on restart.`)

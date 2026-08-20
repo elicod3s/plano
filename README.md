@@ -13,6 +13,7 @@ subscriptions, on your own machine.
 
 [![Download for Windows](https://img.shields.io/badge/Download-Windows-0078D4?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
 [![Download for macOS](https://img.shields.io/badge/Download-macOS-111111?style=for-the-badge&logo=apple&logoColor=white)](https://github.com/zqkra/plano/releases/latest)
+[![Download for Linux](https://img.shields.io/badge/Download-Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black)](https://github.com/zqkra/plano/releases/latest)
 [![Support on Ko-fi](https://img.shields.io/badge/Support-Ko--fi-FF5E5B?style=for-the-badge&logo=kofi&logoColor=white)](https://ko-fi.com/zqkra)
 
 [![Latest release](https://img.shields.io/github/v/release/zqkra/plano?label=latest&color=2b2b2b)](https://github.com/zqkra/plano/releases)
@@ -22,6 +23,7 @@ subscriptions, on your own machine.
 
 ![Platform](https://img.shields.io/badge/Windows%2010%201809%2B-informational?style=flat-square&color=3a3a3a)
 ![Platform](https://img.shields.io/badge/macOS%2012%2B-informational?style=flat-square&color=3a3a3a)
+![Platform](https://img.shields.io/badge/Linux%20(AppImage)-informational?style=flat-square&color=3a3a3a)
 ![Built with](https://img.shields.io/badge/Electron%20·%20React%20·%20TypeScript-informational?style=flat-square&color=3a3a3a)
 
 </div>
@@ -39,8 +41,9 @@ subscriptions, on your own machine.
 - **Windows** — `.exe` installer. Self-updating: PLANO checks for new releases on launch and
   every 4 hours, downloads in the background, and installs on restart or quit.
 - **macOS** — `.dmg` (Apple Silicon). Unsigned CI builds; right-click → **Open** on first launch.
+- **Linux** — `.AppImage` (x64). Make it executable and run it; there is no install step.
 
-Requires Windows 10 1809+ (for ConPTY) or macOS 12+.
+Requires Windows 10 1809+ (for ConPTY), macOS 12+, or Linux (Fedora 40+, KDE Plasma, Wayland or X11).
 
 ---
 
@@ -206,7 +209,7 @@ to them from your phone on the same Wi-Fi, with the desktop app closed.
 
 ## Requirements
 
-- **Windows 10 1809+** (ConPTY) or **macOS 12+**
+- **Windows 10 1809+** (ConPTY), **macOS 12+**, or **Linux** (Fedora 40+, KDE Plasma, Wayland or X11)
 - An AI coding CLI (Claude Code, Codex, Gemini, …) only if you want agent mode — plain
   terminals work standalone.
 
@@ -242,6 +245,9 @@ npm run dev       # launch PLANO with HMR
 
 > **Windows:** `node-pty` needs the *Desktop development with C++* workload (VS Build Tools) if
 > no prebuilt binary is available, and Windows 10 1809+ (ConPTY).
+>
+> **Linux (Fedora):** See [`docs/engineering/LINUX_SETUP.md`](docs/engineering/LINUX_SETUP.md) for the
+> package list, rebuild steps, and Wayland launch flags.
 
 ### Scripts
 
@@ -252,6 +258,8 @@ npm run dev       # launch PLANO with HMR
 | `npm run build:web` | Build the PLANO Mobile web app into `web-dist/` |
 | `npm run dist` | Build + package an installer with electron-builder |
 | `npm run release:win` | Build the Windows installer **and publish it** as a GitHub release |
+| `npm run dist:linux` | Build the Linux AppImage locally (no upload) |
+| `npm run release:linux` | Build the Linux AppImage **and publish** it as a GitHub release |
 
 Publishing a new version (the whole release flow):
 
@@ -259,11 +267,12 @@ Publishing a new version (the whole release flow):
 npm run release:win                       # build installer + publish v<version> (uses your gh CLI)
 node scripts/publish-release.mjs         # publish artifacts already in release/ (no rebuild)
 node scripts/publish-release.mjs --platform mac   # publish macOS artifacts (dmg + zip + latest-mac.yml)
+node scripts/publish-release.mjs --platform linux # publish Linux artifacts (AppImage + latest-linux.yml)
 node scripts/publish-release.mjs --replace        # delete + re-publish an existing vX release
+node scripts/publish-release.mjs --prerelease      # publish as a prerelease (not "Latest")
 ```
 
-The release must be tagged `v<version>` (the script does this) and **not** a draft/prerelease —
-electron-updater ignores those. Mac builds include a `zip` target because macOS updates need it.
+The release must be tagged `v<version>` (the script does this). A tag that ships artifacts for only one platform is published with `--prerelease`, so the previous all-platform release stays GitHub’s “Latest” and installed Windows/macOS builds still find their `latest.yml`/`latest-mac.yml`. The trade-off: electron-updater ignores prereleases, so nothing auto-updates from that tag until it is re-published with `--replace` and without `--prerelease`. Mac builds include a `zip` target because macOS updates need it.
 `dist*` scripts build locally with `--publish never`; only `release*` uploads.
 
 ### Architecture (one screen)

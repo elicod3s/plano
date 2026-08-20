@@ -51,6 +51,7 @@ import { redactContext } from '../services/contextRedaction'
 import type { WebviewMotionService } from '../services/WebviewMotionService'
 import type { DiagnosticsService } from '../services/DiagnosticsService'
 import type { UpdateService } from '../services/UpdateService'
+import { getFirewallNotice } from '../index'
 
 export interface Services {
   diagnostics: DiagnosticsService
@@ -734,9 +735,10 @@ export function registerIpc(services: Services, env: IpcEnv): void {
         pairingCode: token.slice(0, 6).toUpperCase(),
         url: webPort > 0 && primary ? `http://${primary}:${webPort}/` : '',
         phoneConnected,
+        firewallNotice: getFirewallNotice(),
       }
     } catch {
-      return { lanIps: [], webPort: 0, token: '', pairingCode: '', url: '', phoneConnected: false }
+      return { lanIps: [], webPort: 0, token: '', pairingCode: '', url: '', phoneConnected: false, firewallNotice: getFirewallNotice() }
     }
   })
 

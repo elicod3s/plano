@@ -70,6 +70,8 @@ export class FileWatcherService {
     private readonly post: (channel: string, payload: unknown) => void,
     /** Guard: only ever watch directories the renderer is allowed to read. */
     private readonly isAllowed: (dir: string) => boolean,
+    /** Optional diagnostic logger (DiagnosticsService.log) — used to surface inotify limits. */
+    private readonly log?: (event: string, details?: Record<string, unknown>) => void,
   ) {}
 
   watch(dir: string): { ok: boolean } {
@@ -125,7 +127,18 @@ export class FileWatcherService {
         mergeKind(entry, resolve(changedPath), kind)
         this.scheduleFlush(key, entry)
       })
-      watcher.on('error', () => this.close(key))
+      watcher.on('error', (err) => {
+        // Linux: ENOSPC means the inotify watch limit was hit (fs.inotify.max_user_watches).
+        // Rather than silently closing and missing events, log through DiagnosticsService so the
+        // user knows to raise the limit. The close still happens (the watcher is broken).
+        if (err && (err as NodeJS.ErrnoException).code === 'ENOSPC') {
+          this.log?.('file-watcher-inotify-limit', {
+            dir: absoluteDir,
+            hint: 'Run: sudo sysctl fs.inotify.max_user_watches=524288 && sudo sysctl -p',
+          })
+        }
+        this.close(key)
+      })
       entry.watcher = watcher
       return { ok: true }
     } catch {

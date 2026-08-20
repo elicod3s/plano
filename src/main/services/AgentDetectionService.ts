@@ -85,10 +85,12 @@ const SIGS: Signature[] = [
     // Grok Build (x.ai) — a native Rust TUI installed at ~/.grok/bin/grok.exe (bundled
     // resources in ~/.grok/bundled). The image name alone is the load-bearing signal; the
     // cmd matcher also trusts a bare `grok` word so a PATH-less spawn still detects.
+    // On Linux, grok may be installed via bun (grok-dev package), so the host process is
+    // `bun` and the cmd carries the `grok-dev` path segment.
     id: 'grok',
     displayName: 'Grok',
-    names: /^(grok(\.exe)?)$/i,
-    cmd: /(^|[\\/\s])grok(\.exe)?(\s|$)|[\\/]\.grok[\\/]bin[\\/]/i,
+    names: /^(grok(\.exe)?|bun(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])grok(\.exe)?(\s|$)|[\\/]\.grok[\\/]bin[\\/]|[\\/]grok-dev[\\/]/i,
     banner: /Grok (Build|CLI)|x\.ai\b|SuperGrok/i,
   },
   {
@@ -127,7 +129,7 @@ const SIGS: Signature[] = [
   },
 ]
 
-const SHELLS = /^(pwsh|powershell|cmd|conhost|bash|zsh|sh|fish|wsl|winpty-agent|node-pty)(\.exe)?$/i
+const SHELLS = /^(pwsh|powershell|cmd|conhost|bash|zsh|sh|dash|fish|wsl|winpty-agent|node-pty|ksh|tcsh|csh)(\.exe)?$/i
 const HOSTS = /^(node|python(3|w)?|bun|deno)(\.exe)?$/i
 const TAIL_MAX = 4096
 const EXIT_GRACE_MS = 2500

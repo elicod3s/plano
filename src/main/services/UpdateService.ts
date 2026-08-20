@@ -35,9 +35,14 @@ export class UpdateService {
   ) {
     this.diagnostics = diagnostics
     this.post = post
+    // Linux non-AppImage installs (rpm) cannot use electron-updater — it only supports
+    // AppImage on Linux. Be honest: put the updater into a manual-required state instead
+    // of silently failing or pretending it can auto-update.
+    const manualRequired = process.platform === 'linux' && app.isPackaged && !process.env.APPIMAGE
     this.state = {
-      phase: 'idle',
-      canCheck: app.isPackaged,
+      phase: manualRequired ? 'manual-required' : 'idle',
+      canCheck: app.isPackaged && !manualRequired,
+      manualUpdateMessage: manualRequired ? 'Update manually — auto-update is only available for the AppImage build.' : undefined,
     }
   }
 
@@ -49,6 +54,11 @@ export class UpdateService {
   start(): void {
     if (!app.isPackaged) {
       this.diagnostics.log('update-disabled', { reason: 'dev-run' })
+      return
+    }
+    // Linux rpm installs cannot auto-update — the state is already 'manual-required'.
+    if (this.state.phase === 'manual-required') {
+      this.diagnostics.log('update-manual-required', { reason: 'linux-non-appimage' })
       return
     }
     try {
@@ -78,6 +88,7 @@ export class UpdateService {
     if (!app.isPackaged) {
       return this.set({ phase: 'error', message: 'Updates are only available in installed builds.' })
     }
+    if (this.state.phase === 'manual-required') return this.state
     if (this.inFlight) return this.state
     this.inFlight = true
     this.set({ phase: 'checking' })

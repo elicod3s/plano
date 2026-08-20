@@ -71,8 +71,8 @@ const SIGS: Signature[] = [
   },
   {
     id: 'grok',
-    names: /^(grok(\.exe)?)$/i,
-    cmd: /(^|[\\/\s])grok(\.exe)?(\s|$)|[\\\/]\.grok[\\\/]bin[\\\/]grok(\.exe)?/i,
+    names: /^(grok(\.exe)?|bun(\.exe)?)$/i,
+    cmd: /(^|[\\/\s])grok(\.exe)?(\s|$)|[\\\/]\.grok[\\\/]bin[\\\/]grok(\.exe)?|[\\\/]grok-dev[\\\/]/i,
   },
   {
     id: 'hermes',
@@ -255,6 +255,9 @@ export function fingerprintTail(chunks: readonly string[]): string {
   return String(h)
 }
 
+/** Linux host shells that should be skipped by hasActiveWorkers (same role as HOST_SHELL_RE on Windows). */
+const POSIX_HOST_SHELL_RE = /^(bash|zsh|fish|sh|dash|ksh|tcsh|csh)$/i
+
 /** True when the agent CLI has active worker children (bash, node workers, git, rg…). */
 export function hasActiveWorkers(shellPid: number, agentPid: number, procs: Map<number, import('../services/ProcessTreeService').Proc>): boolean {
   if (!shellPid || !agentPid || !procs || procs.size === 0) return false
@@ -262,6 +265,7 @@ export function hasActiveWorkers(shellPid: number, agentPid: number, procs: Map<
   return descendants.some((p) => {
     if (p.pid === agentPid) return false
     const name = (p.name || '').split(/[\\/]/).pop() || p.name || ''
+    if (process.platform === 'linux') return !POSIX_HOST_SHELL_RE.test(name)
     return !HOST_SHELL_RE.test(name)
   })
 }

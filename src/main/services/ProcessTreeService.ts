@@ -91,6 +91,10 @@ export class ProcessTreeService {
     if (this.warmed) return
     this.warmed = true
     if (process.platform === 'win32') void this.ensureFresh()
+    // Linux: a ps-list snapshot is cheaper than Windows' PowerShell worker (~10-30ms vs
+    // ~1.5s), but pre-warming still moves it into the app-startup window so the first
+    // terminal's detection fires without a stall. macOS is left untouched.
+    if (process.platform === 'linux') void this.ensureFresh()
   }
 
   /** Kill the long-lived worker (graceful quit / teardown) so no PowerShell process is orphaned. */

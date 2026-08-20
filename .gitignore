@@ -63,3 +63,7 @@ docs/private/
 
 # Reverse-engineering notes on other apps — never publish
 docs/research/
+
+# Claude Code local session state (settings.local.json is per-machine, not shared)
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

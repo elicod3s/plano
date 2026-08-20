@@ -77,6 +77,11 @@ process.on('unhandledRejection', (reason) =>
 app.on('child-process-gone', (_event, details) => diagnostics.log('child-process-gone', details))
 
 let mainWindow: BrowserWindow | null = null
+
+/** Linux firewalld guidance surfaced to Settings -> Mobile & Remote (empty = open or N/A). */
+let firewallNotice = ''
+/** Exported so the IPC handler can include it in RemoteInfoResult. */
+export function getFirewallNotice(): string { return firewallNotice }
 let services: Services | null = null
 /** Plan F8: pending mesh-writes consent prompt (resolved by the renderer's toast). */
 let pendingMeshConsent: { spaceId: string; resolve: (ok: boolean) => void } | null = null
@@ -313,7 +318,7 @@ if (!app.requestSingleInstanceLock()) {
       workspaceState,
       fs: fileSystem,
       // Shares the FileSystemService's allowed-roots guard so we never watch outside the workspace.
-      fileWatcher: new FileWatcherService(post, (dir) => fileSystem.isAllowed(dir)),
+      fileWatcher: new FileWatcherService(post, (dir) => fileSystem.isAllowed(dir), (event, details) => diagnostics.log(event, details)),
       git: new GitService(),
       time: new TimeTrackingService(),
       settings: settingsService,
@@ -351,20 +356,53 @@ if (!app.requestSingleInstanceLock()) {
   // `before-quit` fires BEFORE BrowserWindow closes, so disposing PTYs there races the renderer's
   // beforeunload session reconciliation/final save. `will-quit` runs after windows have closed.
 function ensureFirewallRuleForPlano(): void {
-  if (process.platform !== 'win32') return
-  const exe = app.isPackaged ? process.execPath : join(app.getAppPath(), 'node_modules', 'electron', 'dist', 'electron.exe')
-  const check = `netsh advfirewall firewall show rule name="PLANO Mobile" >nul 2>&1`
-  execFile('cmd', ['/c', check], { windowsHide: true }, (err) => {
-    if (!err) return // rule already exists
-    // Elevate once (UAC prompt) to add the rule for this program.
-    const rule = `netsh advfirewall firewall add rule name="PLANO Mobile" dir=in action=allow protocol=TCP program="${exe.replace(/"/g, '\\"')}"`
-    execFile(
-      'powershell',
-      ['-NoProfile', '-Command', `Start-Process cmd -ArgumentList '/c', '${rule.replace(/'/g, "''")}' -Verb RunAs -WindowStyle Hidden`],
-      { windowsHide: true },
-      () => undefined,
-    )
-  })
+  if (process.platform === 'win32') {
+    const exe = app.isPackaged ? process.execPath : join(app.getAppPath(), 'node_modules', 'electron', 'dist', 'electron.exe')
+    const check = `netsh advfirewall firewall show rule name="PLANO Mobile" >nul 2>&1`
+    execFile('cmd', ['/c', check], { windowsHide: true }, (err) => {
+      if (!err) return // rule already exists
+      // Elevate once (UAC prompt) to add the rule for this program.
+      const rule = `netsh advfirewall firewall add rule name="PLANO Mobile" dir=in action=allow protocol=TCP program="${exe.replace(/"/g, '\\"')}"`
+      execFile(
+        'powershell',
+        ['-NoProfile', '-Command', `Start-Process cmd -ArgumentList '/c', '${rule.replace(/'/g, "''")}' -Verb RunAs -WindowStyle Hidden`],
+        { windowsHide: true },
+        () => undefined,
+      )
+    })
+    return
+  }
+  if (process.platform === 'linux') {
+    // Fedora/KDE ships firewalld enabled by default — TCP 56780 is blocked and the phone
+    // cannot reach the daemon with no visible error. We NEVER silently elevate: the Linux
+    // equivalent of the Windows UAC prompt is surfacing the exact command the user should
+    // run. Detect whether firewalld is active and whether the port is already open; if not,
+    // set a notice that Settings -> Mobile & Remote displays.
+    execFile('firewall-cmd', ['--state'], { timeout: 5000 }, (stateErr, stateStdout) => {
+      if (stateErr || !String(stateStdout).trim().startsWith('running')) {
+        // firewalld not running (or not installed) — no host firewall to open.
+        return
+      }
+      // Check whether port 56780/tcp is already open in the current zone.
+      // firewalld lists ports as either single ('56780/tcp') or ranges ('1025-65535/tcp').
+      execFile('firewall-cmd', ['--list-ports'], { timeout: 5000 }, (portsErr, portsStdout) => {
+        const entries = portsErr ? [] : String(portsStdout).trim().split(/\s+/).filter(Boolean)
+        const portOpen = entries.some((entry) => {
+          const m = /^(\d+)(?:-(\d+))?\/tcp$/.exec(entry)
+          if (!m) return false
+          const lo = Number(m[1])
+          const hi = m[2] ? Number(m[2]) : lo
+          return lo <= 56780 && 56780 <= hi
+        })
+        if (portOpen) return
+        // Port is blocked: surface the exact command. The user runs it consciously.
+        firewallNotice = 'sudo firewall-cmd --add-port=56780/tcp --permanent && sudo firewall-cmd --reload'
+        diagnostics.log('firewall-port-blocked', { port: 56780, notice: firewallNotice })
+      })
+    })
+    return
+  }
+  // macOS: no host firewall to configure.
 }
 
   app.on('will-quit', () => {
